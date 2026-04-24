@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI-CyberSentinel · SaaS 安全指挥中心</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="noise-layer" aria-hidden="true"></div>
+
+    <header class="topbar glass">
+      <div class="brand-wrap">
+        <div class="brand-orb"></div>
+        <div class="brand-text">
+          <h1>AI-CyberSentinel</h1>
+          <p>Next-Gen Edge WAF SaaS 指挥中心</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <div class="status-wrap">
+          <span>WebSocket</span>
+          <span id="wsStatus" class="status status-connecting">连接中</span>
+        </div>
+        <div class="status-wrap">
+          <span>受保护站点</span>
+          <span id="uptimeStatus" class="status status-connecting">检测中</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="app-shell">
+      <aside class="sidebar glass">
+        <div class="sidebar-header">
+          <h2>Control Plane</h2>
+          <p>多租户安全中控</p>
+        </div>
+
+        <section class="auth-card">
+          <h3>SaaS 用户入口</h3>
+          <div class="auth-grid">
+            <input id="authEmailInput" type="email" class="auth-input" placeholder="邮箱" />
+            <input id="authPasswordInput" type="password" class="auth-input" placeholder="密码（8位以上）" />
+            <input id="authOtpInput" type="text" class="auth-input" placeholder="邮箱验证码 OTP" />
+            <input id="authNewPasswordInput" type="password" class="auth-input" placeholder="重置后的新密码" />
+
+            <button id="registerBtn" class="auth-btn">注册账号</button>
+            <button id="loginBtn" class="auth-btn">密码登录</button>
+            <button class="auth-btn" data-auth="github">GitHub OAuth</button>
+            <button class="auth-btn" data-auth="google">Google OAuth</button>
+            <button id="requestOtpBtn" class="auth-btn">发送 OTP</button>
+            <button id="verifyOtpBtn" class="auth-btn">OTP 登录</button>
+            <button id="requestResetBtn" class="auth-btn">忘记密码（发码）</button>
+            <button id="confirmResetBtn" class="auth-btn">提交重置</button>
+            <button id="logoutBtn" class="auth-btn">退出登录</button>
+          </div>
+          <div id="authHint" class="tiny-hint">未登录，配置不会持久化</div>
+        </section>
+
+        <nav class="nav-menu">
+          <button class="nav-btn active" data-route="overview">赛博指挥中心</button>
+          <button class="nav-btn" data-route="monitor">实时攻击流</button>
+          <button class="nav-btn" data-route="waf">WAF 防御矩阵</button>
+          <button class="nav-btn" data-route="ai-config">模型路由工厂</button>
+          <button class="nav-btn" data-route="reports">安全态势日报</button>
+        </nav>
+
+        <section class="legend-card">
+          <h3>Detection Matrix</h3>
+          <ul>
+            <li><span class="dot critical"></span>Critical / High</li>
+            <li><span class="dot medium"></span>Medium</li>
+            <li><span class="dot low"></span>Low / Unknown</li>
+          </ul>
+        </section>
+      </aside>
+
+      <section class="content">
+        <section class="metrics-grid">
+          <article class="metric-card glass">
+            <p>告警总数</p>
+            <h3 id="metricTotal">0</h3>
+          </article>
+          <article class="metric-card glass">
+            <p>高危告警</p>
+            <h3 id="metricHighRisk">0</h3>
+          </article>
+          <article class="metric-card glass">
+            <p>自动拦截</p>
+            <h3 id="metricBlocked">0</h3>
+          </article>
+          <article class="metric-card glass">
+            <p>来源 IP 数</p>
+            <h3 id="metricSources">0</h3>
+          </article>
+          <article class="metric-card glass metric-long">
+            <p>最新告警</p>
+            <h3 id="metricLatest">--</h3>
+          </article>
+        </section>
+
+        <section id="route-overview" class="route-panel active">
+          <div class="overview-grid">
+            <section class="panel glass map-panel">
+              <div class="panel-head">
+                <h3>地理溯源地图</h3>
+                <span class="panel-head-sub">IP Geolocation (模拟)</span>
+              </div>
+              <div id="geoMap" class="geo-map">
+                <div class="map-grid"></div>
+                <svg id="mapSvg" class="map-svg" viewBox="0 0 1000 420" preserveAspectRatio="none"></svg>
+              </div>
+              <ul id="geoList" class="geo-list">
+                <li class="empty-cell">等待攻击轨迹...</li>
+              </ul>
+            </section>
+
+            <section class="panel glass alert-panel">
+              <div class="panel-head">
+                <h3>实时告警流</h3>
+                <span class="panel-head-sub">点击查看 Security Copilot</span>
+              </div>
+              <ul id="alertList" class="alert-list"></ul>
+            </section>
+
+            <section class="panel glass terminal-panel">
+              <div class="panel-head">
+                <h3>黑客终端</h3>
+                <span class="panel-head-sub">WebSocket 交互式模拟</span>
+              </div>
+              <div id="terminalLog" class="terminal-log"></div>
+              <form id="terminalForm" class="terminal-form">
+                <span class="terminal-prefix">root@waf:~$</span>
+                <input id="terminalInput" type="text" autocomplete="off" placeholder="输入 help / stats / tail / block <ip> / clear" />
+              </form>
+            </section>
+          </div>
+        </section>
+
+        <section id="route-monitor" class="route-panel">
+          <div class="panel glass table-panel">
+            <div class="panel-head">
+              <h3>实时攻击流看板</h3>
+              <span class="panel-head-sub">ML + LLM 双引擎告警</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>时间</th>
+                    <th>源 IP</th>
+                    <th>目标 IP</th>
+                    <th>风险</th>
+                    <th>异常概率</th>
+                    <th>拦截</th>
+                  </tr>
+                </thead>
+                <tbody id="monitorBody">
+                  <tr>
+                    <td colspan="6" class="empty-cell">暂无告警</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section id="route-waf" class="route-panel">
+          <div class="waf-grid">
+            <article class="panel glass waf-stat-card">
+              <div class="panel-head">
+                <h3>防御层状态</h3>
+              </div>
+              <div class="waf-stat-wrap">
+                <h2 id="blockedCount">0</h2>
+                <p>最近窗口内自动封禁总量</p>
+              </div>
+              <div class="waf-alert-box">
+                <button id="voiceToggleBtn" class="test-btn">开启语音预警</button>
+                <span id="voiceStatus" class="tiny-hint">语音预警：关闭</span>
+              </div>
+            </article>
+
+            <article class="panel glass">
+              <div class="panel-head">
+                <h3>拦截来源 IP 排行</h3>
+              </div>
+              <ul id="blockedList" class="simple-list">
+                <li class="empty-cell">暂无拦截来源</li>
+              </ul>
+            </article>
+
+            <article class="panel glass">
+              <div class="panel-head">
+                <h3>攻击类型矩阵</h3>
+              </div>
+              <ul id="attackMatrix" class="simple-list">
+                <li class="empty-cell">等待攻击样本...</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section id="route-ai-config" class="route-panel">
+          <section class="panel glass config-panel">
+            <div class="panel-head">
+              <h3>多模型路由工厂</h3>
+              <span class="panel-head-sub">OpenAI / Claude / Gemini / Grok / Custom</span>
+            </div>
+            <div class="config-grid">
+              <label class="config-field">
+                <span>Provider</span>
+                <select id="providerInput" class="config-select">
+                  <option value="openai">OpenAI</option>
+                  <option value="claude">Claude</option>
+                  <option value="gemini">Gemini</option>
+                  <option value="grok">Grok</option>
+                  <option value="custom">Custom API</option>
+                </select>
+              </label>
+              <label class="config-field">
+                <span>API Key</span>
+                <input id="apiKeyInput" type="password" placeholder="输入你的 API Key" />
+              </label>
+              <label class="config-field">
+                <span>Base URL</span>
+                <input id="baseUrlInput" type="text" placeholder="例如 https://api.openai.com" />
+              </label>
+              <label class="config-field">
+                <span>Model</span>
+                <input id="modelInput" type="text" placeholder="例如 gpt-4o-mini" />
+              </label>
+              <label class="config-field">
+                <span>受保护站点 URL</span>
+                <input id="siteTargetInput" type="url" placeholder="例如 https://example.com" />
+              </label>
+            </div>
+            <div class="config-actions">
+              <button id="saveConfigBtn" class="save-btn">保存配置</button>
+              <button id="testConfigBtn" class="test-btn">模型测试</button>
+              <button id="saveSiteTargetBtn" class="test-btn">保存站点</button>
+              <button id="testSiteProxyBtn" class="test-btn">代理测试</button>
+              <span id="configStatus" class="config-status">未加载配置</span>
+            </div>
+            <div class="threat-actions">
+              <button id="confirmThreatBtn" class="threat-btn" disabled>确认新型攻击并入库</button>
+              <span id="threatStatus" class="threat-status">请选择一条告警后可确认入库</span>
+            </div>
+          </section>
+        </section>
+
+        <section id="route-reports" class="route-panel">
+          <section class="panel glass report-panel">
+            <div class="panel-head">
+              <h3>AI 自动化安全日报</h3>
+              <span class="panel-head-sub">打字机输出模式</span>
+            </div>
+            <div class="report-actions">
+              <button id="refreshReportBtn" class="test-btn">刷新摘要</button>
+            </div>
+            <article id="reportMarkdown" class="markdown-body">暂无数据</article>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <aside id="copilotDrawer" class="copilot-drawer">
+      <div class="copilot-head">
+        <h3>Security Copilot</h3>
+        <button id="closeCopilotBtn" class="icon-btn">✕</button>
+      </div>
+      <div id="copilotContent" class="copilot-content">请选择告警查看 AI 分析建议</div>
+    </aside>
+
+    <section id="copilotWidget" class="copilot-widget">
+      <button id="copilotToggleBtn" class="copilot-fab">Security Copilot</button>
+      <div id="copilotPanel" class="copilot-panel">
+        <div class="copilot-panel-head">
+          <strong>智能中枢</strong>
+          <span id="copilotContextHint" class="tiny-hint">通用咨询模式</span>
+        </div>
+        <div id="copilotMessages" class="copilot-messages"></div>
+        <form id="copilotForm" class="copilot-form">
+          <input id="copilotInput" type="text" placeholder="输入安全问题，或点击告警自动带上下文" />
+          <button id="copilotSendBtn" type="submit" class="test-btn">发送</button>
+        </form>
+      </div>
+    </section>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

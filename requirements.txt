@@ -1,0 +1,17 @@
+scapy==2.7.0
+fastapi==0.136.0
+uvicorn==0.45.0
+websockets==16.0
+pandas==3.0.2
+scikit-learn==1.8.0
+joblib==1.5.3
+loguru==0.7.3
+requests==2.33.1
+sqlalchemy==2.0.44
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+python-jose[cryptography]==3.5.0
+cryptography==46.0.3
+fastapi-mail==1.5.8
+email-validator==2.3.0
+httpx==0.28.1

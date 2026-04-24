@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(autoplan)",
+      "Bash(./.venv/Scripts/python *)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+      "Bash(./.venv/Scripts/pip install *)",
+      "Bash(python *)",
+      "Bash(D:/Users/27629/Desktop/Claude/AI-IDS-Project/.venv/Scripts/python.exe *)",
+      "Bash(curl *)",
+      "Bash(git init *)",
+      "Bash(node *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr :8000)",
+      "Bash(taskkill *)",
+      "Bash(powershell *)",
+      "Bash(findstr :8080)",
+      "Bash(cmd.exe *)",
+      "Skill(codex:rescue)",
+      "Bash(./.venv/Scripts/python.exe *)",
+      "Skill(qa)"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# Node / Next
+node_modules/
+.next/
+out/
+
+# Env files
+.env
+.env.local
+
+# misc
+*.log
