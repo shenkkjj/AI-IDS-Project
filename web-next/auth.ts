@@ -23,6 +23,17 @@ type AuthUser = {
   backendAccessToken: string;
 };
 
+type BackendRequestError = Error & {
+  status?: number;
+};
+
+function isBackendRequestError(error: unknown): error is BackendRequestError {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return "status" in error;
+}
+
 const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "http://127.0.0.1:8000").trim().replace(/\/$/, "");
 
 async function backendPost<T>(path: string, payload: Record<string, unknown>): Promise<T> {
@@ -35,7 +46,9 @@ async function backendPost<T>(path: string, payload: Record<string, unknown>): P
   const data = (await response.json().catch(() => ({}))) as T & { detail?: string };
   if (!response.ok) {
     const message = (data as { detail?: string }).detail || `HTTP ${response.status}`;
-    throw new Error(message);
+    const error: BackendRequestError = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   return data;
 }
@@ -66,10 +79,18 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null;
         }
 
-        const payload = await backendPost<BackendAuthPayload>("/auth/login/password", {
-          email,
-          password,
-        });
+        let payload: BackendAuthPayload;
+        try {
+          payload = await backendPost<BackendAuthPayload>("/auth/login/password", {
+            email,
+            password,
+          });
+        } catch (error: unknown) {
+          if (isBackendRequestError(error) && error.status === 401) {
+            return null;
+          }
+          throw error;
+        }
 
         if (!payload.user?.id || !payload.access_token) {
           return null;

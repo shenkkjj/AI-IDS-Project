@@ -1,23 +1,16 @@
 {
   "date": "2026-04-24",
-  "url": "http://localhost:3400",
-  "healthScore": 90,
-  "issues": [
-    {
-      "id": "ISSUE-002",
-      "title": "/favicon.ico 返回404",
-      "severity": "low",
-      "category": "content"
-    }
-  ],
+  "url": "http://localhost:3500",
+  "healthScore": 96,
+  "issues": [],
   "categoryScores": {
     "console": 100,
-    "links": 85,
+    "links": 95,
     "visual": 92,
-    "functional": 95,
-    "ux": 88,
-    "performance": 85,
-    "content": 88,
-    "accessibility": 82
+    "functional": 98,
+    "ux": 95,
+    "performance": 86,
+    "content": 95,
+    "accessibility": 85
   }
 }
