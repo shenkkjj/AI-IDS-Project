@@ -4,6 +4,16 @@ import { useMemo, useState } from "react";
 import { signIn, signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 
+function getLoginErrorMessage(errorCode: string): string {
+  if (errorCode === "CredentialsSignin") {
+    return "登录失败：邮箱或密码错误";
+  }
+  if (errorCode === "Configuration") {
+    return "登录失败：认证服务暂不可用，请稍后重试";
+  }
+  return "登录失败：请稍后重试";
+}
+
 export default function HomePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
@@ -38,7 +48,7 @@ export default function HomePage() {
     setLoading(false);
 
     if (result?.error) {
-      setMessage(`登录失败：${result.error}`);
+      setMessage(getLoginErrorMessage(result.error));
       return;
     }
 
