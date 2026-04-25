@@ -106,6 +106,13 @@ export default function HomePage() {
   }
 
   async function handleOAuthLogin(provider: "github" | "google") {
+    const providerEnabled = provider === "github" ? canUseGitHub : canUseGoogle;
+    if (!providerEnabled) {
+      setLoginState("error");
+      setMessage(`登录失败：${provider === "github" ? "GitHub" : "Google"} OAuth 未配置`);
+      return;
+    }
+
     setMessage("");
     setLoginState("loading");
     await signIn(provider, { callbackUrl: "/dashboard" });
@@ -257,18 +264,24 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => handleOAuthLogin("github")}
-                disabled={!canUseGitHub}
                 title={canUseGitHub ? "" : "请配置 AUTH_GITHUB_ID/AUTH_GITHUB_SECRET"}
-                className="flex-1 border border-cyber-purple text-cyber-purple hover:bg-cyber-purple hover:text-white py-2 text-sm transition-all text-center disabled:opacity-40"
+                className={`flex-1 border border-cyber-purple py-2 text-sm transition-all text-center ${
+                  canUseGitHub
+                    ? "text-cyber-purple hover:bg-cyber-purple hover:text-white"
+                    : "text-cyber-purple/50 hover:bg-cyber-purple/20"
+                }`}
               >
                 GitHub 登录
               </button>
               <button
                 type="button"
                 onClick={() => handleOAuthLogin("google")}
-                disabled={!canUseGoogle}
                 title={canUseGoogle ? "" : "请配置 AUTH_GOOGLE_ID/AUTH_GOOGLE_SECRET"}
-                className="flex-1 border border-cyber-orange text-cyber-orange hover:bg-cyber-orange hover:text-white py-2 text-sm transition-all text-center disabled:opacity-40"
+                className={`flex-1 border border-cyber-orange py-2 text-sm transition-all text-center ${
+                  canUseGoogle
+                    ? "text-cyber-orange hover:bg-cyber-orange hover:text-white"
+                    : "text-cyber-orange/50 hover:bg-cyber-orange/20"
+                }`}
               >
                 Google 登录
               </button>
