@@ -1,0 +1,4 @@
+# Local runtime artifacts
+.gstack/
+web-next/.gstack/
+.omc/state/hud-stdin-cache.json

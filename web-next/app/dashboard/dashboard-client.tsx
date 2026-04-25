@@ -1,24 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ComponentType, type FormEvent } from "react";
-import { AnimatePresence, motion } from "framer-motion";
-import {
-  Activity,
-  BarChart3,
-  Bot,
-  Globe,
-  Radar,
-  RefreshCw,
-  SendHorizonal,
-  Shield,
-  ShieldCheck,
-  Siren,
-  SlidersHorizontal,
-  TerminalSquare,
-  Volume2,
-  VolumeX,
-} from "lucide-react";
-import { Card } from "@/components/ui/card";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
+import CyberSidebar from "@/components/dashboard/CyberSidebar";
+import StatsCards from "@/components/dashboard/StatsCards";
+import AttackLogTable from "@/components/dashboard/AttackLogTable";
+import HackerTerminal from "@/components/dashboard/HackerTerminal";
+import CopilotPanel from "@/components/dashboard/CopilotPanel";
 import { Button } from "@/components/ui/button";
 
 type RouteKey = "overview" | "monitor" | "waf" | "ai" | "report";
@@ -103,15 +91,12 @@ type SiteTargetResponse = {
   detail?: string;
 };
 
-
 type CopilotMessage = {
   role: "user" | "assistant";
   content: string;
 };
 
 type DashboardClientProps = {
-  backendAccessToken: string;
-  backendBaseUrl: string;
   userEmail: string;
 };
 
@@ -121,70 +106,15 @@ const COPILOT_HISTORY_REQUEST_LIMIT = 10;
 const TERMINAL_LOG_LIMIT = 120;
 const REPORT_LATEST_ALERTS_LIMIT = 5;
 
-const NAV_ITEMS: { key: RouteKey; label: string; icon: ComponentType<{ className?: string }> }[] = [
-  { key: "overview", label: "概览", icon: BarChart3 },
-  { key: "monitor", label: "监测", icon: Activity },
-  { key: "waf", label: "WAF 管理", icon: Shield },
-  { key: "ai", label: "AI 配置", icon: SlidersHorizontal },
-  { key: "report", label: "安全日报", icon: Radar },
+const NAV_ITEMS: { key: RouteKey; label: string; icon: string }[] = [
+  { key: "overview", label: "概览", icon: "01" },
+  { key: "monitor", label: "监测", icon: "02" },
+  { key: "waf", label: "WAF 管理", icon: "03" },
+  { key: "ai", label: "AI 配置", icon: "04" },
+  { key: "report", label: "安全日报", icon: "05" },
 ];
 
 const PROVIDERS = ["openai", "claude", "gemini", "grok", "custom"] as const;
-
-const DEMO_ALERTS: AlertItem[] = [
-  {
-    id: "A-2026-001",
-    alertId: "",
-    source: "103.14.89.23",
-    target: "10.0.3.8",
-    risk: "critical",
-    payload: "GET /search?q=<script>alert(1)</script>",
-    summary: "检测到高置信度 XSS 投递行为，建议立即启用 WAF 阻断并回溯同源会话。",
-    timestamp: Math.floor(Date.now() / 1000) - 120,
-    blocked: true,
-  },
-  {
-    id: "A-2026-002",
-    alertId: "",
-    source: "45.91.233.11",
-    target: "10.0.3.8",
-    risk: "high",
-    payload: "id=1 UNION SELECT username,password FROM users--",
-    summary: "疑似 SQLi 探测，包含 UNION SELECT 特征词，建议临时拉黑源 IP。",
-    timestamp: Math.floor(Date.now() / 1000) - 540,
-    blocked: false,
-  },
-  {
-    id: "A-2026-003",
-    alertId: "",
-    source: "91.200.47.9",
-    target: "10.0.3.8",
-    risk: "medium",
-    payload: "nmap -sS -Pn -p 21,22,80,443",
-    summary: "端口扫描特征命中，当前为中风险，建议观察是否持续升高。",
-    timestamp: Math.floor(Date.now() / 1000) - 980,
-    blocked: false,
-  },
-];
-
-const RISK_STYLE: Record<AlertRisk, string> = {
-  critical: "bg-rose-500",
-  high: "bg-orange-400",
-  medium: "bg-amber-300",
-  low: "bg-emerald-300",
-};
-
-function TopMetric({ title, value, pulse }: { title: string; value: string; pulse?: boolean }) {
-  return (
-    <Card className="p-4">
-      <p className="text-xs text-cyan-100/70">{title}</p>
-      <div className="mt-2 flex items-center gap-2">
-        <p className="text-2xl font-semibold text-cyan-50">{value}</p>
-        {pulse ? <span className="h-2.5 w-2.5 rounded-full bg-rose-500 animate-ping" /> : null}
-      </div>
-    </Card>
-  );
-}
 
 function formatLoadError(message: string): string {
   if (message.includes("401")) {
@@ -399,10 +329,7 @@ function runTerminalCommand(command: string, alerts: AlertItem[]): string[] {
 }
 
 function buildTerminalBootstrapLines(): string[] {
-  return [
-    "[INFO] CyberSentinel terminal online",
-    "[INFO] 可用命令: help, stats, tail, block <ip>, clear",
-  ];
+  return ["[INFO] CyberSentinel terminal online", "[INFO] 可用命令: help, stats, tail, block <ip>, clear"];
 }
 
 function formatTerminalLine(text: string, tone: "normal" | "warn" | "error" = "normal"): string {
@@ -462,10 +389,19 @@ function inferProxyPath(urlText: string): string {
   }
 }
 
-export default function DashboardClient({ backendAccessToken, backendBaseUrl, userEmail }: DashboardClientProps) {
+function routeDescription(route: RouteKey): string {
+  if (route === "overview") return "总览态势、告警与联动操作";
+  if (route === "monitor") return "实时监测与日志链路";
+  if (route === "waf") return "WAF 与代理防护策略";
+  if (route === "ai") return "AI 模型路由与参数配置";
+  return "安全日报生成与归档";
+}
+
+export default function DashboardClient({ userEmail }: DashboardClientProps) {
   const [route, setRoute] = useState<RouteKey>("overview");
-  const [alerts, setAlerts] = useState<AlertItem[]>(DEMO_ALERTS);
-  const [selected, setSelected] = useState<AlertItem | null>(DEMO_ALERTS[0] || null);
+  const [alerts, setAlerts] = useState<AlertItem[]>([]);
+  const [selected, setSelected] = useState<AlertItem | null>(null);
+  const [alertsLoadState, setAlertsLoadState] = useState<"loading" | "ready" | "empty" | "error">("loading");
 
   const [config, setConfig] = useState<PersistedUserConfig | null>(null);
   const [configDraft, setConfigDraft] = useState<ConfigDraft>({
@@ -483,8 +419,7 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
   const activeCopilotRequestId = useRef(0);
 
   const [terminalLogs, setTerminalLogs] = useState<string[]>(buildTerminalBootstrapLines());
-  const [terminalInput, setTerminalInput] = useState("");
-  const [reportMarkdown, setReportMarkdown] = useState<string>(() => buildReportMarkdown(DEMO_ALERTS));
+  const [reportMarkdown, setReportMarkdown] = useState<string>(() => buildReportMarkdown(alerts));
   const [reportTyping, setReportTyping] = useState(false);
   const reportTypingToken = useRef(0);
 
@@ -501,11 +436,14 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
   const siteHealthTimer = useRef<number | null>(null);
 
   const counters = useMemo(() => {
-    const total = alerts.length;
-    const high = alerts.filter((a) => a.risk === "high" || a.risk === "critical").length;
-    const blocked = alerts.filter((a) => a.blocked).length;
-    return { total, high, blocked };
-  }, [alerts]);
+    const alertsTotal = alerts.length;
+    const highRiskTotal = alerts.filter((a) => a.risk === "high" || a.risk === "critical").length;
+    const blockedTotal = alerts.filter((a) => a.blocked).length;
+    const siteHealthText = siteHealthUi.text;
+    return { alertsTotal, highRiskTotal, blockedTotal, siteHealthText };
+  }, [alerts, siteHealthUi.text]);
+
+
 
   function appendTerminalLogs(lines: string[], tone: "normal" | "warn" | "error" = "normal") {
     if (lines.length === 0) {
@@ -543,11 +481,7 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     await typewriteReport(next);
   }
 
-  function handleTerminalSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const command = terminalInput;
-    setTerminalInput("");
-
+  function handleTerminalCommand(command: string) {
     const outputLines = runTerminalCommand(command, alerts);
     if (outputLines.length === 0) {
       return;
@@ -564,11 +498,8 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
   }
 
   async function loadUserConfig(signal?: AbortSignal) {
-    const response = await fetch(`${backendBaseUrl}/user/config`, {
+    const response = await fetch(`/api/backend/user/config`, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${backendAccessToken}`,
-      },
       credentials: "include",
       cache: "no-store",
       signal,
@@ -589,15 +520,16 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     setConfigStatus("配置已同步");
   }
 
-  async function loadAlerts(signal?: AbortSignal) {
-    const response = await fetch(`${backendBaseUrl}/alerts?limit=100`, {
+  async function loadAlerts(options?: { signal?: AbortSignal; showLoading?: boolean }) {
+    const showLoading = Boolean(options?.showLoading);
+    if (showLoading) {
+      setAlertsLoadState("loading");
+    }
+    const response = await fetch(`/api/backend/alerts?limit=100`, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${backendAccessToken}`,
-      },
       credentials: "include",
       cache: "no-store",
-      signal,
+      signal: options?.signal,
     });
 
     if (!response.ok) {
@@ -608,12 +540,15 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     const payload = (await response.json().catch(() => ({}))) as { items?: BackendAlertItem[] };
     const items = Array.isArray(payload.items) ? payload.items : [];
     if (items.length === 0) {
-      setAlerts(DEMO_ALERTS);
+      setAlerts([]);
+      setSelected(null);
+      setAlertsLoadState("empty");
       return;
     }
 
     const mapped = items.map(mapBackendAlert).reverse();
     setAlerts(mapped);
+    setAlertsLoadState("ready");
 
     setSelected((prev) => {
       if (prev) {
@@ -638,23 +573,26 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
       setConfigStatus(formatLoadError(message));
     });
 
-    loadAlerts(controller.signal).catch(() => {
+    loadAlerts({ signal: controller.signal, showLoading: true }).catch(() => {
       if (controller.signal.aborted) {
         return;
       }
-      setAlerts(DEMO_ALERTS);
-      setSelected(DEMO_ALERTS[0] || null);
+      setAlerts([]);
+      setSelected(null);
+      setAlertsLoadState("error");
     });
 
     const timer = window.setInterval(() => {
-      loadAlerts().catch(() => undefined);
+      loadAlerts({ showLoading: false }).catch(() => {
+        setConfigStatus("告警自动刷新失败，当前显示上次成功数据");
+      });
     }, ALERTS_POLL_MS);
 
     return () => {
       controller.abort();
       window.clearInterval(timer);
     };
-  }, [backendAccessToken, backendBaseUrl]);
+  }, []);
 
   useEffect(() => {
     if (!selected) {
@@ -678,11 +616,8 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
   }, [selected]);
 
   async function pingSiteHealth(signal?: AbortSignal) {
-    const response = await fetch(`${backendBaseUrl}/site/health`, {
+    const response = await fetch(`/api/backend/site/health`, {
       method: "GET",
-      headers: {
-        Authorization: `Bearer ${backendAccessToken}`,
-      },
       credentials: "include",
       signal,
     });
@@ -732,12 +667,11 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     setSiteTargetSaving(true);
     setConfigStatus("正在保存站点...");
     try {
-      const response = await fetch(`${backendBaseUrl}/site/target`, {
+      const response = await fetch(`/api/backend/site/target`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${backendAccessToken}`,
-        },
+          },
         credentials: "include",
         body: JSON.stringify({ url: normalizedUrl }),
       });
@@ -764,11 +698,8 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
 
     try {
       const path = inferProxyPath(proxyPathInput);
-      const response = await fetch(`${backendBaseUrl}/site/proxy${path}`, {
+      const response = await fetch(`/api/backend/site/proxy${path}`, {
         method: "GET",
-        headers: {
-          Authorization: `Bearer ${backendAccessToken}`,
-        },
         credentials: "include",
       });
 
@@ -807,12 +738,11 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     setThreatStatusTone("default");
 
     try {
-      const response = await fetch(`${backendBaseUrl}/threats/confirm`, {
+      const response = await fetch(`/api/backend/threats/confirm`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${backendAccessToken}`,
-        },
+          },
         credentials: "include",
         body: JSON.stringify({
           alert_id: alertId,
@@ -842,12 +772,11 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     setConfigStatus("正在更新语音预警配置...");
 
     try {
-      const response = await fetch(`${backendBaseUrl}/user/config`, {
+      const response = await fetch(`/api/backend/user/config`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${backendAccessToken}`,
-        },
+          },
         credentials: "include",
         body: JSON.stringify({ alert_voice_enabled: next }),
       });
@@ -886,7 +815,7 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
         siteHealthTimer.current = null;
       }
     };
-  }, [backendAccessToken, backendBaseUrl]);
+  }, []);
 
   useEffect(() => {
     setReportMarkdown(buildReportMarkdown(alerts));
@@ -907,7 +836,6 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     });
   }
 
-
   async function sendCopilotMessage(messageText: string) {
     const message = String(messageText || "").trim();
     if (!message || copilotSending) {
@@ -920,11 +848,7 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
       .map((item) => ({ role: item.role, content: item.content }));
 
     setCopilotMessages((prev) => {
-      const next: CopilotMessage[] = [
-        ...prev,
-        { role: "user", content: message },
-        { role: "assistant", content: "" },
-      ];
+      const next: CopilotMessage[] = [...prev, { role: "user", content: message }, { role: "assistant", content: "" }];
       return next.slice(-COPILOT_HISTORY_LIMIT);
     });
 
@@ -932,13 +856,12 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     setCopilotSending(true);
 
     try {
-      const response = await fetch(`${backendBaseUrl}/copilot/stream`, {
+      const response = await fetch(`/api/backend/copilot/stream`, {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${backendAccessToken}`,
-        },
+          },
         body: JSON.stringify({
           message,
           alert_id: selected?.alertId || null,
@@ -1025,12 +948,11 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     }
 
     try {
-      const response = await fetch(`${backendBaseUrl}/user/config`, {
+      const response = await fetch(`/api/backend/user/config`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${backendAccessToken}`,
-        },
+          },
         credentials: "include",
         body: JSON.stringify(body),
       });
@@ -1066,12 +988,11 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     }
 
     try {
-      const response = await fetch(`${backendBaseUrl}/llm/test`, {
+      const response = await fetch(`/api/backend/llm/test`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${backendAccessToken}`,
-        },
+          },
         credentials: "include",
         body: JSON.stringify(body),
       });
@@ -1096,396 +1017,252 @@ export default function DashboardClient({ backendAccessToken, backendBaseUrl, us
     }
   }
 
-  function handleCopilotSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    void sendCopilotMessage(copilotInput);
+  const selectedLogId = selected?.id;
+  const isOverviewRoute = route === "overview";
+  const isMonitorRoute = route === "monitor";
+  const isWafRoute = route === "waf";
+  const isAiRoute = route === "ai";
+  const isReportRoute = route === "report";
+
+  function handleSelectLog(id: string) {
+    const found = alerts.find((item) => item.id === id) || null;
+    setSelected(found);
   }
 
   return (
-    <div className="min-h-screen bg-background text-cyan-50">
-      <div className="pointer-events-none fixed inset-0 opacity-20 [background-image:radial-gradient(circle_at_1px_1px,rgba(103,232,249,.35)_1px,transparent_0)] [background-size:18px_18px]" />
+    <div className="min-h-screen bg-cyber-bg text-cyber-text">
+      <div className="pointer-events-none fixed inset-0 opacity-20 [background-image:radial-gradient(circle_at_1px_1px,rgba(0,245,255,.25)_1px,transparent_0)] [background-size:16px_16px]" />
+      <main className="relative mx-auto flex min-h-screen max-w-[1600px] flex-col md:flex-row gap-4 p-4">
+        <CyberSidebar items={NAV_ITEMS} active={route} onSelect={setRoute} />
 
-      <main className="relative mx-auto flex min-h-screen max-w-[1440px] gap-3 p-4">
-        <aside className="w-64 rounded-2xl border border-cyan-300/20 bg-slate-950/70 p-3 backdrop-blur">
-          <div className="mb-4 flex items-center gap-2 rounded-xl border border-cyan-400/30 bg-cyan-500/10 p-3">
-            <Siren className="h-4 w-4 text-cyan-300" />
-            <div>
-              <p className="text-sm font-semibold">AI-CyberSentinel</p>
-              <p className="text-[11px] text-cyan-100/60">赛博指挥中心</p>
+        <section className="flex-1 flex flex-col gap-4 min-h-[calc(100vh-2rem)]">
+          <StatsCards stats={counters} />
+
+          <div className="bg-black/40 border border-cyber-cyan/30 p-3 text-sm text-cyber-text/70">{configStatus}</div>
+
+          {!isOverviewRoute ? (
+            <div className="bg-black/40 border border-cyber-cyan/30 p-4 text-sm text-cyber-text/80">
+              当前标签页：{NAV_ITEMS.find((item) => item.key === route)?.label || route} · {routeDescription(route)}
             </div>
-          </div>
+          ) : null}
 
-          <nav className="space-y-1">
-            {NAV_ITEMS.map((item) => {
-              const Icon = item.icon;
-              const active = route === item.key;
-              return (
-                <button
-                  key={item.key}
-                  onClick={() => setRoute(item.key)}
-                  className={`flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm transition ${
-                    active ? "bg-cyan-500/20 text-cyan-100" : "text-cyan-100/70 hover:bg-cyan-500/10"
-                  }`}
-                >
-                  <Icon className="h-4 w-4" />
-                  {item.label}
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
-
-        <section className="flex-1 space-y-3">
-          <div className="grid grid-cols-4 gap-3">
-            <TopMetric title="告警总数" value={String(counters.total)} />
-            <TopMetric title="高危告警" value={String(counters.high)} pulse />
-            <TopMetric title="自动拦截" value={String(counters.blocked)} />
-            <TopMetric title="当前账号" value={userEmail || "unknown"} />
-          </div>
-
-          <motion.div
-            key={route}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className="grid grid-cols-[1.3fr_1fr] gap-3"
-          >
-            <Card className="h-[68vh] overflow-hidden p-0">
-              <div className="flex items-center justify-between border-b border-cyan-200/20 px-4 py-3 text-sm text-cyan-100/80">
-                <span>实时告警流</span>
-                <Button variant="outline" size="sm" onClick={() => void loadAlerts()}>
-                  刷新
-                </Button>
-              </div>
-              <div className="h-[calc(68vh-56px)] space-y-2 overflow-auto p-3">
-                {alerts.map((item) => (
-                  <button
-                    key={item.id}
-                    className="w-full rounded-xl border border-cyan-200/20 bg-slate-900/60 p-3 text-left transition hover:bg-slate-800/80"
-                    onClick={() => setSelected(item)}
+          {(isOverviewRoute || isMonitorRoute) ? (
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 min-h-0 flex-1">
+              <div className="xl:col-span-2 min-h-0 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm uppercase tracking-widest text-cyber-text/70">实时告警流</h2>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      loadAlerts({ showLoading: true }).catch(() => {
+                        setAlertsLoadState("error");
+                      });
+                    }}
+                    className="border-cyber-cyan/40 text-cyber-cyan"
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs text-cyan-100/70">{item.id}</div>
-                      <span className={`h-2.5 w-2.5 rounded-full ${RISK_STYLE[item.risk]} animate-pulse`} />
+                    刷新
+                  </Button>
+                </div>
+                <div className="min-h-0 flex-1">
+                  {alertsLoadState === "loading" ? (
+                    <div className="h-full min-h-[220px] bg-black/40 border border-cyber-cyan/30 flex items-center justify-center text-cyber-text/60 text-sm">
+                      正在加载告警...
                     </div>
-                    <p className="mt-2 text-sm">
-                      {item.source} → {item.target}
-                    </p>
-                    <p className="mt-1 line-clamp-1 text-xs text-cyan-100/60">{item.payload}</p>
-                  </button>
-                ))}
-              </div>
-            </Card>
-
-            <Card className="h-[68vh] p-4">
-              <div className="mb-3 flex items-center gap-2 text-sm text-cyan-100/80">
-                <Bot className="h-4 w-4" />
-                多模型路由配置
-              </div>
-              <p className="text-xs text-cyan-100/60">{configStatus}</p>
-
-              <div className="mt-3 space-y-2 rounded-xl border border-cyan-200/20 bg-slate-900/40 p-3 text-xs text-cyan-50/90">
-                <label className="block space-y-1">
-                  <span className="text-cyan-100/60">Provider</span>
-                  <select
-                    value={configDraft.ai_provider}
-                    onChange={(event) => setConfigDraft((prev) => ({ ...prev, ai_provider: event.target.value }))}
-                    className="w-full rounded bg-slate-900 px-2 py-1.5 text-cyan-50 outline-none ring-1 ring-cyan-300/20"
-                  >
-                    {PROVIDERS.map((provider) => (
-                      <option key={provider} value={provider}>
-                        {provider}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className="block space-y-1">
-                  <span className="text-cyan-100/60">Model</span>
-                  <input
-                    value={configDraft.model}
-                    onChange={(event) => setConfigDraft((prev) => ({ ...prev, model: event.target.value }))}
-                    className="w-full rounded bg-slate-900 px-2 py-1.5 text-cyan-50 outline-none ring-1 ring-cyan-300/20"
-                  />
-                </label>
-
-                <label className="block space-y-1">
-                  <span className="text-cyan-100/60">Base URL</span>
-                  <input
-                    value={configDraft.base_url}
-                    onChange={(event) => setConfigDraft((prev) => ({ ...prev, base_url: event.target.value }))}
-                    className="w-full rounded bg-slate-900 px-2 py-1.5 text-cyan-50 outline-none ring-1 ring-cyan-300/20"
-                  />
-                </label>
-
-                <label className="block space-y-1">
-                  <span className="text-cyan-100/60">API Key（可选覆盖）</span>
-                  <input
-                    type="password"
-                    value={configDraft.api_key}
-                    onChange={(event) => setConfigDraft((prev) => ({ ...prev, api_key: event.target.value }))}
-                    placeholder={config?.has_api_key ? "已配置，留空表示不修改" : "输入新的 API Key"}
-                    className="w-full rounded bg-slate-900 px-2 py-1.5 text-cyan-50 outline-none ring-1 ring-cyan-300/20"
-                  />
-                </label>
-
-                <div className="text-cyan-100/60">当前密钥状态：{config?.has_api_key ? config.api_key_masked : "未配置"}</div>
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button variant="outline" size="sm" onClick={handleSaveConfig}>
-                  保存配置
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleTestConfig}>
-                  测试路由
-                </Button>
-                <Button variant="outline" size="sm" onClick={handleRefreshConfig}>
-                  重新同步
-                </Button>
-              </div>
-            </Card>
-          </motion.div>
-
-          <div className="grid grid-cols-2 gap-3">
-            <Card className="h-[32vh] p-4">
-              <div className="mb-3 flex items-center justify-between text-sm text-cyan-100/80">
-                <div className="flex items-center gap-2">
-                  <TerminalSquare className="h-4 w-4" />
-                  溯源终端
+                  ) : alertsLoadState === "error" ? (
+                    <div className="h-full min-h-[220px] bg-black/40 border border-red-400/30 flex flex-col items-center justify-center gap-2 text-sm text-red-300">
+                      告警加载失败，请稍后重试
+                      <Button variant="outline" size="sm" onClick={() => void loadAlerts()} className="border-red-300/40 text-red-200">
+                        重试
+                      </Button>
+                    </div>
+                  ) : alertsLoadState === "empty" ? (
+                    <div className="h-full min-h-[220px] bg-black/40 border border-cyber-cyan/30 flex items-center justify-center text-cyber-text/60 text-sm">
+                      暂无告警
+                    </div>
+                  ) : (
+                    <AttackLogTable
+                      logs={alerts}
+                      highlightId={selectedLogId}
+                      selectedId={selectedLogId}
+                      onSelect={handleSelectLog}
+                    />
+                  )}
                 </div>
               </div>
 
-              <pre className="h-[calc(32vh-96px)] overflow-auto whitespace-pre-wrap rounded bg-slate-900/60 p-2 font-mono text-xs leading-5 text-cyan-100/80">
-                {terminalLogs.join("\n")}
-              </pre>
-
-              <form onSubmit={handleTerminalSubmit} className="mt-2 flex items-center gap-2">
-                <input
-                  value={terminalInput}
-                  onChange={(event) => setTerminalInput(event.target.value)}
-                  placeholder="输入命令：help / stats / tail / block <ip> / clear"
-                  className="flex-1 rounded bg-slate-900 px-3 py-2 text-xs text-cyan-50 outline-none ring-1 ring-cyan-300/20"
+              <div className="min-h-0 flex flex-col gap-4">
+                <CopilotPanel
+                  messages={copilotMessages}
+                  draft={copilotInput}
+                  loading={copilotSending}
+                  onDraftChange={setCopilotInput}
+                  onSend={() => void sendCopilotMessage(copilotInput)}
                 />
-                <Button type="submit" size="sm" disabled={!terminalInput.trim()}>
-                  执行
-                </Button>
-              </form>
-            </Card>
+              </div>
+            </div>
+          ) : null}
 
-            <Card className="h-[32vh] p-4">
-              <div className="mb-3 flex items-center justify-between text-sm text-cyan-100/80">
-                <div className="flex items-center gap-2">
-                  <Radar className="h-4 w-4" />
-                  安全日报
-                </div>
-                <Button variant="outline" size="sm" onClick={() => void refreshReportWithTypewriter()}>
-                  <RefreshCw className={`mr-1 h-3.5 w-3.5 ${reportTyping ? "animate-spin" : ""}`} />
-                  刷新
-                </Button>
+          {(isOverviewRoute || isMonitorRoute) ? (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div className="h-[320px]">
+                <HackerTerminal lines={terminalLogs} onCommand={handleTerminalCommand} />
               </div>
 
-              <pre className="h-[calc(32vh-64px)] overflow-auto whitespace-pre-wrap rounded bg-slate-900/60 p-3 text-xs leading-5 text-cyan-100/85">
-                {reportMarkdown}
-              </pre>
-            </Card>
-          </div>
-
-          <div className="grid grid-cols-3 gap-3">
-            <Card className="h-[24vh] p-4">
-              <div className="mb-2 flex items-center gap-2 text-sm text-cyan-100/80">
-                <Globe className="h-4 w-4" />
-                站点监测
-              </div>
-
-              <div className="space-y-2 text-xs text-cyan-100/75">
-                <div className="flex items-center justify-between rounded bg-slate-900/40 px-2 py-1.5">
-                  <span>状态</span>
-                  <span
-                    className={
-                      siteHealthUi.tone === "online"
-                        ? "text-emerald-300"
-                        : siteHealthUi.tone === "warning"
-                          ? "text-amber-300"
-                          : "text-rose-300"
-                    }
-                  >
-                    {siteHealthUi.text}
-                  </span>
+              <div className="bg-black/40 border border-cyber-cyan/30 backdrop-blur p-4 h-[320px] overflow-y-auto">
+                <div className="mb-3 flex items-center justify-between text-sm text-cyber-text/80">
+                  <span>安全日报</span>
+                  <Button variant="outline" size="sm" onClick={() => void refreshReportWithTypewriter()} className="border-cyber-cyan/40 text-cyber-cyan">
+                    <RefreshCw className={`mr-1 h-3.5 w-3.5 ${reportTyping ? "animate-spin" : ""}`} />
+                    刷新
+                  </Button>
                 </div>
+                <pre className="whitespace-pre-wrap text-xs leading-5 text-cyber-text/85">{reportMarkdown}</pre>
+              </div>
+            </div>
+          ) : null}
 
+          {(isOverviewRoute || isWafRoute) ? (
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-3">
+                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">站点监测</h3>
+                <div className="text-xs text-cyber-text/80">状态: {siteHealthUi.text}</div>
                 <input
                   value={siteTargetInput}
                   onChange={(event) => setSiteTargetInput(event.target.value)}
                   placeholder="https://example.com"
-                  className="w-full rounded bg-slate-900 px-3 py-2 text-xs text-cyan-50 outline-none ring-1 ring-cyan-300/20"
+                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2 focus:outline-none"
                 />
-
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full"
+                  className="w-full border-cyber-cyan/40 text-cyber-cyan"
                   onClick={() => void handleSaveSiteTarget()}
                   disabled={siteTargetSaving || !siteTargetInput.trim()}
                 >
                   保存目标
                 </Button>
-
-                <div className="line-clamp-2 text-[11px] text-cyan-100/55">
-                  {siteHealth?.url ? `当前目标: ${siteHealth.url}` : "当前目标: 未设置"}
-                </div>
-              </div>
-            </Card>
-
-            <Card className="h-[24vh] p-4">
-              <div className="mb-2 flex items-center gap-2 text-sm text-cyan-100/80">
-                <Shield className="h-4 w-4" />
-                代理与WAF
+                <div className="text-[11px] text-cyber-text/60">{siteHealth?.url ? `当前目标: ${siteHealth.url}` : "当前目标: 未设置"}</div>
               </div>
 
-              <div className="space-y-2 text-xs text-cyan-100/75">
+              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-3">
+                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">代理与 WAF</h3>
                 <input
                   value={proxyPathInput}
                   onChange={(event) => setProxyPathInput(event.target.value)}
                   placeholder="/"
-                  className="w-full rounded bg-slate-900 px-3 py-2 text-xs text-cyan-50 outline-none ring-1 ring-cyan-300/20"
+                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2 focus:outline-none"
                 />
-
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full"
+                  className="w-full border-cyber-cyan/40 text-cyber-cyan"
                   onClick={() => void handleTestSiteProxy()}
                   disabled={proxyTesting}
                 >
                   {proxyTesting ? "测试中..." : "测试代理链路"}
                 </Button>
-
-                <div className="rounded bg-slate-900/40 px-2 py-1.5 text-[11px] text-cyan-100/60">
-                  路径支持 URL 或相对路径，命中策略会返回 403。
-                </div>
-              </div>
-            </Card>
-
-            <Card className="h-[24vh] p-4">
-              <div className="mb-2 flex items-center gap-2 text-sm text-cyan-100/80">
-                <ShieldCheck className="h-4 w-4" />
-                告警确认与语音
+                <div className="text-[11px] text-cyber-text/60">路径支持 URL 或相对路径，命中策略会返回 403。</div>
               </div>
 
-              <div className="space-y-2 text-xs text-cyan-100/75">
+              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-3">
+                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">告警确认与语音</h3>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full"
+                  className="w-full border-cyber-cyan/40 text-cyber-cyan"
                   onClick={() => void handleConfirmThreat()}
                   disabled={confirmingThreat || !selected?.alertId}
                 >
                   {confirmingThreat ? "确认中..." : "确认威胁入库"}
                 </Button>
-
                 <div
-                  className={`rounded px-2 py-1.5 text-[11px] ${
+                  className={`text-[11px] px-2 py-1 rounded ${
                     threatStatusTone === "ok"
-                      ? "bg-emerald-500/10 text-emerald-200"
+                      ? "bg-green-500/10 text-green-300"
                       : threatStatusTone === "error"
-                        ? "bg-rose-500/10 text-rose-200"
-                        : "bg-slate-900/40 text-cyan-100/70"
+                        ? "bg-red-500/10 text-red-300"
+                        : "bg-black/40 text-cyber-text/70"
                   }`}
                 >
                   {threatStatus}
                 </div>
-
-                <Button variant="outline" size="sm" className="w-full" onClick={() => void handleToggleVoiceAlert()}>
-                  {config?.alert_voice_enabled ? (
-                    <>
-                      <VolumeX className="mr-1 h-3.5 w-3.5" />
-                      关闭语音预警
-                    </>
-                  ) : (
-                    <>
-                      <Volume2 className="mr-1 h-3.5 w-3.5" />
-                      开启语音预警
-                    </>
-                  )}
-                </Button>
-              </div>
-            </Card>
-          </div>
-        </section>
-      </main>
-
-      <AnimatePresence>
-        {selected ? (
-          <motion.aside
-            initial={{ x: 460, opacity: 0 }}
-            animate={{ x: 0, opacity: 1 }}
-            exit={{ x: 460, opacity: 0 }}
-            transition={{ duration: 0.22 }}
-            className="fixed right-0 top-0 z-50 h-full w-[460px] border-l border-cyan-300/30 bg-slate-950/95 p-4 backdrop-blur"
-          >
-            <div className="mb-3 flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Security Copilot</h3>
-              <Button variant="outline" size="sm" onClick={() => setSelected(null)}>
-                关闭
-              </Button>
-            </div>
-
-            <Card className="mb-3 p-3">
-              <p className="text-xs text-cyan-100/70">告警上下文</p>
-              <p className="mt-1 text-xs text-cyan-100/80">{copilotHint}</p>
-              <p className="mt-2 rounded bg-slate-900 p-2 text-xs text-cyan-100/80">{selected.payload || "无 payload"}</p>
-              <div className="mt-2 flex gap-2">
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() =>
-                    void sendCopilotMessage("请分析这条攻击告警，输出风险判断、处置优先级和可执行防御动作。")
-                  }
+                  className="w-full border-cyber-cyan/40 text-cyber-cyan"
+                  onClick={() => void handleToggleVoiceAlert()}
                 >
-                  快速分析
+                  {config?.alert_voice_enabled ? "关闭语音预警" : "开启语音预警"}
                 </Button>
               </div>
-            </Card>
+            </div>
+          ) : null}
 
-            <Card className="flex h-[calc(100%-180px)] flex-col p-3">
-              <div className="mb-2 text-xs text-cyan-100/60">对话</div>
-              <div className="mb-3 flex-1 space-y-2 overflow-auto rounded bg-slate-900/40 p-2">
-                {copilotMessages.length === 0 ? (
-                  <div className="rounded border border-cyan-300/20 p-2 text-xs text-cyan-100/70">
-                    请输入安全问题，或点击“快速分析”让 Copilot 带告警上下文回答。
-                  </div>
-                ) : (
-                  copilotMessages.map((item, index) => (
-                    <div
-                      key={`${item.role}-${index}`}
-                      className={`rounded p-2 text-xs leading-5 ${
-                        item.role === "user"
-                          ? "ml-6 bg-cyan-500/15 text-cyan-50"
-                          : "mr-6 border border-cyan-300/20 bg-slate-900 text-cyan-100"
-                      }`}
-                    >
-                      {item.content || (copilotSending && index === copilotMessages.length - 1 ? "思考中..." : "")}
-                    </div>
-                  ))
-                )}
-              </div>
-
-              <form onSubmit={handleCopilotSubmit} className="flex items-center gap-2">
+          {(isOverviewRoute || isAiRoute) ? (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-2">
+                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">AI 路由配置</h3>
+                <select
+                  value={configDraft.ai_provider}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, ai_provider: event.target.value }))}
+                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2"
+                >
+                  {PROVIDERS.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {provider}
+                    </option>
+                  ))}
+                </select>
                 <input
-                  value={copilotInput}
-                  onChange={(event) => setCopilotInput(event.target.value)}
-                  placeholder="输入安全问题，例如：这条告警要先做什么？"
-                  className="flex-1 rounded bg-slate-900 px-3 py-2 text-xs text-cyan-50 outline-none ring-1 ring-cyan-300/20"
-                  disabled={copilotSending}
+                  value={configDraft.model}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, model: event.target.value }))}
+                  placeholder="Model"
+                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2"
                 />
-                <Button type="submit" size="sm" disabled={copilotSending || !copilotInput.trim()}>
-                  <SendHorizonal className="h-4 w-4" />
-                </Button>
-              </form>
-            </Card>
-          </motion.aside>
-        ) : null}
-      </AnimatePresence>
+                <input
+                  value={configDraft.base_url}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, base_url: event.target.value }))}
+                  placeholder="Base URL"
+                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2"
+                />
+                <input
+                  type="password"
+                  value={configDraft.api_key}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, api_key: event.target.value }))}
+                  placeholder={config?.has_api_key ? "已配置，留空表示不修改" : "输入新的 API Key"}
+                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2"
+                />
+                <div className="text-xs text-cyber-text/60">当前密钥状态：{config?.has_api_key ? config.api_key_masked : "未配置"}</div>
+                <div className="flex gap-2 flex-wrap">
+                  <Button variant="outline" size="sm" onClick={() => void handleSaveConfig()} className="border-cyber-cyan/40 text-cyber-cyan">
+                    保存配置
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => void handleTestConfig()} className="border-cyber-cyan/40 text-cyber-cyan">
+                    测试路由
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => void handleRefreshConfig()} className="border-cyber-cyan/40 text-cyber-cyan">
+                    重新同步
+                  </Button>
+                </div>
+              </div>
+
+              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-2">
+                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">当前会话</h3>
+                <div className="text-sm text-cyber-text/80">用户: {userEmail || "unknown"}</div>
+                <div className="text-xs text-cyber-text/60">上下文: {copilotHint}</div>
+              </div>
+            </div>
+          ) : null}
+
+          {(isOverviewRoute || isReportRoute) ? (
+            <div className="bg-black/40 border border-cyber-cyan/30 p-4">
+              <h3 className="text-sm uppercase tracking-widest text-cyber-text/70 mb-2">日报摘要</h3>
+              <pre className="whitespace-pre-wrap text-xs leading-5 text-cyber-text/85">{reportMarkdown}</pre>
+            </div>
+          ) : null}
+        </section>
+      </main>
     </div>
   );
 }

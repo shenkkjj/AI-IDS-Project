@@ -151,7 +151,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         session.user.id = token.sub || "";
         session.user.authProvider = String(token.authProvider || "");
       }
-      session.backendAccessToken = String(token.backendAccessToken || "");
       return session;
     },
   },
