@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -55,6 +56,11 @@ PASSWORD_RESET_EXPIRES_MINUTES = 10
 SSL_CHECK_INTERVAL_SECONDS = 60
 SITE_MONITOR_HTTP_TIMEOUT_SECONDS = 8.0
 
+INTERNAL_ALERT_TOKEN_HEADER = "x-alerts-token"
+INTERNAL_ALERT_TOKEN_ENV = "ALERTS_INGEST_TOKEN"
+LLM_ADMIN_TOKEN_HEADER = "x-llm-admin-token"
+LLM_ADMIN_TOKEN_ENV = "LLM_ADMIN_TOKEN"
+
 WAF_BLOCK_PATTERNS = [
     re.compile(r"(?i)(?:\bor\b\s+1=1|\bunion\b\s+\bselect\b|sleep\s*\(|benchmark\s*\(|information_schema)"),
     re.compile(r"(?i)(?:<script\b|onerror\s*=|onload\s*=|javascript:)"),
@@ -102,6 +108,46 @@ def _get_client_ip(request: Request) -> str:
     return str(client.host) if client else "unknown"
 
 
+def _get_direct_client_ip(request: Request) -> str:
+    client = request.client
+    return str(client.host) if client else ""
+
+
+def _is_private_or_loopback_ip(ip_text: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(ip_text)
+    except ValueError:
+        return False
+    return parsed.is_private or parsed.is_loopback
+
+
+def _is_allowed_alert_ingest_source(request: Request) -> bool:
+    source_ip = _get_direct_client_ip(request)
+    if not source_ip:
+        return False
+
+    cidr_text = os.getenv("ALERTS_INGEST_ALLOWED_CIDRS", "").strip()
+    if not cidr_text:
+        return _is_private_or_loopback_ip(source_ip)
+
+    try:
+        source = ipaddress.ip_address(source_ip)
+    except ValueError:
+        return False
+
+    for raw_item in cidr_text.split(","):
+        item = raw_item.strip()
+        if not item:
+            continue
+        try:
+            network = ipaddress.ip_network(item, strict=False)
+        except ValueError:
+            continue
+        if source in network:
+            return True
+    return False
+
+
 def _payload_has_attack_signature(text: str) -> bool:
     if not text:
         return False
@@ -121,12 +167,13 @@ def _build_proxy_headers(request: Request) -> dict[str, str]:
     return out
 
 
-def _build_attack_alert(source_ip: str, destination_host: str, payload: str) -> "AlertIn":
+def _build_attack_alert(source_ip: str, destination_host: str, payload: str, user_id: int) -> "AlertIn":
     return AlertIn(
         event="waf_block",
         source_ip=source_ip,
         destination_ip=destination_host,
         payload=payload[:4000],
+        alert_user_id=user_id,
         timestamp=time.time(),
         blocked=True,
         block_expires_at=None,
@@ -160,6 +207,7 @@ class AlertIn(BaseModel):
     source_ip: str
     destination_ip: str
     payload: str = Field(default="")
+    alert_user_id: int | None = None
     timestamp: float | None = None
     feature_values: dict[str, Any] | None = None
     model_probability: float | None = None
@@ -263,26 +311,33 @@ PROVIDER_BASE_URL_DEFAULTS = {
 
 class ConnectionManager:
     def __init__(self) -> None:
-        self.active_connections: set[WebSocket] = set()
+        self.active_connections: dict[int, set[WebSocket]] = {}
         self._lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket) -> None:
+    async def connect(self, user_id: int, websocket: WebSocket) -> None:
         await websocket.accept()
         async with self._lock:
-            self.active_connections.add(websocket)
-        logger.info("WebSocket connected. total={}", len(self.active_connections))
+            user_connections = self.active_connections.setdefault(user_id, set())
+            user_connections.add(websocket)
+            total = sum(len(items) for items in self.active_connections.values())
+        logger.info("WebSocket connected. user_id={} total={}", user_id, total)
 
-    async def disconnect(self, websocket: WebSocket) -> None:
+    async def disconnect(self, user_id: int, websocket: WebSocket) -> None:
         async with self._lock:
-            self.active_connections.discard(websocket)
-        logger.info("WebSocket disconnected. total={}", len(self.active_connections))
+            user_connections = self.active_connections.get(user_id)
+            if user_connections is not None:
+                user_connections.discard(websocket)
+                if not user_connections:
+                    self.active_connections.pop(user_id, None)
+            total = sum(len(items) for items in self.active_connections.values())
+        logger.info("WebSocket disconnected. user_id={} total={}", user_id, total)
 
-    async def snapshot_connections(self) -> list[WebSocket]:
+    async def snapshot_connections(self, user_id: int) -> list[WebSocket]:
         async with self._lock:
-            return list(self.active_connections)
+            return list(self.active_connections.get(user_id, set()))
 
-    async def broadcast_json(self, message: dict[str, Any]) -> None:
-        targets = await self.snapshot_connections()
+    async def broadcast_json(self, user_id: int, message: dict[str, Any]) -> None:
+        targets = await self.snapshot_connections(user_id)
         if not targets:
             return
 
@@ -295,8 +350,12 @@ class ConnectionManager:
 
         if stale:
             async with self._lock:
-                for websocket in stale:
-                    self.active_connections.discard(websocket)
+                user_connections = self.active_connections.get(user_id)
+                if user_connections is not None:
+                    for websocket in stale:
+                        user_connections.discard(websocket)
+                    if not user_connections:
+                        self.active_connections.pop(user_id, None)
 
 
 load_dotenv_file(Path(__file__).resolve().parents[1] / ".env")
@@ -514,6 +573,33 @@ def _provider_test_endpoint(provider: str, runtime: AnalyzerConfig) -> str:
     if provider == "gemini":
         return f"{normalized_base}/v1beta/models/{runtime.model}:generateContent?key={runtime.api_key}"
     return build_chat_completions_url(runtime.base_url)
+
+
+def _validate_test_base_url(provider: str, base_url: str) -> str:
+    normalized = str(base_url or "").strip().rstrip("/")
+    if not normalized:
+        raise HTTPException(status_code=400, detail="Base URL is required")
+
+    parsed = urlparse(normalized)
+    if parsed.scheme != "https" or not parsed.netloc:
+        raise HTTPException(status_code=422, detail="base_url must be a valid https URL")
+
+    inferred = infer_provider_from_base_url(normalized)
+    if inferred != "custom" and inferred != provider:
+        raise HTTPException(status_code=422, detail="base_url does not match selected provider")
+
+    return normalized
+
+
+def _resolve_test_api_key(update: dict[str, Any], runtime: AnalyzerConfig) -> str:
+    candidate = str(update.get("api_key", "")).strip()
+    if candidate:
+        return candidate
+
+    if "api_key" in update:
+        raise HTTPException(status_code=400, detail="api_key cannot be empty")
+
+    return str(runtime.api_key).strip()
 
 
 def _extract_test_reply(provider: str, payload: dict[str, Any]) -> str:
@@ -785,6 +871,30 @@ def get_current_user(
     return user
 
 
+def require_auth_user(
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    access_token_cookie: str | None = Cookie(default=None, alias="access_token"),
+) -> User:
+    return get_current_user(db, access_token_cookie, authorization)
+
+
+def require_llm_admin_token(token: str | None = Header(default=None, alias=LLM_ADMIN_TOKEN_HEADER)) -> None:
+    expected = os.getenv(LLM_ADMIN_TOKEN_ENV, "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail=f"{LLM_ADMIN_TOKEN_ENV} not configured")
+    if token != expected:
+        raise HTTPException(status_code=401, detail="Invalid admin token")
+
+
+def require_alert_ingest_token(token: str | None = Header(default=None, alias=INTERNAL_ALERT_TOKEN_HEADER)) -> None:
+    expected = os.getenv(INTERNAL_ALERT_TOKEN_ENV, "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail=f"{INTERNAL_ALERT_TOKEN_ENV} not configured")
+    if token != expected:
+        raise HTTPException(status_code=401, detail="Invalid alerts token")
+
+
 def config_to_payload(config: AnalyzerConfig, ai_provider: str = "custom") -> dict[str, Any]:
     provider = choose_provider(ai_provider, config.model, config.base_url)
     return {
@@ -923,9 +1033,14 @@ async def append_new_threat_csv(payload: dict[str, Any], label: str) -> None:
             writer.writerow(row)
 
 
-def find_alert_by_id(alert_id: str) -> dict[str, Any] | None:
+def find_alert_by_id(alert_id: str, *, user_id: int | None = None) -> dict[str, Any] | None:
     for item in _alert_backlog:
-        if str(item.get("alert_id", "")) == alert_id:
+        if str(item.get("alert_id", "")) != alert_id:
+            continue
+        if user_id is None:
+            return item
+        raw_alert = item.get("raw_alert") or {}
+        if raw_alert.get("alert_user_id") == user_id:
             return item
     return None
 
@@ -1055,6 +1170,7 @@ def _build_site_monitor_alert(user_id: int, target_url: str, reason: str, detail
         source_ip="system:site-monitor",
         destination_ip=target_url,
         payload=(f"reason={reason};detail={detail}" if detail else f"reason={reason}")[:4000],
+        alert_user_id=user_id,
         timestamp=time.time(),
         blocked=False,
         block_expires_at=None,
@@ -1553,7 +1669,7 @@ async def copilot_stream(
 
     alert: dict[str, Any] | None = None
     if data.alert_id:
-        alert = find_alert_by_id(str(data.alert_id).strip())
+        alert = find_alert_by_id(str(data.alert_id).strip(), user_id=user.id)
 
     context_block = _build_context_from_alert(alert)
     stream = stream_user_chat_completion(
@@ -1584,7 +1700,7 @@ async def post_threat_confirm(
 ) -> dict[str, Any]:
     user = get_current_user(db, access_token_cookie, authorization)
 
-    alert = find_alert_by_id(data.alert_id)
+    alert = find_alert_by_id(data.alert_id, user_id=user.id)
     if alert is None:
         raise HTTPException(status_code=404, detail="alert_id not found")
 
@@ -1605,7 +1721,9 @@ async def alert_worker(worker_id: int) -> None:
         try:
             payload = await process_alert(alert)
             await append_backlog(payload)
-            await manager.broadcast_json(payload)
+            alert_user_id = int((payload.get("raw_alert") or {}).get("alert_user_id") or 0)
+            if alert_user_id > 0:
+                await manager.broadcast_json(alert_user_id, payload)
         except Exception as exc:
             logger.exception("Alert worker failed id={} err={}", worker_id, exc)
         finally:
@@ -1634,35 +1752,42 @@ async def health() -> dict[str, str]:
 
 
 @app.get("/llm/config")
-async def get_llm_config() -> dict[str, Any]:
+async def get_llm_config(
+    _: None = Depends(require_llm_admin_token),
+) -> dict[str, Any]:
     config = await get_runtime_llm_config()
     provider = choose_provider("custom", config.model, config.base_url)
     return config_to_payload(config, provider)
 
 
 @app.put("/llm/config")
-async def put_llm_config(data: LLMConfigIn) -> dict[str, Any]:
+async def put_llm_config(
+    data: LLMConfigIn,
+    _: None = Depends(require_llm_admin_token),
+) -> dict[str, Any]:
     config = await update_runtime_llm_config(data)
     provider = choose_provider(data.ai_provider, config.model, config.base_url)
     return {"status": "updated", "config": config_to_payload(config, provider)}
 
 
 @app.post("/llm/test")
-async def post_llm_test(data: LLMConfigIn) -> dict[str, Any]:
+async def post_llm_test(
+    data: LLMConfigIn,
+    _: None = Depends(require_llm_admin_token),
+) -> dict[str, Any]:
     update = data.model_dump(exclude_none=True)
     runtime = await get_runtime_llm_config()
 
     provider = choose_provider(str(update.get("ai_provider", "custom")), str(update.get("model", runtime.model)), str(update.get("base_url", runtime.base_url)))
-    base_url = str(update.get("base_url", runtime.base_url)).strip().rstrip("/")
     model = str(update.get("model", runtime.model)).strip() or runtime.model
-
-    if not base_url:
-        base_url = PROVIDER_BASE_URL_DEFAULTS[provider]
     if not model:
         model = PROVIDER_MODEL_DEFAULTS[provider]
 
+    base_url = _validate_test_base_url(provider, str(update.get("base_url", runtime.base_url)))
+    api_key = _resolve_test_api_key(update, runtime)
+
     test_config = AnalyzerConfig(
-        api_key=str(update.get("api_key", runtime.api_key)).strip(),
+        api_key=api_key,
         base_url=base_url,
         model=model,
         timeout_seconds=int(update.get("timeout_seconds", runtime.timeout_seconds)),
@@ -1712,7 +1837,7 @@ async def site_proxy(
         source_ip = _get_client_ip(request)
         destination = parsed.hostname or "unknown"
         attack_payload = body_text or path
-        accepted, replaced_oldest = enqueue_alert(_build_attack_alert(source_ip, destination, attack_payload))
+        accepted, replaced_oldest = enqueue_alert(_build_attack_alert(source_ip, destination, attack_payload, user.id))
         if not accepted:
             logger.warning("waf alert queue full, drop block alert source_ip={}", source_ip)
         elif replaced_oldest:
@@ -1745,7 +1870,14 @@ async def site_proxy(
 
 
 @app.post("/alerts")
-async def receive_alert(alert: AlertIn) -> dict[str, Any]:
+async def receive_alert(
+    alert: AlertIn,
+    request: Request,
+    _: None = Depends(require_alert_ingest_token),
+) -> dict[str, Any]:
+    if not _is_allowed_alert_ingest_source(request):
+        raise HTTPException(status_code=403, detail="Alert ingest source is not allowed")
+
     accepted, replaced_oldest = enqueue_alert(alert)
     if not accepted:
         raise HTTPException(status_code=503, detail="Alert queue is full")
@@ -1760,28 +1892,56 @@ async def receive_alert(alert: AlertIn) -> dict[str, Any]:
 
 
 @app.get("/alerts")
-async def get_alerts(limit: int = 100) -> dict[str, Any]:
+async def get_alerts(
+    limit: int = 100,
+    user: User = Depends(require_auth_user),
+) -> dict[str, Any]:
     backlog = await get_backlog_snapshot()
+    user_items = [item for item in backlog if (item.get("raw_alert") or {}).get("alert_user_id") == user.id]
     bounded = max(1, min(limit, ALERT_BACKLOG_SIZE))
     return {
-        "items": backlog[-bounded:],
-        "count": len(backlog),
+        "items": user_items[-bounded:],
+        "count": len(user_items),
         "queue_size": _alert_queue.qsize(),
     }
 
 
 @app.websocket("/ws/alerts")
 async def ws_alerts(websocket: WebSocket) -> None:
-    await manager.connect(websocket)
+    token = websocket.headers.get("authorization")
+    cookie_text = websocket.headers.get("cookie", "")
+    access_token_cookie: str | None = None
+    for item in cookie_text.split(";"):
+        entry = item.strip()
+        if entry.startswith("access_token="):
+            access_token_cookie = entry.split("=", 1)[1].strip() or None
+            break
+
+    db = SessionLocal()
+    user: User | None = None
+    try:
+        user = get_current_user(db, access_token_cookie, token)
+    except HTTPException:
+        db.close()
+        await websocket.close(code=1008)
+        return
+    finally:
+        db.close()
+
+    if user is None:
+        await websocket.close(code=1008)
+        return
+    await manager.connect(user.id, websocket)
     try:
         backlog = await get_backlog_snapshot()
         for item in backlog:
-            await websocket.send_json(item)
+            if (item.get("raw_alert") or {}).get("alert_user_id") == user.id:
+                await websocket.send_json(item)
 
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
-        await manager.disconnect(websocket)
+        await manager.disconnect(user.id, websocket)
     except Exception as exc:
-        await manager.disconnect(websocket)
+        await manager.disconnect(user.id, websocket)
         logger.warning("WebSocket closed with error: {}", exc)

@@ -14,15 +14,38 @@ from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
+WEAK_APP_SECRETS = {
+    "dev-secret-change-me",
+    "change-me-to-a-long-random-secret",
+    "changeme",
+    "change-me",
+    "default",
+    "secret",
+}
+
+
+def _required_app_secret() -> str:
+    secret = os.getenv("APP_SECRET", "").strip()
+    if not secret or secret.lower() in WEAK_APP_SECRETS:
+        raise RuntimeError("APP_SECRET must be configured with a strong non-default value")
+    return secret
+
+
+def _derive_fernet_key(secret: str) -> str:
+    digest = hashlib.sha256(secret.encode("utf-8")).digest()
+    return base64.urlsafe_b64encode(digest).decode("utf-8")
+
 
 def get_fernet_key() -> str:
     key = os.getenv("APP_FERNET_KEY", "").strip()
     if key:
+        try:
+            Fernet(key.encode("utf-8"))
+        except Exception as exc:
+            raise RuntimeError("APP_FERNET_KEY is invalid") from exc
         return key
 
-    secret = os.getenv("APP_SECRET", "dev-secret-change-me")
-    digest = hashlib.sha256(secret.encode("utf-8")).digest()
-    return base64.urlsafe_b64encode(digest).decode("utf-8")
+    return _derive_fernet_key(_required_app_secret())
 
 
 fernet = Fernet(get_fernet_key().encode("utf-8"))
@@ -60,7 +83,7 @@ def verify_otp_code(code: str, code_hash: str) -> bool:
 
 
 def issue_access_token(subject: str, expires_minutes: int = 60 * 24 * 7) -> str:
-    secret = os.getenv("APP_SECRET", "dev-secret-change-me")
+    secret = _required_app_secret()
     algorithm = os.getenv("APP_JWT_ALG", "HS256")
     now = datetime.utcnow()
     payload: dict[str, Any] = {
@@ -72,7 +95,7 @@ def issue_access_token(subject: str, expires_minutes: int = 60 * 24 * 7) -> str:
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
-    secret = os.getenv("APP_SECRET", "dev-secret-change-me")
+    secret = _required_app_secret()
     algorithm = os.getenv("APP_JWT_ALG", "HS256")
     return jwt.decode(token, secret, algorithms=[algorithm])
 
