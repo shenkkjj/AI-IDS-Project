@@ -13,8 +13,10 @@ web-next/.env.*
 
 # Runtime data
 data/app.db
+backups/
 
 # Build/cache artifacts
 __pycache__/
 *.pyc
 *.tsbuildinfo
+.claude/worktrees/

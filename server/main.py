@@ -202,6 +202,48 @@ def bool_env(name: str, default: bool = False) -> bool:
     return default
 
 
+def cookie_secure() -> bool:
+    return bool_env("APP_COOKIE_SECURE", True)
+
+
+def cookie_samesite() -> str:
+    value = os.getenv("APP_COOKIE_SAMESITE", "lax").strip().lower()
+    if value in {"lax", "strict", "none"}:
+        return value
+    return "lax"
+
+
+def validate_cookie_config() -> None:
+    secure = cookie_secure()
+    same_site = cookie_samesite()
+    env = os.getenv("APP_ENV", "development").strip().lower()
+    is_production = env in {"prod", "production"}
+
+    if same_site == "none" and not secure:
+        raise RuntimeError("APP_COOKIE_SAMESITE=none requires APP_COOKIE_SECURE=true")
+
+    if is_production and not secure:
+        raise RuntimeError("APP_COOKIE_SECURE must be true when APP_ENV=production")
+
+
+def set_access_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        "access_token",
+        token,
+        httponly=True,
+        samesite=cookie_samesite(),
+        secure=cookie_secure(),
+    )
+
+
+def clear_access_cookie(response: Response) -> None:
+    response.delete_cookie(
+        "access_token",
+        samesite=cookie_samesite(),
+        secure=cookie_secure(),
+    )
+
+
 class AlertIn(BaseModel):
     event: str = Field(default="anomaly")
     source_ip: str
@@ -359,6 +401,7 @@ class ConnectionManager:
 
 
 load_dotenv_file(Path(__file__).resolve().parents[1] / ".env")
+validate_cookie_config()
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="AI-IDS Alert Backend", version="0.2.0")
@@ -1337,7 +1380,7 @@ async def auth_register(data: UserRegisterIn, response: Response, db: Session = 
     db.refresh(user)
 
     token = issue_access_token(str(user.id))
-    response.set_cookie("access_token", token, httponly=True, samesite="lax", secure=False)
+    set_access_cookie(response, token)
 
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="register", detail="password register")
@@ -1353,7 +1396,7 @@ async def auth_login_password(data: LoginPasswordIn, response: Response, db: Ses
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
 
     token = issue_access_token(str(user.id))
-    response.set_cookie("access_token", token, httponly=True, samesite="lax", secure=False)
+    set_access_cookie(response, token)
 
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="login_password", detail="password login")
@@ -1386,7 +1429,7 @@ async def auth_login_oauth(data: OAuthLoginIn, response: Response, db: Session =
         db.refresh(user)
 
     token = issue_access_token(str(user.id))
-    response.set_cookie("access_token", token, httponly=True, samesite="lax", secure=False)
+    set_access_cookie(response, token)
 
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="login_oauth", detail=f"oauth login {data.provider}")
@@ -1414,7 +1457,7 @@ async def auth_login_otp_verify(data: OTPVerifyIn, response: Response, db: Sessi
 
     _consume_valid_challenge(db, data.email.lower(), "otp", data.code)
     token = issue_access_token(str(user.id))
-    response.set_cookie("access_token", token, httponly=True, samesite="lax", secure=False)
+    set_access_cookie(response, token)
 
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="login_otp", detail="otp login")
@@ -1454,7 +1497,7 @@ async def auth_password_reset_confirm(data: PasswordResetConfirmIn, db: Session 
 
 @app.post("/auth/logout")
 async def auth_logout(response: Response) -> dict[str, Any]:
-    response.delete_cookie("access_token")
+    clear_access_cookie(response)
     return {"status": "ok"}
 
 
