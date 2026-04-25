@@ -2,3 +2,19 @@
 .gstack/
 web-next/.gstack/
 .omc/state/hud-stdin-cache.json
+
+# Secrets and local env
+.env
+.env.*
+!.env.example
+web-next/.env.local
+web-next/.env.*
+!web-next/.env.example
+
+# Runtime data
+data/app.db
+
+# Build/cache artifacts
+__pycache__/
+*.pyc
+*.tsbuildinfo
