@@ -1,6 +1,7 @@
 import asyncio
 import csv
 import hashlib
+import hmac
 import ipaddress
 import json
 import os
@@ -10,10 +11,10 @@ import ssl
 import sys
 import time
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, AsyncIterator
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 import httpx
@@ -38,6 +39,7 @@ from server.db import SessionLocal, engine
 from server.mailer import send_otp_email, send_reset_email
 from server.models_db import AuthChallenge, Base, Log, User, UserConfig
 from server.security_utils import (
+    DecryptionError,
     decode_access_token,
     decrypt_api_key,
     encrypt_api_key,
@@ -55,6 +57,17 @@ OTP_EXPIRES_MINUTES = 10
 PASSWORD_RESET_EXPIRES_MINUTES = 10
 SSL_CHECK_INTERVAL_SECONDS = 60
 SITE_MONITOR_HTTP_TIMEOUT_SECONDS = 8.0
+LOGIN_RATE_LIMIT_WINDOW = 300
+LOGIN_RATE_LIMIT_MAX = 10
+OTP_RATE_LIMIT_WINDOW = 600
+OTP_RATE_LIMIT_MAX = 5
+REGISTER_RATE_LIMIT_WINDOW = 3600
+REGISTER_RATE_LIMIT_MAX = 5
+LLM_RATE_LIMIT_WINDOW = 60
+LLM_RATE_LIMIT_MAX = 10
+COPILOT_RATE_LIMIT_WINDOW = 60
+COPILOT_RATE_LIMIT_MAX = 20
+OTP_VERIFY_MAX_ATTEMPTS = 5
 
 INTERNAL_ALERT_TOKEN_HEADER = "x-alerts-token"
 INTERNAL_ALERT_TOKEN_ENV = "ALERTS_INGEST_TOKEN"
@@ -82,6 +95,12 @@ PROXY_STRIP_HEADERS = {
     "authorization",
     "cookie",
 }
+UPSTREAM_STRIP_RESPONSE_HEADERS = {
+    "server",
+    "x-powered-by",
+    "x-aspnet-version",
+    "set-cookie",
+}
 
 
 def load_dotenv_file(path: Path) -> None:
@@ -99,11 +118,26 @@ def load_dotenv_file(path: Path) -> None:
 
 
 def _get_client_ip(request: Request) -> str:
+    trusted_proxy_count = int(os.getenv("TRUSTED_PROXY_COUNT", "0").strip())
     forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        ip = forwarded.split(",", 1)[0].strip()
-        if ip:
-            return ip
+    if forwarded and trusted_proxy_count > 0:
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        # SECURITY: Validate each IP in the chain to prevent IP spoofing
+        valid_parts = []
+        for p in parts:
+            try:
+                ipaddress.ip_address(p)
+                valid_parts.append(p)
+            except ValueError:
+                continue
+        if len(valid_parts) >= trusted_proxy_count:
+            idx = len(valid_parts) - trusted_proxy_count
+            ip = valid_parts[idx]
+            if ip:
+                return ip
+    elif forwarded and trusted_proxy_count == 0:
+        # SECURITY: When TRUSTED_PROXY_COUNT=0, X-Forwarded-For is untrusted and ignored
+        pass
     client = request.client
     return str(client.host) if client else "unknown"
 
@@ -118,7 +152,26 @@ def _is_private_or_loopback_ip(ip_text: str) -> bool:
         parsed = ipaddress.ip_address(ip_text)
     except ValueError:
         return False
-    return parsed.is_private or parsed.is_loopback
+    return parsed.is_private or parsed.is_loopback or parsed.is_link_local or parsed.is_reserved
+
+
+def _is_url_pointing_to_internal(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return True
+        try:
+            addr_info = socket.getaddrinfo(hostname, None)
+            for family, _type, _proto, _canonname, sockaddr in addr_info:
+                ip_text = sockaddr[0]
+                if _is_private_or_loopback_ip(ip_text):
+                    return True
+        except socket.gaierror:
+            return True
+        return False
+    except Exception:
+        return True
 
 
 def _is_allowed_alert_ingest_source(request: Request) -> bool:
@@ -167,11 +220,25 @@ def _build_proxy_headers(request: Request) -> dict[str, str]:
     return out
 
 
+def _sanitize_for_log(text: str) -> str:
+    if not text:
+        return ""
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#x27;")
+        .replace("\n", " ")
+        .replace("\r", "")
+    )
+
+
 def _build_attack_alert(source_ip: str, destination_host: str, payload: str, user_id: int) -> "AlertIn":
     return AlertIn(
         event="waf_block",
-        source_ip=source_ip,
-        destination_ip=destination_host,
+        source_ip=_sanitize_for_log(source_ip),
+        destination_ip=_sanitize_for_log(destination_host),
         payload=payload[:4000],
         alert_user_id=user_id,
         timestamp=time.time(),
@@ -203,7 +270,10 @@ def bool_env(name: str, default: bool = False) -> bool:
 
 
 def cookie_secure() -> bool:
-    return bool_env("APP_COOKIE_SECURE", True)
+    env = os.getenv("APP_ENV", "development").strip().lower()
+    if env in {"dev", "development"}:
+        return False
+    return True
 
 
 def cookie_samesite() -> str:
@@ -239,13 +309,14 @@ def set_access_cookie(response: Response, token: str) -> None:
 def clear_access_cookie(response: Response) -> None:
     response.delete_cookie(
         "access_token",
+        httponly=True,
         samesite=cookie_samesite(),
         secure=cookie_secure(),
     )
 
 
 class AlertIn(BaseModel):
-    event: str = Field(default="anomaly")
+    event: str = Field(default="anomaly", pattern="^(anomaly|waf_block|site_down|ssl_warning|ssl_critical)$")
     source_ip: str
     destination_ip: str
     payload: str = Field(default="")
@@ -275,10 +346,24 @@ class UserRegisterIn(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     display_name: str | None = None
 
+    @staticmethod
+    def validate_password_strength(password: str) -> str:
+        if len(password) < 8:
+            raise ValueError("密码长度至少8位")
+        has_upper = any(c.isupper() for c in password)
+        has_lower = any(c.islower() for c in password)
+        has_digit = any(c.isdigit() for c in password)
+        if not (has_upper and has_lower and has_digit):
+            raise ValueError("密码必须包含大写字母、小写字母和数字")
+        return password
+
+    def model_post_init(self, __context: object) -> None:
+        UserRegisterIn.validate_password_strength(self.password)
+
 
 class LoginPasswordIn(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(max_length=128)
 
 
 class OTPRequestIn(BaseModel):
@@ -299,23 +384,27 @@ class PasswordResetConfirmIn(BaseModel):
     code: str = Field(min_length=4, max_length=12)
     new_password: str = Field(min_length=8, max_length=128)
 
+    def model_post_init(self, __context: object) -> None:
+        UserRegisterIn.validate_password_strength(self.new_password)
+
 
 class OAuthLoginIn(BaseModel):
     provider: str = Field(pattern="^(github|google)$")
-    provider_user_id: str = Field(min_length=2, max_length=255)
+    id_token: str = Field(min_length=1, max_length=8192)
+    provider_user_id: str = Field(max_length=255)
     email: EmailStr
     display_name: str | None = None
 
 
 class UserConfigIn(BaseModel):
-    ai_provider: str | None = None
+    ai_provider: str | None = Field(default=None, pattern="^(openai|claude|gemini|grok|custom)$")
     model: str | None = None
     base_url: str | None = None
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     alert_email_enabled: bool | None = None
     alert_voice_enabled: bool | None = None
-    ui_theme: str | None = None
-    ui_density: str | None = None
+    ui_theme: str | None = Field(default=None, pattern="^(dark|light|auto)$")
+    ui_density: str | None = Field(default=None, pattern="^(comfortable|compact|spacious)$")
     api_key: str | None = None
 
 
@@ -405,17 +494,31 @@ validate_cookie_config()
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="AI-IDS Alert Backend", version="0.2.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:8080",
-        "http://localhost:8080",
+
+_cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
+_cors_origins = (
+    [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+    if _cors_origins_env
+    else [
         "http://127.0.0.1:3000",
         "http://localhost:3000",
-    ],
+        "http://127.0.0.1:8080",
+        "http://localhost:8080",
+        "http://192.168.28.1:3000",
+    ]
+)
+if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"} and any(
+    "localhost" in o or "127.0.0.1" in o for o in _cors_origins
+):
+    logger.warning("CORS allows localhost in production — set CORS_ORIGINS explicitly")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT"],
+    allow_headers=["Authorization", "Content-Type", "X-Alerts-Token", "X-LLM-Admin-Token"],
+    max_age=600,
 )
 
 manager = ConnectionManager()
@@ -429,6 +532,18 @@ _llm_config = AnalyzerConfig(
 _alert_queue: asyncio.Queue[AlertIn] = asyncio.Queue(maxsize=ALERT_QUEUE_MAX_SIZE)
 _alert_backlog: deque[dict[str, Any]] = deque(maxlen=ALERT_BACKLOG_SIZE)
 _alert_backlog_lock = asyncio.Lock()
+_login_attempts: dict[str, list[float]] = {}
+_login_lock = asyncio.Lock()
+_otp_attempts: dict[str, list[float]] = {}
+_otp_lock = asyncio.Lock()
+_register_attempts: dict[str, list[float]] = {}
+_register_lock = asyncio.Lock()
+_llm_attempts: dict[str, list[float]] = {}
+_llm_lock = asyncio.Lock()
+_copilot_attempts: dict[str, list[float]] = {}
+_copilot_lock = asyncio.Lock()
+_otp_verify_failures: dict[str, int] = {}
+_otp_verify_lock = asyncio.Lock()
 _new_threats_lock = asyncio.Lock()
 _worker_tasks: list[asyncio.Task[None]] = []
 _ssl_monitor_task: asyncio.Task[None] | None = None
@@ -440,13 +555,16 @@ site_health_status: dict[int, dict[str, Any]] = {}
 def ensure_user_config_columns() -> None:
     statements = [
         "ALTER TABLE user_configs ADD COLUMN ai_provider VARCHAR(24) NOT NULL DEFAULT 'openai'",
+        "ALTER TABLE users ADD COLUMN password_changed_at DATETIME NULL",
     ]
     with engine.begin() as conn:
         for sql in statements:
             try:
                 conn.execute(text(sql))
-            except Exception:
-                pass
+            except Exception as exc:
+                err_msg = str(exc).lower()
+                if "already exists" not in err_msg and "duplicate" not in err_msg:
+                    logger.warning("ALTER failed: {} err={}", sql.strip(), exc)
 
 
 ensure_user_config_columns()
@@ -551,7 +669,10 @@ def choose_provider(preferred: str | None, model_name: str, base_url: str) -> st
 
 
 def user_config_to_llm_runtime(config: UserConfig, user: User) -> tuple[AnalyzerConfig, str]:
-    api_key = decrypt_api_key(user.encrypted_api_key) or ""
+    try:
+        api_key = decrypt_api_key(user.encrypted_api_key) or ""
+    except DecryptionError:
+        api_key = ""
     provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
     model = (config.model or "").strip() or PROVIDER_MODEL_DEFAULTS[provider]
     base_url = (config.base_url or "").strip().rstrip("/") or PROVIDER_BASE_URL_DEFAULTS[provider]
@@ -580,6 +701,7 @@ def _provider_headers(provider: str, api_key: str) -> dict[str, str]:
     if provider == "gemini":
         return {
             "Content-Type": "application/json",
+            "x-goog-api-key": api_key,
         }
     return {
         "Content-Type": "application/json",
@@ -614,24 +736,8 @@ def _provider_test_endpoint(provider: str, runtime: AnalyzerConfig) -> str:
     if provider == "claude":
         return f"{normalized_base}/v1/messages"
     if provider == "gemini":
-        return f"{normalized_base}/v1beta/models/{runtime.model}:generateContent?key={runtime.api_key}"
+        return f"{normalized_base}/v1beta/models/{runtime.model}:generateContent"
     return build_chat_completions_url(runtime.base_url)
-
-
-def _validate_test_base_url(provider: str, base_url: str) -> str:
-    normalized = str(base_url or "").strip().rstrip("/")
-    if not normalized:
-        raise HTTPException(status_code=400, detail="Base URL is required")
-
-    parsed = urlparse(normalized)
-    if parsed.scheme != "https" or not parsed.netloc:
-        raise HTTPException(status_code=422, detail="base_url must be a valid https URL")
-
-    inferred = infer_provider_from_base_url(normalized)
-    if inferred != "custom" and inferred != provider:
-        raise HTTPException(status_code=422, detail="base_url does not match selected provider")
-
-    return normalized
 
 
 def _resolve_test_api_key(update: dict[str, Any], runtime: AnalyzerConfig) -> str:
@@ -662,24 +768,20 @@ def _extract_test_reply(provider: str, payload: dict[str, Any]) -> str:
     return str((payload.get("choices", [{}])[0] or {}).get("message", {}).get("content", "") or "").strip()
 
 
-def test_llm_connection_by_provider(config: AnalyzerConfig, provider: str) -> dict[str, Any]:
+async def test_llm_connection_by_provider(config: AnalyzerConfig, provider: str) -> dict[str, Any]:
     if not config.api_key or not config.base_url:
-        raise ValueError("Missing API Key or Base URL.")
+        raise ValueError("缺少 API Key 或 Base URL")
 
     if config.timeout_seconds < 1 or config.timeout_seconds > 300:
-        raise ValueError("timeout_seconds must be in 1..300")
+        raise ValueError("timeout_seconds 必须在 1-300 之间")
 
     endpoint = _provider_test_endpoint(provider, config)
     request_body = _test_request_body(provider, config.model)
     headers = _provider_headers(provider, config.api_key)
 
     started_at = time.time()
-    response = httpx.post(
-        endpoint,
-        headers=headers,
-        json=request_body,
-        timeout=config.timeout_seconds,
-    )
+    async with httpx.AsyncClient(timeout=config.timeout_seconds) as client:
+        response = await client.post(endpoint, headers=headers, json=request_body)
     response.raise_for_status()
 
     response_json = response.json()
@@ -721,7 +823,10 @@ def _build_gemini_contents(user_message: str, context_block: str, history: list[
 
 
 def _extract_openai_delta(payload: dict[str, Any]) -> str:
-    return str(payload.get("choices", [{}])[0].get("delta", {}).get("content", "") or "")
+    choices = payload.get("choices")
+    if not choices:
+        return ""
+    return str((choices[0] or {}).get("delta", {}).get("content", "") or "")
 
 
 def _extract_claude_delta(payload: dict[str, Any]) -> str:
@@ -785,9 +890,10 @@ async def stream_user_chat_completion(
                             yield _sse_pack(token)
 
         elif provider == "gemini":
+            # SECURITY: Gemini API key is passed via x-goog-api-key header, not URL query params
             endpoint = (
                 f"{runtime.base_url.rstrip('/')}/v1beta/models/{runtime.model}:streamGenerateContent"
-                f"?alt=sse&key={runtime.api_key}"
+                f"?alt=sse"
             )
             request_body = {
                 "system_instruction": {"parts": [{"text": COPILOT_SYSTEM_PROMPT}]},
@@ -840,8 +946,9 @@ async def stream_user_chat_completion(
 
         yield _sse_done(provider, runtime.model)
     except Exception as exc:
-        logger.exception("copilot stream failed provider={} model={} err={}", provider, runtime.model, exc)
-        yield _sse_error(str(exc))
+        logger.exception("copilot stream failed provider={} model={} err_type={}", provider, runtime.model, type(exc).__name__)
+        # SECURITY: Never leak internal exception details to the client
+        yield _sse_error("AI 服务暂时不可用，请稍后重试")
 
 
 def _build_context_from_alert(alert: dict[str, Any] | None) -> str:
@@ -896,6 +1003,18 @@ def resolve_token(access_token_cookie: str | None, authorization: str | None) ->
     return token
 
 
+def _issue_token_for_user(user: User) -> str:
+    pwd_ts = user.password_changed_at.replace(tzinfo=timezone.utc).timestamp() if user.password_changed_at else None
+    return issue_access_token(str(user.id), password_changed_at=pwd_ts)
+
+
+def _safe_decrypt(encrypted: str | None) -> str | None:
+    try:
+        return decrypt_api_key(encrypted)
+    except DecryptionError:
+        return None
+
+
 def get_current_user(
     db: Session,
     access_token_cookie: str | None,
@@ -911,6 +1030,15 @@ def get_current_user(
     user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
+    token_pwd_iat = payload.get("pwd_iat")
+    if user.password_changed_at is not None:
+        if token_pwd_iat is None:
+            raise HTTPException(status_code=401, detail="密码已更改，请重新登录")
+        changed_ts = user.password_changed_at.replace(tzinfo=timezone.utc).timestamp()
+        if changed_ts > token_pwd_iat:
+            raise HTTPException(status_code=401, detail="密码已更改，请重新登录")
+
     return user
 
 
@@ -926,7 +1054,7 @@ def require_llm_admin_token(token: str | None = Header(default=None, alias=LLM_A
     expected = os.getenv(LLM_ADMIN_TOKEN_ENV, "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail=f"{LLM_ADMIN_TOKEN_ENV} not configured")
-    if token != expected:
+    if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
 
@@ -934,7 +1062,7 @@ def require_alert_ingest_token(token: str | None = Header(default=None, alias=IN
     expected = os.getenv(INTERNAL_ALERT_TOKEN_ENV, "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail=f"{INTERNAL_ALERT_TOKEN_ENV} not configured")
-    if token != expected:
+    if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Invalid alerts token")
 
 
@@ -1088,10 +1216,30 @@ def find_alert_by_id(alert_id: str, *, user_id: int | None = None) -> dict[str, 
     return None
 
 
+def _check_rate_limit(attempts: dict[str, list[float]], key: str, window: int, max_attempts: int) -> bool:
+    now = time.time()
+    if key in attempts:
+        attempts[key] = [t for t in attempts[key] if now - t < window]
+    if key not in attempts or len(attempts[key]) < max_attempts:
+        if key not in attempts:
+            attempts[key] = []
+        attempts[key].append(now)
+        return True
+    return False
+
+
+def _check_login_rate_limit(email: str) -> bool:
+    return _check_rate_limit(_login_attempts, email.lower(), LOGIN_RATE_LIMIT_WINDOW, LOGIN_RATE_LIMIT_MAX)
+
+
+def _check_otp_rate_limit(email: str) -> bool:
+    return _check_rate_limit(_otp_attempts, email.lower(), OTP_RATE_LIMIT_WINDOW, OTP_RATE_LIMIT_MAX)
+
+
 def _mask_key(value: str | None) -> str:
     if not value:
         return ""
-    if len(value) <= 6:
+    if len(value) <= 8:
         return "*" * len(value)
     return f"{value[:3]}***{value[-3:]}"
 
@@ -1101,7 +1249,7 @@ def _challenge_hash_material(email: str, challenge_type: str, code: str) -> str:
 
 
 def _now() -> datetime:
-    return datetime.utcnow()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _issue_challenge(db: Session, email: str, challenge_type: str, user_id: int | None) -> str:
@@ -1139,7 +1287,7 @@ def _consume_valid_challenge(db: Session, email: str, challenge_type: str, code:
         raise HTTPException(status_code=400, detail="验证码已过期")
 
     expected = _challenge_hash_material(email, challenge_type, code)
-    if expected != challenge.code_hash:
+    if not hmac.compare_digest(expected, challenge.code_hash):
         raise HTTPException(status_code=400, detail="验证码错误")
 
     challenge.consumed_at = _now()
@@ -1150,7 +1298,10 @@ def _consume_valid_challenge(db: Session, email: str, challenge_type: str, code:
 
 
 def _auth_payload(user: User, config: UserConfig, access_token: str | None = None) -> dict[str, Any]:
-    api_key_plain = decrypt_api_key(user.encrypted_api_key)
+    try:
+        api_key_plain = decrypt_api_key(user.encrypted_api_key)
+    except DecryptionError:
+        api_key_plain = None
     provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
     payload = {
         "user": {
@@ -1235,7 +1386,7 @@ def _check_target_uptime(url: str) -> dict[str, Any]:
         response = httpx.get(
             url,
             timeout=SITE_MONITOR_HTTP_TIMEOUT_SECONDS,
-            follow_redirects=True,
+            follow_redirects=False,
         )
         status_code = int(response.status_code)
         if status_code >= 500:
@@ -1361,7 +1512,12 @@ async def _ssl_monitor_loop() -> None:
 
 
 @app.post("/auth/register")
-async def auth_register(data: UserRegisterIn, response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def auth_register(data: UserRegisterIn, response: Response, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    client_ip = _get_client_ip(request)
+    async with _register_lock:
+        if not _check_rate_limit(_register_attempts, client_ip, REGISTER_RATE_LIMIT_WINDOW, REGISTER_RATE_LIMIT_MAX):
+            raise HTTPException(status_code=429, detail="注册尝试过于频繁，请1小时后再试")
+
     existing = db.query(User).filter(User.email == data.email.lower()).first()
     if existing:
         raise HTTPException(status_code=409, detail="邮箱已注册")
@@ -1379,7 +1535,7 @@ async def auth_register(data: UserRegisterIn, response: Response, db: Session = 
     db.commit()
     db.refresh(user)
 
-    token = issue_access_token(str(user.id))
+    token = _issue_token_for_user(user)
     set_access_cookie(response, token)
 
     config = get_or_create_user_config(db, user.id)
@@ -1389,13 +1545,17 @@ async def auth_register(data: UserRegisterIn, response: Response, db: Session = 
 
 @app.post("/auth/login/password")
 async def auth_login_password(data: LoginPasswordIn, response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
+    async with _login_lock:
+        if not _check_login_rate_limit(data.email):
+            raise HTTPException(status_code=429, detail="登录尝试过于频繁，请5分钟后再试")
+
     user = db.query(User).filter(User.email == data.email.lower(), User.is_active.is_(True)).first()
     if not user or not user.password_hash:
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
     if not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
 
-    token = issue_access_token(str(user.id))
+    token = _issue_token_for_user(user)
     set_access_cookie(response, token)
 
     config = get_or_create_user_config(db, user.id)
@@ -1403,10 +1563,79 @@ async def auth_login_password(data: LoginPasswordIn, response: Response, db: Ses
     return _auth_payload(user, config, token)
 
 
+async def _verify_google_token(id_token: str) -> dict[str, Any] | None:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://oauth2.googleapis.com/tokeninfo",
+                params={"id_token": id_token},
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            if data.get("email_verified") != "true" and data.get("email_verified") is not True:
+                return None
+            return {"email": data.get("email", "").lower(), "sub": data.get("sub", ""), "name": data.get("name")}
+    except Exception:
+        return None
+
+
+async def _verify_github_token(access_token: str) -> dict[str, Any] | None:
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.github.com/user",
+                headers={"Authorization": f"Bearer {access_token}", "User-Agent": "AI-CyberSentinel"},
+            )
+            if resp.status_code != 200:
+                return None
+            data = resp.json()
+            email = data.get("email") or ""
+            emails_resp = await client.get(
+                "https://api.github.com/user/emails",
+                headers={"Authorization": f"Bearer {access_token}", "User-Agent": "AI-CyberSentinel"},
+            )
+            if emails_resp.status_code == 200:
+                for e in emails_resp.json():
+                    if e.get("primary") and e.get("verified"):
+                        email = e.get("email", email)
+            return {"email": email.lower(), "sub": str(data.get("id", "")), "name": data.get("name") or data.get("login")}
+    except Exception:
+        return None
+
+
 @app.post("/auth/login/oauth")
-async def auth_login_oauth(data: OAuthLoginIn, response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
+async def auth_login_oauth(data: OAuthLoginIn, response: Response, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
+    client_ip = _get_client_ip(request)
+    async with _register_lock:
+        if not _check_rate_limit(_register_attempts, client_ip, REGISTER_RATE_LIMIT_WINDOW, REGISTER_RATE_LIMIT_MAX):
+            raise HTTPException(status_code=429, detail="注册尝试过于频繁，请稍后再试")
+
+    if not data.provider_user_id or len(data.provider_user_id) < 2:
+        raise HTTPException(status_code=400, detail="OAuth 身份验证信息无效")
+
+    verified: dict[str, Any] | None = None
+    if data.provider == "google":
+        verified = await _verify_google_token(data.id_token)
+    elif data.provider == "github":
+        verified = await _verify_github_token(data.id_token)
+
+    if not verified:
+        raise HTTPException(status_code=401, detail="OAuth 身份验证失败，请重新登录")
+
+    if verified["email"].lower() != data.email.lower():
+        raise HTTPException(status_code=401, detail="OAuth 邮箱与请求不匹配")
+
+    if str(verified["sub"]) != str(data.provider_user_id):
+        raise HTTPException(status_code=401, detail="OAuth 用户标识与请求不匹配")
+
     user = db.query(User).filter(User.email == data.email.lower()).first()
     if user is None:
+        logger.warning(
+            "OAuth auto-register: provider={} email={} ip={} — "
+            "ensure OAuth callback verification is enabled on the frontend",
+            data.provider, _sanitize_for_log(data.email), client_ip,
+        )
         user = User(
             email=data.email.lower(),
             password_hash=None,
@@ -1420,6 +1649,8 @@ async def auth_login_oauth(data: OAuthLoginIn, response: Response, db: Session =
         db.commit()
         db.refresh(user)
     else:
+        if user.auth_provider and user.auth_provider != data.provider:
+            raise HTTPException(status_code=409, detail="该邮箱已使用其他方式注册")
         user.auth_provider = data.provider
         user.provider_user_id = data.provider_user_id
         if data.display_name:
@@ -1428,7 +1659,7 @@ async def auth_login_oauth(data: OAuthLoginIn, response: Response, db: Session =
         db.commit()
         db.refresh(user)
 
-    token = issue_access_token(str(user.id))
+    token = _issue_token_for_user(user)
     set_access_cookie(response, token)
 
     config = get_or_create_user_config(db, user.id)
@@ -1438,6 +1669,13 @@ async def auth_login_oauth(data: OAuthLoginIn, response: Response, db: Session =
 
 @app.post("/auth/login/otp/request")
 async def auth_login_otp_request(data: OTPRequestIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    async with _otp_lock:
+        if not _check_otp_rate_limit(data.email):
+            raise HTTPException(status_code=429, detail="验证码请求过于频繁，请10分钟后再试")
+
+    async with _otp_verify_lock:
+        _otp_verify_failures.pop(data.email.lower(), None)
+
     user = db.query(User).filter(User.email == data.email.lower(), User.is_active.is_(True)).first()
     code = _issue_challenge(db, data.email.lower(), "otp", user.id if user else None)
     try:
@@ -1451,12 +1689,27 @@ async def auth_login_otp_request(data: OTPRequestIn, db: Session = Depends(get_d
 
 @app.post("/auth/login/otp/verify")
 async def auth_login_otp_verify(data: OTPVerifyIn, response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
-    user = db.query(User).filter(User.email == data.email.lower(), User.is_active.is_(True)).first()
+    email_key = data.email.lower()
+    async with _otp_verify_lock:
+        failures = _otp_verify_failures.get(email_key, 0)
+        if failures >= OTP_VERIFY_MAX_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="验证码错误次数过多，请重新获取验证码")
+
+    user = db.query(User).filter(User.email == email_key, User.is_active.is_(True)).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在，请先注册")
 
-    _consume_valid_challenge(db, data.email.lower(), "otp", data.code)
-    token = issue_access_token(str(user.id))
+    try:
+        _consume_valid_challenge(db, email_key, "otp", data.code)
+    except HTTPException:
+        async with _otp_verify_lock:
+            _otp_verify_failures[email_key] = _otp_verify_failures.get(email_key, 0) + 1
+        raise
+
+    async with _otp_verify_lock:
+        _otp_verify_failures.pop(email_key, None)
+
+    token = _issue_token_for_user(user)
     set_access_cookie(response, token)
 
     config = get_or_create_user_config(db, user.id)
@@ -1466,6 +1719,13 @@ async def auth_login_otp_verify(data: OTPVerifyIn, response: Response, db: Sessi
 
 @app.post("/auth/password/reset/request")
 async def auth_password_reset_request(data: PasswordResetRequestIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    async with _otp_lock:
+        if not _check_otp_rate_limit(data.email):
+            raise HTTPException(status_code=429, detail="请求过于频繁，请10分钟后再试")
+
+    async with _otp_verify_lock:
+        _otp_verify_failures.pop(data.email.lower(), None)
+
     user = db.query(User).filter(User.email == data.email.lower(), User.is_active.is_(True)).first()
     if not user:
         return {"status": "ok", "message": "如果邮箱存在，验证码已发送"}
@@ -1483,12 +1743,32 @@ async def auth_password_reset_request(data: PasswordResetRequestIn, db: Session 
 
 @app.post("/auth/password/reset/confirm")
 async def auth_password_reset_confirm(data: PasswordResetConfirmIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    user = db.query(User).filter(User.email == data.email.lower(), User.is_active.is_(True)).first()
+    async with _otp_lock:
+        if not _check_otp_rate_limit(data.email):
+            raise HTTPException(status_code=429, detail="请求过于频繁，请10分钟后再试")
+
+    email_key = data.email.lower()
+    async with _otp_verify_lock:
+        failures = _otp_verify_failures.get(email_key, 0)
+        if failures >= OTP_VERIFY_MAX_ATTEMPTS:
+            raise HTTPException(status_code=429, detail="验证码错误次数过多，请重新获取验证码")
+
+    user = db.query(User).filter(User.email == email_key, User.is_active.is_(True)).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
 
-    _consume_valid_challenge(db, data.email.lower(), "reset", data.code)
+    try:
+        _consume_valid_challenge(db, email_key, "reset", data.code)
+    except HTTPException:
+        async with _otp_verify_lock:
+            _otp_verify_failures[email_key] = _otp_verify_failures.get(email_key, 0) + 1
+        raise
+
+    async with _otp_verify_lock:
+        _otp_verify_failures.pop(email_key, None)
+
     user.password_hash = hash_password(data.new_password)
+    user.password_changed_at = _now()
     db.add(user)
     db.commit()
     create_log(db, user_id=user.id, level="info", action="password_reset_confirm", detail="password reset")
@@ -1521,7 +1801,10 @@ async def get_user_config(
     user = get_current_user(db, access_token_cookie, authorization)
     config = get_or_create_user_config(db, user.id)
 
-    api_key_plain = decrypt_api_key(user.encrypted_api_key)
+    try:
+        api_key_plain = decrypt_api_key(user.encrypted_api_key)
+    except DecryptionError:
+        api_key_plain = None
     provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
     return {
         "ai_provider": provider,
@@ -1584,15 +1867,6 @@ async def put_user_config(
     db.commit()
     db.refresh(config)
 
-    runtime_input = LLMConfigIn(
-        ai_provider=provider,
-        api_key=decrypt_api_key(user.encrypted_api_key) or None,
-        base_url=config.base_url,
-        model=config.model,
-        timeout_seconds=config.timeout_seconds,
-    )
-    await update_runtime_llm_config(runtime_input)
-
     create_log(db, user_id=user.id, level="info", action="user_config_update", detail=json.dumps(log_payload, ensure_ascii=False))
     return {
         "status": "updated",
@@ -1606,7 +1880,7 @@ async def put_user_config(
             "ui_theme": config.ui_theme,
             "ui_density": config.ui_density,
             "has_api_key": bool(user.encrypted_api_key),
-            "api_key_masked": _mask_key(decrypt_api_key(user.encrypted_api_key)),
+            "api_key_masked": _mask_key(_safe_decrypt(user.encrypted_api_key)),
         },
     }
 
@@ -1651,6 +1925,9 @@ async def set_site_target(
     parsed = urlparse(normalized)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise HTTPException(status_code=422, detail="site target must be valid http(s) url")
+
+    if _is_url_pointing_to_internal(normalized):
+        raise HTTPException(status_code=422, detail="不允许监控内网地址")
 
     site_targets[user.id] = normalized
 
@@ -1702,11 +1979,16 @@ async def get_site_health(
 @app.post("/copilot/stream")
 async def copilot_stream(
     data: CopilotStreamIn,
+    request: Request,
     authorization: str | None = Header(default=None, alias="Authorization"),
     access_token_cookie: str | None = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
 ) -> StreamingResponse:
     user = get_current_user(db, access_token_cookie, authorization)
+    client_ip = _get_client_ip(request)
+    async with _copilot_lock:
+        if not _check_rate_limit(_copilot_attempts, client_ip, COPILOT_RATE_LIMIT_WINDOW, COPILOT_RATE_LIMIT_MAX):
+            raise HTTPException(status_code=429, detail="Copilot请求过于频繁，请1分钟后再试")
     config = get_or_create_user_config(db, user.id)
     runtime, provider = user_config_to_llm_runtime(config, user)
 
@@ -1748,10 +2030,10 @@ async def post_threat_confirm(
         raise HTTPException(status_code=404, detail="alert_id not found")
 
     await append_new_threat_csv(alert, data.label)
-    create_log(db, user_id=user.id, level="info", action="threat_confirm", detail=f"{data.alert_id}:{data.label}")
+    create_log(db, user_id=user.id, level="info", action="threat_confirm", detail=f"{data.alert_id}:{_sanitize_for_log(data.label)}")
     return {
         "status": "ok",
-        "saved_to": str(_new_threats_csv_path),
+        "saved_to": _new_threats_csv_path.name,
         "alert_id": data.alert_id,
         "label": data.label,
     }
@@ -1816,42 +2098,81 @@ async def put_llm_config(
 @app.post("/llm/test")
 async def post_llm_test(
     data: LLMConfigIn,
-    _: None = Depends(require_llm_admin_token),
+    request: Request,
+    user: User = Depends(require_auth_user),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    client_ip = _get_client_ip(request)
+    async with _llm_lock:
+        if not _check_rate_limit(_llm_attempts, client_ip, LLM_RATE_LIMIT_WINDOW, LLM_RATE_LIMIT_MAX):
+            raise HTTPException(status_code=429, detail="LLM测试请求过于频繁，请1分钟后再试")
+
     update = data.model_dump(exclude_none=True)
-    runtime = await get_runtime_llm_config()
+    config = get_or_create_user_config(db, user.id)
+    decrypted_key = _safe_decrypt(user.encrypted_api_key) or ""
 
-    provider = choose_provider(str(update.get("ai_provider", "custom")), str(update.get("model", runtime.model)), str(update.get("base_url", runtime.base_url)))
-    model = str(update.get("model", runtime.model)).strip() or runtime.model
-    if not model:
-        model = PROVIDER_MODEL_DEFAULTS[provider]
+    provider = choose_provider(
+        str(update.get("ai_provider", config.ai_provider)),
+        str(update.get("model", config.model)),
+        str(update.get("base_url", config.base_url)),
+    )
 
-    base_url = _validate_test_base_url(provider, str(update.get("base_url", runtime.base_url)))
-    api_key = _resolve_test_api_key(update, runtime)
+    model = str(update.get("model", config.model)).strip() or config.model
+    base_url = str(update.get("base_url", config.base_url)).strip() or config.base_url
+    timeout_seconds = int(update.get("timeout_seconds", config.timeout_seconds))
+
+    api_key = decrypted_key
+    if "api_key" in update:
+        api_key = str(update["api_key"] or "").strip() or decrypted_key
 
     test_config = AnalyzerConfig(
         api_key=api_key,
         base_url=base_url,
         model=model,
-        timeout_seconds=int(update.get("timeout_seconds", runtime.timeout_seconds)),
+        timeout_seconds=timeout_seconds,
+    )
+
+    logger.info(
+        "[LLM_TEST] user_id={} provider={} model={} base_url={} has_api_key={}",
+        user.id, provider, test_config.model,
+        test_config.base_url[:30] + "..." if len(test_config.base_url) > 30 else test_config.base_url,
+        bool(test_config.api_key),
     )
 
     if not test_config.api_key or not test_config.base_url:
-        raise HTTPException(status_code=400, detail="API Key and Base URL are required")
+        raise HTTPException(status_code=400, detail="API Key 和 Base URL 不能为空")
 
     if test_config.timeout_seconds < 1 or test_config.timeout_seconds > 300:
-        raise HTTPException(status_code=422, detail="timeout_seconds must be in 1..300")
+        raise HTTPException(status_code=422, detail="timeout_seconds 必须在 1-300 之间")
+
+    parsed_base = urlparse(test_config.base_url)
+    if parsed_base.scheme not in {"http", "https"} or not parsed_base.netloc:
+        raise HTTPException(status_code=422, detail="Base URL 格式无效")
 
     try:
-        result = await run_in_threadpool(test_llm_connection_by_provider, test_config, provider)
+        result = await test_llm_connection_by_provider(test_config, provider)
+        logger.info("[LLM_TEST] success user_id={} result={}", user.id, result)
+        create_log(
+            db,
+            user_id=user.id,
+            level="info",
+            action="llm_test",
+            detail=f"provider={provider};model={test_config.model}",
+        )
         return {"status": "ok", "provider": provider, "result": result}
+    except httpx.TimeoutException as exc:
+        logger.warning("[LLM_TEST] timeout user_id={} base_url={} exc={}", user.id, test_config.base_url, exc)
+        raise HTTPException(status_code=400, detail="连接超时，请检查网络或 Base URL 是否可达，或增加超时时间") from exc
+    except httpx.ConnectError as exc:
+        logger.warning("[LLM_TEST] connect_error user_id={} base_url={} exc={}", user.id, test_config.base_url, exc)
+        raise HTTPException(status_code=400, detail="无法连接到服务器，请检查 Base URL") from exc
+    except httpx.HTTPStatusError as exc:
+        logger.warning("[LLM_TEST] http_error user_id={} status={} body={}", user.id, exc.response.status_code, exc.response.text[:200])
+        raise HTTPException(status_code=400, detail=f"服务器返回错误 ({exc.response.status_code})，请检查 API Key 和模型名称") from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        logger.warning("[LLM_TEST] failure user_id={} exc_type={} exc={}", user.id, type(exc).__name__, exc)
+        raise HTTPException(status_code=400, detail="LLM 连接测试失败，请检查配置") from exc
 
-
-
-
-@app.api_route("/site/proxy/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
 async def site_proxy(
     path: str,
     request: Request,
@@ -1868,7 +2189,39 @@ async def site_proxy(
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise HTTPException(status_code=400, detail="受保护站点配置无效")
 
+    if _is_url_pointing_to_internal(target_base):
+        raise HTTPException(status_code=400, detail="受保护站点不允许指向内网地址")
+
+    # SECURITY: Multi-layer path traversal protection
+    decoded_path = path
+    # Decode up to 3 times to catch double/triple encoding
+    for _ in range(3):
+        new_decoded = unquote(decoded_path)
+        if new_decoded == decoded_path:
+            break
+        decoded_path = new_decoded
+
+    if ".." in decoded_path or ".." in path or "%2e" in path.lower() or "%2f" in path.lower() or "\\" in path or "\0" in decoded_path:
+        return JSONResponse(status_code=400, content={"detail": "无效的路径格式"})
+
+    # Validate path segments don't contain traversal after decoding
+    segments = [s for s in decoded_path.split("/") if s]
+    for seg in segments:
+        if seg == ".." or seg.startswith("..") or "/" in seg or "\\" in seg:
+            return JSONResponse(status_code=400, content={"detail": "无效的路径格式"})
+
     target_url = f"{target_base.rstrip('/')}/{path.lstrip('/')}"
+    resolved = urlparse(target_url)
+    if resolved.scheme not in {"http", "https"} or not resolved.netloc:
+        return JSONResponse(status_code=400, content={"detail": "无效的目标URL"})
+
+    # SECURITY: Ensure resolved URL doesn't escape the target base
+    resolved_target = urlparse(target_base)
+    target_path = (resolved_target.path or "/").rstrip("/")
+    path_ok = resolved.path == target_path or resolved.path == target_path + "/" or resolved.path.startswith(target_path + "/")
+    if resolved.hostname != resolved_target.hostname or not path_ok:
+        return JSONResponse(status_code=400, content={"detail": "无效的目标URL"})
+
     if request.url.query:
         target_url = f"{target_url}?{request.url.query}"
 
@@ -1885,8 +2238,8 @@ async def site_proxy(
             logger.warning("waf alert queue full, drop block alert source_ip={}", source_ip)
         elif replaced_oldest:
             logger.warning("waf alert queue full, evict oldest block alert source_ip={}", source_ip)
-        create_log(db, user_id=user.id, level="warning", action="waf_block", detail=f"ip={source_ip};path=/{path}")
-        return JSONResponse(status_code=403, content={"status": "blocked", "reason": "WAF policy matched"})
+        create_log(db, user_id=user.id, level="warning", action="waf_block", detail=f"ip={_sanitize_for_log(source_ip)}")
+        return JSONResponse(status_code=403, content={"status": "blocked", "reason": "Security policy violation"})
 
     headers = _build_proxy_headers(request)
     headers["X-Forwarded-For"] = _get_client_ip(request)
@@ -1901,12 +2254,13 @@ async def site_proxy(
                 content=body_bytes if body_bytes else None,
             )
     except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"upstream request failed: {exc}") from exc
+        logger.warning("site_proxy upstream error: {}", exc)
+        raise HTTPException(status_code=502, detail="上游服务不可用") from exc
 
     response_headers = {
         key: value
         for key, value in upstream.headers.items()
-        if key.lower() not in HOP_BY_HOP_HEADERS
+        if key.lower() not in HOP_BY_HOP_HEADERS and key.lower() not in UPSTREAM_STRIP_RESPONSE_HEADERS
     }
     return Response(content=upstream.content, status_code=upstream.status_code, headers=response_headers)
 
@@ -1929,7 +2283,6 @@ async def receive_alert(
         "status": "accepted",
         "queued": True,
         "received_at": time.time(),
-        "queue_size": _alert_queue.qsize(),
         "replaced_oldest": replaced_oldest,
     }
 
@@ -1945,7 +2298,6 @@ async def get_alerts(
     return {
         "items": user_items[-bounded:],
         "count": len(user_items),
-        "queue_size": _alert_queue.qsize(),
     }
 
 
@@ -1954,22 +2306,25 @@ async def ws_alerts(websocket: WebSocket) -> None:
     token = websocket.headers.get("authorization")
     cookie_text = websocket.headers.get("cookie", "")
     access_token_cookie: str | None = None
-    for item in cookie_text.split(";"):
-        entry = item.strip()
-        if entry.startswith("access_token="):
-            access_token_cookie = entry.split("=", 1)[1].strip() or None
-            break
 
-    db = SessionLocal()
-    user: User | None = None
+    # SECURITY: Use SimpleCookie for robust cookie parsing with proper decoding
     try:
-        user = get_current_user(db, access_token_cookie, token)
-    except HTTPException:
-        db.close()
-        await websocket.close(code=1008)
-        return
-    finally:
-        db.close()
+        from http.cookies import SimpleCookie
+        cookie = SimpleCookie()
+        cookie.load(cookie_text)
+        if "access_token" in cookie:
+            access_token_cookie = cookie["access_token"].value or None
+    except Exception:
+        # Fallback only for malformed cookie strings, not for parsing logic errors
+        access_token_cookie = None
+
+    with SessionLocal() as db:
+        user: User | None = None
+        try:
+            user = get_current_user(db, access_token_cookie, token)
+        except HTTPException:
+            await websocket.close(code=1008)
+            return
 
     if user is None:
         await websocket.close(code=1008)

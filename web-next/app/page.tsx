@@ -1,294 +1,678 @@
 "use client";
 
-import { useMemo, useState, type MouseEvent } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { getSession, signIn, signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import { Eye, EyeOff, Shield, Mail, Lock, Terminal, Fingerprint, ArrowRight, UserPlus, KeyRound, ChevronLeft } from "lucide-react";
+import AnimatedCharacters from "./components/animated-characters/AnimatedCharacters";
+
+type AuthMode = "login" | "register" | "forgot" | "reset";
+type LoginState = "idle" | "loading" | "success" | "error";
 
 function getLoginErrorMessage(errorCode: string): string {
-  if (errorCode === "CredentialsSignin") {
-    return "登录失败：邮箱或密码错误";
-  }
-  if (errorCode === "Configuration") {
-    return "登录失败：认证服务暂不可用，请稍后重试";
-  }
-  return "登录失败：请稍后重试";
+  if (errorCode === "CredentialsSignin") return "凭证验证失败";
+  if (errorCode === "Configuration") return "认证服务不可用";
+  return "请稍后重试";
 }
 
-type LoginState = "idle" | "loading" | "success" | "error";
+function sanitizeBackendError(detail: string): string {
+  if (detail.includes("already") || detail.includes("已存在") || detail.includes("exists")) return "该邮箱已注册";
+  if (detail.includes("weak") || detail.includes("强度")) return "密码强度不足";
+  if (detail.includes("invalid") || detail.includes("无效")) return "输入信息无效";
+  if (detail.includes("expired") || detail.includes("过期")) return "验证码已过期，请重新获取";
+  if (detail.includes("rate") || detail.includes("频繁")) return "请求过于频繁，请稍后重试";
+  return "操作失败，请稍后重试";
+}
 
 async function waitForSessionReady(maxAttempts = 8, intervalMs = 250): Promise<boolean> {
   for (let i = 0; i < maxAttempts; i += 1) {
     const session = await getSession();
-    if (session?.user) {
-      return true;
-    }
-    await new Promise((resolve) => {
-      window.setTimeout(resolve, intervalMs);
-    });
+    if (session?.user) return true;
+    await new Promise((resolve) => window.setTimeout(resolve, intervalMs));
   }
   return false;
+}
+
+// Matrix Rain Component
+function MatrixRain() {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const chars = "01アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン";
+    const fontSize = 14;
+    const columns = canvas.width / fontSize;
+    const drops: number[] = Array(Math.floor(columns)).fill(1);
+
+    const draw = () => {
+      ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = "#00ff41";
+      ctx.font = `${fontSize}px monospace`;
+
+      drops.forEach((drop, i) => {
+        const char = chars[Math.floor(Math.random() * chars.length)];
+        ctx.fillText(char, i * fontSize, drop * fontSize);
+
+        if (drop * fontSize > canvas.height && Math.random() > 0.975) {
+          drops[i] = 0;
+        }
+        drops[i] += 1;
+      });
+    };
+
+    const interval = setInterval(draw, 35);
+
+    const handleResize = () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+    };
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} className="fixed inset-0 z-0 opacity-30" />;
+}
+
+// Circuit Board Background
+function CircuitBackground() {
+  return (
+    <div className="fixed inset-0 z-0 opacity-10 pointer-events-none">
+      <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="circuit" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
+            <path d="M10 10 L30 10 L30 30 L50 30" fill="none" stroke="#00ff41" strokeWidth="0.5" />
+            <circle cx="10" cy="10" r="2" fill="#00ff41" />
+            <circle cx="30" cy="30" r="2" fill="#00ff41" />
+            <circle cx="50" cy="30" r="2" fill="#00ff41" />
+            <path d="M60 60 L80 60 L80 80 L100 80" fill="none" stroke="#9d4edd" strokeWidth="0.5" />
+            <circle cx="60" cy="60" r="2" fill="#9d4edd" />
+            <circle cx="80" cy="80" r="2" fill="#9d4edd" />
+          </pattern>
+        </defs>
+        <rect width="100%" height="100%" fill="url(#circuit)" />
+      </svg>
+    </div>
+  );
+}
+
+// Glitch Text Effect
+function GlitchText({ text, className = "" }: { text: string; className?: string }) {
+  return (
+    <div className={`relative inline-block ${className}`}>
+      <span className="relative z-10">{text}</span>
+      <span className="absolute top-0 left-0 text-red-500/40" style={{ clipPath: "inset(0 0 55% 0)", transform: "translateX(1px)" }}>
+        {text}
+      </span>
+      <span className="absolute top-0 left-0 text-cyan-400/40" style={{ clipPath: "inset(55% 0 0 0)", transform: "translateX(-1px)" }}>
+        {text}
+      </span>
+    </div>
+  );
+}
+
+// Iris Scanner Component
+function IrisScanner({ scanning }: { scanning: boolean }) {
+  return (
+    <div className="relative w-24 h-24 mx-auto mb-4">
+      <div className={`absolute inset-0 rounded-full border-2 ${scanning ? "border-cyan-400 animate-pulse" : "border-cyan-900"}`}>
+        <div className={`absolute inset-2 rounded-full border ${scanning ? "border-cyan-300" : "border-cyan-950"}`} />
+        <div className={`absolute inset-4 rounded-full border-2 ${scanning ? "border-cyan-200" : "border-cyan-950"}`} />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Fingerprint className={`w-8 h-8 ${scanning ? "text-cyan-400 animate-pulse" : "text-cyan-800"}`} />
+        </div>
+      </div>
+      {scanning && (
+        <div className="absolute inset-0 rounded-full bg-cyan-400/10 animate-ping" />
+      )}
+      <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-mono text-cyan-600">
+        {scanning ? "扫描中..." : "待命"}
+      </div>
+    </div>
+  );
+}
+
+// Terminal Input Component
+function TerminalInput({
+  type,
+  value,
+  onChange,
+  placeholder,
+  icon: Icon,
+  showToggle,
+  showValue,
+  onToggle,
+  onFocus,
+  onBlur,
+  maxLength,
+  inputMode,
+  autoComplete,
+}: {
+  type: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  icon: React.ElementType;
+  showToggle?: boolean;
+  showValue?: boolean;
+  onToggle?: () => void;
+  onFocus?: () => void;
+  onBlur?: () => void;
+  maxLength?: number;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
+  autoComplete?: string;
+}) {
+  return (
+    <div className="relative group">
+      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-cyan-700 group-focus-within:text-cyan-400 transition-colors">
+        <Icon className="w-4 h-4" />
+      </div>
+      <div className="absolute left-8 top-1/2 -translate-y-1/2 text-cyan-600 font-mono text-sm pointer-events-none">
+        {">"}
+      </div>
+      <input
+        type={showToggle ? (showValue ? "text" : "password") : type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        className="w-full h-12 pl-12 pr-10 bg-black/60 border border-cyan-900/50 rounded text-cyan-400 font-mono text-sm placeholder:text-cyan-900 focus:outline-none focus:border-cyan-500 focus:shadow-[0_0_15px_rgba(0,255,255,0.2)] transition-all"
+        placeholder={placeholder}
+        maxLength={maxLength}
+        inputMode={inputMode}
+        autoComplete={autoComplete}
+      />
+      {showToggle && onToggle && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-700 hover:text-cyan-400 transition-colors"
+        >
+          {showValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        </button>
+      )}
+      <div className="absolute bottom-0 left-0 h-px w-0 group-focus-within:w-full bg-cyan-400 transition-all duration-500" />
+    </div>
+  );
 }
 
 export default function HomePage() {
   const { data: session, status } = useSession();
   const router = useRouter();
+  const [mode, setMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [otpCode, setOtpCode] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [loginState, setLoginState] = useState<LoginState>("idle");
-  const [eyePos, setEyePos] = useState({ x: 0, y: 0 });
+  const [isTyping, setIsTyping] = useState(false);
+  const [scanning, setScanning] = useState(false);
+  const [activeCharacter, setActiveCharacter] = useState<string | null>(null);
+  const hexStreamRef = useRef<HTMLDivElement>(null);
+  const [lockedResetEmail, setLockedResetEmail] = useState("");
 
   const isAuthenticated = status === "authenticated";
-  const canUseGitHub = Boolean(process.env.NEXT_PUBLIC_AUTH_GITHUB_ENABLED === "true");
-  const canUseGoogle = Boolean(process.env.NEXT_PUBLIC_AUTH_GOOGLE_ENABLED === "true");
 
-  const statusText = useMemo(() => {
-    if (status === "loading") {
-      return "正在检查会话...";
-    }
+  // Auto-redirect to dashboard when already authenticated
+  useEffect(() => {
     if (isAuthenticated) {
-      return `已登录：${session?.user?.email || "unknown"}`;
-    }
-    return "未登录";
-  }, [status, isAuthenticated, session?.user?.email]);
-
-  function handleMouseMove(event: MouseEvent<HTMLDivElement>) {
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = ((event.clientX - rect.left) / rect.width - 0.5) * 10;
-    const y = ((event.clientY - rect.top) / rect.height - 0.5) * 10;
-    setEyePos({ x, y });
-  }
-
-  async function handleCredentialsLogin(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setLoading(true);
-    setLoginState("loading");
-    setMessage("");
-
-    try {
-      const result = await signIn("credentials", {
-        email,
-        password,
-        redirect: false,
-      });
-
-      if (result?.error) {
-        setLoginState("error");
-        setMessage(getLoginErrorMessage(result.error));
-        return;
-      }
-
-      if (!result?.ok) {
-        setLoginState("error");
-        setMessage("登录失败：认证流程未完成");
-        return;
-      }
-
-      const ready = await waitForSessionReady();
-      if (!ready) {
-        setLoginState("error");
-        setMessage("登录失败：会话未建立，请重试");
-        return;
-      }
-
-      setLoginState("success");
-      setMessage("登录成功，正在进入控制台...");
       router.push("/dashboard");
-      router.refresh();
-    } catch {
-      setLoginState("error");
-      setMessage("登录失败：请稍后重试");
-    } finally {
-      setLoading(false);
     }
-  }
+  }, [isAuthenticated, router]);
 
-  async function handleOAuthLogin(provider: "github" | "google") {
-    const providerEnabled = provider === "github" ? canUseGitHub : canUseGoogle;
-    if (!providerEnabled) {
-      setLoginState("error");
-      setMessage(`登录失败：${provider === "github" ? "GitHub" : "Google"} OAuth 未配置`);
-      return;
-    }
+  // Generate hex stream effect
+  useEffect(() => {
+    const el = hexStreamRef.current;
+    if (!el) return;
+    const interval = setInterval(() => {
+      const hex = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16).toUpperCase()).join("");
+      el.textContent = hex;
+    }, 100);
+    return () => clearInterval(interval);
+  }, []);
 
-    setMessage("");
-    setLoginState("loading");
-    await signIn(provider, { callbackUrl: "/dashboard" });
-  }
+  const handleCredentialsLogin = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      setLoading(true);
+      setLoginState("loading");
+      setMessage("");
+      setScanning(true);
 
-  async function handleLogout() {
+      try {
+        const result = await signIn("credentials", { email, password, redirect: false });
+
+        if (result?.error) {
+          setLoginState("error");
+          setMessage(getLoginErrorMessage(result.error));
+          setScanning(false);
+          return;
+        }
+
+        if (!result?.ok) {
+          setLoginState("error");
+          setMessage("认证流程未完成");
+          setScanning(false);
+          return;
+        }
+
+        const ready = await waitForSessionReady();
+        if (!ready) {
+          setLoginState("error");
+          setMessage("会话未建立，请刷新页面重试");
+          setScanning(false);
+          return;
+        }
+
+        setLoginState("success");
+        setMessage("验证通过，正在进入系统...");
+        setTimeout(() => {
+          router.push("/dashboard");
+          router.refresh();
+        }, 1000);
+      } catch {
+        setLoginState("error");
+        setMessage("请稍后重试");
+        setScanning(false);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [email, password, router]
+  );
+
+  const handleRegister = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (password !== confirmPassword) {
+        setMessage("密码不匹配");
+        return;
+      }
+      setLoading(true);
+      setMessage("");
+
+      try {
+        const res = await fetch("/api/backend/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password, display_name: displayName || undefined }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          setMessage(`REGISTRATION_FAILED: ${sanitizeBackendError(data.detail || "")}`);
+          return;
+        }
+
+        setMessage("REGISTRATION_SUCCESS: 用户已创建，请登录");
+        setTimeout(() => setMode("login"), 1500);
+      } catch {
+        setMessage("NETWORK_ERROR: 注册请求失败");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [email, password, confirmPassword, displayName]
+  );
+
+  const handleForgotPassword = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      setLoading(true);
+      setMessage("");
+
+      try {
+        const res = await fetch("/api/backend/auth/password/reset/request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          setMessage(`REQUEST_FAILED: ${sanitizeBackendError(data.detail || "")}`);
+          return;
+        }
+
+        setMessage("验证码已发送至邮箱");
+        setLockedResetEmail(email);
+        setMode("reset");
+      } catch {
+        setMessage("NETWORK_ERROR: 请求失败");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [email]
+  );
+
+  const handleResetPassword = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (!/^\d{4,6}$/.test(otpCode)) {
+        setMessage("验证码必须为4-6位数字");
+        return;
+      }
+      if (password !== confirmPassword) {
+        setMessage("密码不匹配");
+        return;
+      }
+      setLoading(true);
+      setMessage("");
+
+      try {
+        const res = await fetch("/api/backend/auth/password/reset/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: lockedResetEmail || email, code: otpCode, new_password: password }),
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          setMessage(`RESET_FAILED: ${sanitizeBackendError(data.detail || "")}`);
+          return;
+        }
+
+        setMessage("RESET_SUCCESS: 密码已重置，请登录");
+        setTimeout(() => setMode("login"), 1500);
+      } catch {
+        setMessage("NETWORK_ERROR: 重置请求失败");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [email, lockedResetEmail, otpCode, password, confirmPassword]
+  );
+
+  const handleLogout = useCallback(async () => {
     await signOut({ redirect: false });
-    setMessage("已退出");
+    setMessage("SESSION_TERMINATED: 已退出");
     setLoginState("idle");
     router.refresh();
+  }, [router]);
+
+  const switchMode = (newMode: AuthMode) => {
+    setMode(newMode);
+    setMessage("");
+    setLoginState("idle");
+    setScanning(false);
+  };
+
+  if (isAuthenticated) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-black relative overflow-hidden">
+        <MatrixRain />
+        <CircuitBackground />
+        <div className="relative z-10 bg-black/80 border border-cyan-900/50 p-8 rounded-lg shadow-[0_0_40px_rgba(0,255,255,0.1)] max-w-md w-full mx-4 backdrop-blur-sm">
+          <div className="text-center mb-6">
+            <div className="w-16 h-16 bg-cyan-900/30 rounded-full flex items-center justify-center mx-auto mb-4 border border-cyan-500/30">
+              <Shield className="w-8 h-8 text-cyan-400" />
+            </div>
+            <h2 className="text-2xl font-bold text-cyan-400 font-mono mb-2">SESSION_ACTIVE</h2>
+            <p className="text-cyan-700 font-mono text-sm">{session?.user?.email || "unknown"}</p>
+          </div>
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={() => router.push("/dashboard")}
+              className="w-full bg-cyan-900/50 hover:bg-cyan-800/50 text-cyan-400 font-mono py-3 px-4 rounded border border-cyan-700/50 transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,255,255,0.2)]"
+            >
+              $ cd /dashboard
+            </button>
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="w-full bg-red-900/20 hover:bg-red-900/30 text-red-400 font-mono py-3 px-4 rounded border border-red-800/30 transition-all duration-300"
+            >
+              $ logout
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div
-      className="min-h-screen w-full flex flex-col items-center justify-center p-4 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#111] via-cyber-bg to-cyber-bg"
-      onMouseMove={handleMouseMove}
-    >
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <section className="bg-black/40 backdrop-blur-lg border border-cyber-cyan/40 p-8 shadow-neon-cyan rounded-lg">
-          <div className="mb-8">
-            <h1 className="text-3xl font-bold tracking-widest text-cyber-cyan uppercase">
-              AI-CyberSentinel <span className="text-cyber-orange">Auth</span>
-            </h1>
-            <p className="text-cyber-text/70 text-sm mt-2">{statusText}</p>
-            <p className="text-cyber-text/50 text-xs mt-1">NextAuth.js 前端鉴权层，后端会话与用户配置由 FastAPI 维护。</p>
+    <div className="min-h-screen w-full flex bg-black relative overflow-hidden">
+      <MatrixRain />
+      <CircuitBackground />
+
+      {/* Floating hex stream */}
+      <div ref={hexStreamRef} className="fixed top-4 left-4 z-20 font-mono text-xs text-cyan-900/40 break-all max-w-xs pointer-events-none" />
+
+      {/* Left Panel - Characters */}
+      <div className="hidden lg:flex lg:w-1/2 relative flex-col justify-end items-center pb-12 z-10 pointer-events-auto">
+        <div className="absolute top-12 left-12 z-20 flex items-center gap-3">
+          <div className="w-10 h-10 rounded-lg bg-cyan-900/30 border border-cyan-500/30 flex items-center justify-center backdrop-blur-sm">
+            <Shield className="w-5 h-5 text-cyan-400" />
           </div>
+          <span className="text-cyan-400 text-xl font-bold tracking-wide font-mono">AI-CyberSentinel</span>
+        </div>
 
-          <div className="flex justify-center mb-8">
-            <svg viewBox="0 0 220 220" className="w-48 h-48 overflow-visible drop-shadow-[0_0_15px_rgba(0,245,255,0.3)]">
-              <g id="blue-data-core" fill="#0055FF">
-                <circle cx="110" cy="110" r="76" opacity="0.15" className="animate-pulse" />
-                <circle cx="110" cy="110" r="52" opacity="0.28" />
-              </g>
+        <AnimatedCharacters
+          isTyping={isTyping}
+          showPassword={showPassword}
+          passwordLength={password.length}
+          activeCharacter={activeCharacter}
+        />
 
-              <g id="yellow-crypto-module" fill="#EAB308">
-                <rect x="78" y="164" width="64" height="18" rx="6" />
-                {loginState === "loading" ? <rect x="90" y="170" width="40" height="6" rx="3" fill="#00F5FF" /> : null}
-              </g>
+        <div className="absolute bottom-4 left-12 z-20 flex items-center gap-6">
+          <span className="text-cyan-800 text-xs font-mono">SECURE_TERMINAL_V2.4.1</span>
+          <span className="text-cyan-800 text-xs font-mono">ENCRYPTION: AES-256</span>
+        </div>
+      </div>
 
-              <g id="purple-hacker-drone" fill="#A855F7">
-                <rect x="38" y="36" width="144" height="22" rx="2" />
-                <rect x="50" y="30" width="22" height="6" fill="#00F5FF" />
-                <rect x="148" y="30" width="22" height="6" fill="#00F5FF" />
-                {loginState === "error" ? (
-                  <rect x="104" y="44" width="12" height="4" fill="#FF8A00" />
-                ) : (
-                  <rect x="104" y="44" width="12" height="4" fill="#00F5FF" />
-                )}
-              </g>
-
-              <g id="orange-cyborg-head" fill="#FF8A00">
-                <path d="M66 66 L154 66 L166 130 L110 156 L54 130 Z" stroke="#050505" strokeWidth="2" />
-                <rect x="94" y="136" width="32" height="6" fill="#050505" />
-
-                <g className="transition-all duration-100 ease-out">
-                  <rect x={72 + eyePos.x} y={84 + eyePos.y} width="26" height={showPassword ? 18 : 5} fill="#00F5FF" />
-                  <rect x={122 + eyePos.x} y={84 + eyePos.y} width="26" height={showPassword ? 18 : 5} fill="#00F5FF" />
-                </g>
-
-                {loginState === "success" ? (
-                  <rect x="96" y="122" width="28" height="4" fill="#00F5FF" />
-                ) : loginState === "error" ? (
-                  <rect x="96" y="128" width="28" height="4" fill="#F43F5E" />
-                ) : null}
-              </g>
-            </svg>
-          </div>
-
-          {isAuthenticated ? (
-            <div className="space-y-4">
-              <button
-                type="button"
-                className="w-full bg-cyber-cyan/10 border border-cyber-cyan text-cyber-cyan hover:bg-cyber-cyan hover:text-cyber-bg font-bold py-2 px-4 transition-all duration-300"
-                onClick={() => router.push("/dashboard")}
-              >
-                进入控制台
-              </button>
-              <button
-                type="button"
-                className="w-full border border-cyber-orange text-cyber-orange hover:bg-cyber-orange hover:text-white py-2 text-sm transition-all"
-                onClick={handleLogout}
-              >
-                退出
-              </button>
+      {/* Right Panel - Terminal Window */}
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12 relative z-20">
+        <div className="w-full max-w-lg">
+          {/* Mobile Logo */}
+          <div className="lg:hidden flex items-center justify-center gap-2 mb-8">
+            <div className="w-8 h-8 rounded-lg bg-cyan-900/30 border border-cyan-500/30 flex items-center justify-center">
+              <Shield className="w-4 h-4 text-cyan-400" />
             </div>
-          ) : (
-            <form onSubmit={handleCredentialsLogin} className="space-y-5">
-              <div>
-                <label className="block text-xs text-cyber-cyan mb-1 uppercase tracking-wider">邮箱</label>
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  className="w-full bg-cyber-bg/50 border border-cyber-cyan/30 text-cyber-text p-2 focus:outline-none focus:border-cyber-cyan focus:shadow-neon-cyan transition-all rounded"
-                  placeholder="operator@nexus.com"
-                />
-              </div>
+            <span className="text-lg font-bold text-cyan-400 font-mono">AI-CyberSentinel</span>
+          </div>
 
-              <div>
-                <label className="block text-xs text-cyber-cyan mb-1 uppercase tracking-wider">密码</label>
-                <div className="relative">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    required
-                    value={password}
-                    onChange={(event) => setPassword(event.target.value)}
-                    className="w-full bg-cyber-bg/50 border border-cyber-cyan/30 text-cyber-text p-2 pr-10 focus:outline-none focus:border-cyber-cyan focus:shadow-neon-cyan transition-all rounded"
-                    placeholder="••••••••"
-                  />
-                  <button
-                    type="button"
-                    className="absolute right-2 top-2 text-cyber-cyan hover:text-cyber-orange transition-colors"
-                    onClick={() => setShowPassword(!showPassword)}
-                    aria-label={showPassword ? "隐藏密码" : "显示密码"}
-                  >
-                    {showPassword ? "隐" : "显"}
-                  </button>
-                </div>
-              </div>
+          {/* Terminal Header */}
+          <div className="bg-cyan-950/80 border border-cyan-800/50 rounded-t-lg px-4 py-2 flex items-center justify-between backdrop-blur-sm">
+          <div className="flex items-center gap-2">
+            <Terminal className="w-4 h-4 text-cyan-400" />
+            <span className="text-cyan-400 font-mono text-sm">auth_terminal.exe</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <div className="w-3 h-3 rounded-full bg-red-500/50" />
+            <div className="w-3 h-3 rounded-full bg-yellow-500/50" />
+            <div className="w-3 h-3 rounded-full bg-green-500/50" />
+          </div>
+        </div>
 
-              {message ? (
-                <div
-                  className={`text-xs text-center font-bold tracking-wide border p-2 ${
-                    loginState === "error"
-                      ? "text-red-400 border-red-500/50 bg-red-500/10"
-                      : "text-cyber-cyan border-cyber-cyan/50 bg-cyber-cyan/10"
-                  }`}
+        {/* Terminal Body */}
+        <div className="bg-black/90 border-x border-b border-cyan-800/50 rounded-b-lg p-6 backdrop-blur-sm shadow-[0_0_60px_rgba(0,255,255,0.08)]">
+          {/* Iris Scanner */}
+          <IrisScanner scanning={scanning} />
+
+          {/* Title */}
+          <div className="text-center mb-6">
+            <GlitchText
+              text={mode === "login" ? "身份验证" : mode === "register" ? "新用户注册" : mode === "forgot" ? "密码找回" : "重置密码"}
+              className="text-xl font-bold text-cyan-400 font-mono"
+            />
+            <div className="text-cyan-700 font-mono text-xs mt-2">
+              {mode === "login" && "安全访问终端 V2.4.1"}
+              {mode === "register" && "创建新凭证"}
+              {mode === "forgot" && "身份验证已启用"}
+              {mode === "reset" && "输入新认证密钥"}
+            </div>
+          </div>
+
+          {/* Form */}
+          <form
+            onSubmit={
+              mode === "login"
+                ? handleCredentialsLogin
+                : mode === "register"
+                ? handleRegister
+                : mode === "forgot"
+                ? handleForgotPassword
+                : handleResetPassword
+            }
+            className="space-y-4"
+          >
+            {mode === "register" && (
+              <TerminalInput
+                type="text"
+                value={displayName}
+                onChange={setDisplayName}
+                placeholder="输入昵称"
+                icon={Terminal}
+                onFocus={() => setIsTyping(true)}
+                onBlur={() => setIsTyping(false)}
+              />
+            )}
+
+            <TerminalInput
+              type="email"
+              value={mode === "reset" && lockedResetEmail ? lockedResetEmail : email}
+              onChange={mode === "reset" && lockedResetEmail ? () => {} : setEmail}
+              placeholder="输入邮箱地址"
+              icon={Mail}
+              onFocus={() => setIsTyping(true)}
+              onBlur={() => setIsTyping(false)}
+            />
+
+            {mode === "reset" && (
+              <TerminalInput
+                type="text"
+                value={otpCode}
+                onChange={(v: string) => setOtpCode(v.replace(/\D/g, "").slice(0, 6))}
+                placeholder="输入验证码 (4-6位数字)"
+                icon={KeyRound}
+                onFocus={() => setIsTyping(true)}
+                onBlur={() => setIsTyping(false)}
+                maxLength={6}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+              />
+            )}
+
+            {(mode === "login" || mode === "register" || mode === "reset") && (
+              <TerminalInput
+                type="password"
+                value={password}
+                onChange={setPassword}
+                placeholder="输入密码"
+                icon={Lock}
+                showToggle
+                showValue={showPassword}
+                onToggle={() => setShowPassword(!showPassword)}
+              />
+            )}
+
+            {(mode === "register" || mode === "reset") && (
+              <TerminalInput
+                type="password"
+                value={confirmPassword}
+                onChange={setConfirmPassword}
+                placeholder="确认密码"
+                icon={Lock}
+                showToggle
+                showValue={showPassword}
+                onToggle={() => setShowPassword(!showPassword)}
+              />
+            )}
+
+            {/* Message */}
+            {message && (
+              <div
+                className={`text-xs font-mono px-3 py-2 rounded border ${
+                  loginState === "error" || message.includes("失败") || message.includes("错误")
+                    ? "text-red-400 bg-red-950/30 border-red-800/50"
+                    : message.includes("成功") || message.includes("通过")
+                    ? "text-green-400 bg-green-950/30 border-green-800/50"
+                    : "text-yellow-400 bg-yellow-950/30 border-yellow-800/50"
+                }`}
+              >
+                <span className="opacity-50">{`>`}</span> {message}
+              </div>
+            )}
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={loading || loginState === "success"}
+              className="w-full h-12 bg-cyan-900/40 hover:bg-cyan-800/50 text-cyan-400 font-mono text-sm rounded border border-cyan-700/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(0,255,255,0.15)] flex items-center justify-center gap-2 group"
+            >
+              <span>{loading ? "处理中..." : loginState === "success" ? "验证通过" : "执行"}</span>
+              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+            </button>
+          </form>
+
+          {/* Mode Switch Links */}
+          <div className="mt-6 pt-4 border-t border-cyan-900/30 space-y-2">
+            {mode === "login" && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => switchMode("register")}
+                  className="w-full text-left text-cyan-700 hover:text-cyan-400 font-mono text-xs transition-colors flex items-center gap-2"
                 >
-                  {message}
-                </div>
-              ) : null}
+                  <UserPlus className="w-3 h-3" />
+                  <span>{`>`} 新用户注册</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchMode("forgot")}
+                  className="w-full text-left text-cyan-700 hover:text-cyan-400 font-mono text-xs transition-colors flex items-center gap-2"
+                >
+                  <KeyRound className="w-3 h-3" />
+                  <span>{`>`} 密码找回</span>
+                </button>
+              </>
+            )}
 
-              <button
-                type="submit"
-                disabled={loading || loginState === "success"}
-                className="w-full bg-cyber-cyan/10 border border-cyber-cyan text-cyber-cyan hover:bg-cyber-cyan hover:text-cyber-bg font-bold py-2 px-4 transition-all duration-300 disabled:opacity-50"
-              >
-                {loading ? "登录中..." : loginState === "success" ? "已授权" : "登录"}
-              </button>
-            </form>
-          )}
-        </section>
-
-        {!isAuthenticated ? (
-          <section className="bg-black/40 backdrop-blur-lg border border-cyber-purple/40 p-8 rounded-lg">
-            <h3 className="text-cyber-purple uppercase tracking-wider text-sm mb-4">OAuth 登录（FastAPI /auth/login/oauth）</h3>
-            <div className="flex gap-4">
+            {(mode === "register" || mode === "forgot" || mode === "reset") && (
               <button
                 type="button"
-                onClick={() => handleOAuthLogin("github")}
-                title={canUseGitHub ? "" : "请配置 AUTH_GITHUB_ID/AUTH_GITHUB_SECRET"}
-                className={`flex-1 border border-cyber-purple py-2 text-sm transition-all text-center ${
-                  canUseGitHub
-                    ? "text-cyber-purple hover:bg-cyber-purple hover:text-white"
-                    : "text-cyber-purple/50 hover:bg-cyber-purple/20"
-                }`}
+                onClick={() => switchMode("login")}
+                className="w-full text-left text-cyan-700 hover:text-cyan-400 font-mono text-xs transition-colors flex items-center gap-2"
               >
-                GitHub 登录
+                <ChevronLeft className="w-3 h-3" />
+                <span>{`>`} 返回登录</span>
               </button>
-              <button
-                type="button"
-                onClick={() => handleOAuthLogin("google")}
-                title={canUseGoogle ? "" : "请配置 AUTH_GOOGLE_ID/AUTH_GOOGLE_SECRET"}
-                className={`flex-1 border border-cyber-orange py-2 text-sm transition-all text-center ${
-                  canUseGoogle
-                    ? "text-cyber-orange hover:bg-cyber-orange hover:text-white"
-                    : "text-cyber-orange/50 hover:bg-cyber-orange/20"
-                }`}
-              >
-                Google 登录
-              </button>
+            )}
+          </div>
+
+          {/* Character selector hint */}
+          <div className="mt-4 text-center">
+            <div className="text-cyan-900 font-mono text-[10px]">
+              点击守护者查看状态
             </div>
-            <p className="small mt-4 text-cyber-text/50">若按钮不可用，请在 web-next/.env.local 中配置对应 OAuth 变量。</p>
-          </section>
-        ) : null}
+          </div>
+        </div>
+
+          {/* Bottom status bar */}
+          <div className="mt-2 flex items-center justify-between text-cyan-900 font-mono text-[10px]">
+            <span>加密: AES-256-GCM</span>
+            <span className="animate-pulse">● 系统在线</span>
+            <span>协议: HTTPS/TLS1.3</span>
+          </div>
+        </div>
       </div>
     </div>
   );

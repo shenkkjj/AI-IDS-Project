@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, LogOut } from "lucide-react";
+import { signOut } from "next-auth/react";
 import CyberSidebar from "@/components/dashboard/CyberSidebar";
 import StatsCards from "@/components/dashboard/StatsCards";
 import AttackLogTable from "@/components/dashboard/AttackLogTable";
@@ -114,13 +115,29 @@ const NAV_ITEMS: { key: RouteKey; label: string; icon: string }[] = [
   { key: "report", label: "安全日报", icon: "05" },
 ];
 
-const PROVIDERS = ["openai", "claude", "gemini", "grok", "custom"] as const;
+const PROVIDERS = ["custom"] as const;
+
+type ProviderValue = (typeof PROVIDERS)[number];
+
+function normalizeProviderForDraft(value: string | undefined): ProviderValue {
+  return PROVIDERS.includes(value as ProviderValue) ? (value as ProviderValue) : "custom";
+}
+
+function hasSupportedProvider(value: string | undefined): value is ProviderValue {
+  return PROVIDERS.includes(value as ProviderValue);
+}
 
 function formatLoadError(message: string): string {
   if (message.includes("401")) {
     return "会话失效，请重新登录";
   }
-  return `配置同步失败：${message}`;
+  if (message.includes("403") || message.includes("blocked")) {
+    return "请求被拒绝，请稍后重试";
+  }
+  if (message.includes("429") || message.includes("rate")) {
+    return "请求过于频繁，请稍后重试";
+  }
+  return "操作失败，请稍后重试";
 }
 
 function parseRisk(riskLevel: string | undefined): AlertRisk {
@@ -405,12 +422,15 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
 
   const [config, setConfig] = useState<PersistedUserConfig | null>(null);
   const [configDraft, setConfigDraft] = useState<ConfigDraft>({
-    ai_provider: "openai",
-    model: "gpt-4o-mini",
+    ai_provider: normalizeProviderForDraft(undefined),
+    model: "",
     base_url: "",
     api_key: "",
   });
   const [configStatus, setConfigStatus] = useState("正在同步配置...");
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [testingConfig, setTestingConfig] = useState(false);
+  const [refreshingConfig, setRefreshingConfig] = useState(false);
 
   const [copilotMessages, setCopilotMessages] = useState<CopilotMessage[]>([]);
   const [copilotInput, setCopilotInput] = useState("");
@@ -512,8 +532,8 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
 
     setConfig(data);
     setConfigDraft({
-      ai_provider: data.ai_provider || "openai",
-      model: data.model || "gpt-4o-mini",
+      ai_provider: normalizeProviderForDraft(data.ai_provider),
+      model: data.model || "",
       base_url: data.base_url || "",
       api_key: "",
     });
@@ -928,16 +948,20 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
 
   async function handleRefreshConfig() {
     setConfigStatus("正在重新同步...");
+    setRefreshingConfig(true);
     try {
       await loadUserConfig();
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       setConfigStatus(formatLoadError(message));
+    } finally {
+      setRefreshingConfig(false);
     }
   }
 
   async function handleSaveConfig() {
     setConfigStatus("正在保存配置...");
+    setSavingConfig(true);
     const body: Record<string, unknown> = {
       ai_provider: configDraft.ai_provider,
       model: configDraft.model,
@@ -973,11 +997,14 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       setConfigStatus(`保存失败：${message}`);
+    } finally {
+      setSavingConfig(false);
     }
   }
 
   async function handleTestConfig() {
     setConfigStatus("正在测试多模型连通性...");
+    setTestingConfig(true);
     const body: Record<string, unknown> = {
       ai_provider: configDraft.ai_provider,
       model: configDraft.model,
@@ -1014,6 +1041,8 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
       setConfigStatus(`测试失败：${message}`);
+    } finally {
+      setTestingConfig(false);
     }
   }
 
@@ -1036,6 +1065,17 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
         <CyberSidebar items={NAV_ITEMS} active={route} onSelect={setRoute} />
 
         <section className="flex-1 flex flex-col gap-4 min-h-[calc(100vh-2rem)]">
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => signOut({ callbackUrl: "/" })}
+              className="border-cyber-cyan/30 text-cyber-text/70 hover:text-cyber-cyan hover:bg-cyber-cyan/10 hover:border-cyber-cyan/60"
+            >
+              <LogOut className="w-4 h-4 mr-2" />
+              退出登录
+            </Button>
+          </div>
           <StatsCards stats={counters} />
 
           <div className="bg-black/40 border border-cyber-cyan/30 p-3 text-sm text-cyber-text/70">{configStatus}</div>
@@ -1215,12 +1255,14 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                   ))}
                 </select>
                 <input
+                  autoComplete="off"
                   value={configDraft.model}
                   onChange={(event) => setConfigDraft((prev) => ({ ...prev, model: event.target.value }))}
                   placeholder="Model"
                   className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2"
                 />
                 <input
+                  autoComplete="off"
                   value={configDraft.base_url}
                   onChange={(event) => setConfigDraft((prev) => ({ ...prev, base_url: event.target.value }))}
                   placeholder="Base URL"
@@ -1228,6 +1270,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                 />
                 <input
                   type="password"
+                  autoComplete="new-password"
                   value={configDraft.api_key}
                   onChange={(event) => setConfigDraft((prev) => ({ ...prev, api_key: event.target.value }))}
                   placeholder={config?.has_api_key ? "已配置，留空表示不修改" : "输入新的 API Key"}
@@ -1235,14 +1278,32 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                 />
                 <div className="text-xs text-cyber-text/60">当前密钥状态：{config?.has_api_key ? config.api_key_masked : "未配置"}</div>
                 <div className="flex gap-2 flex-wrap">
-                  <Button variant="outline" size="sm" onClick={() => void handleSaveConfig()} className="border-cyber-cyan/40 text-cyber-cyan">
-                    保存配置
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleSaveConfig()}
+                    disabled={savingConfig || testingConfig || refreshingConfig}
+                    className="border-cyber-cyan/40 text-cyber-cyan"
+                  >
+                    {savingConfig ? "保存中..." : "保存配置"}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => void handleTestConfig()} className="border-cyber-cyan/40 text-cyber-cyan">
-                    测试路由
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleTestConfig()}
+                    disabled={savingConfig || testingConfig || refreshingConfig}
+                    className="border-cyber-cyan/40 text-cyber-cyan"
+                  >
+                    {testingConfig ? "测试中..." : "测试路由"}
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => void handleRefreshConfig()} className="border-cyber-cyan/40 text-cyber-cyan">
-                    重新同步
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleRefreshConfig()}
+                    disabled={savingConfig || testingConfig || refreshingConfig}
+                    className="border-cyber-cyan/40 text-cyber-cyan"
+                  >
+                    {refreshingConfig ? "同步中..." : "重新同步"}
                   </Button>
                 </div>
               </div>

@@ -3,16 +3,30 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from cryptography.fernet import Fernet
-from fastapi import HTTPException
 from jose import jwt
 from passlib.context import CryptContext
 
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+ALLOWED_JWT_ALGORITHMS = {"HS256", "HS384", "HS512"}
+
+_CACHED_JWT_ALGORITHM: str | None = None
+
+
+def _get_jwt_algorithm() -> str:
+    global _CACHED_JWT_ALGORITHM
+    if _CACHED_JWT_ALGORITHM is not None:
+        return _CACHED_JWT_ALGORITHM
+    algorithm = os.getenv("APP_JWT_ALG", "HS256")
+    if algorithm not in ALLOWED_JWT_ALGORITHMS:
+        raise ValueError(f"APP_JWT_ALG must be one of {ALLOWED_JWT_ALGORITHMS}")
+    _CACHED_JWT_ALGORITHM = algorithm
+    return algorithm
 
 WEAK_APP_SECRETS = {
     "dev-secret-change-me",
@@ -26,8 +40,14 @@ WEAK_APP_SECRETS = {
 
 def _required_app_secret() -> str:
     secret = os.getenv("APP_SECRET", "").strip()
-    if not secret or secret.lower() in WEAK_APP_SECRETS:
-        raise RuntimeError("APP_SECRET must be configured with a strong non-default value")
+    if not secret:
+        raise RuntimeError("APP_SECRET must be configured")
+    if secret.lower() in WEAK_APP_SECRETS:
+        app_env = os.getenv("APP_ENV", "development").strip().lower()
+        if app_env in ("prod", "production"):
+            raise RuntimeError("APP_SECRET must be configured with a strong non-default value in production")
+        import warnings
+        warnings.warn("APP_SECRET uses a weak default value — change it before deploying to production", stacklevel=2)
     return secret
 
 
@@ -65,13 +85,17 @@ def encrypt_api_key(value: str | None) -> str | None:
     return fernet.encrypt(value.encode("utf-8")).decode("utf-8")
 
 
+class DecryptionError(Exception):
+    pass
+
+
 def decrypt_api_key(value: str | None) -> str | None:
     if not value:
         return None
     try:
         return fernet.decrypt(value.encode("utf-8")).decode("utf-8")
     except Exception as exc:
-        raise HTTPException(status_code=500, detail="Stored API key cannot be decrypted") from exc
+        raise DecryptionError("存储的配置无法读取，请重新设置") from exc
 
 
 def hash_otp_code(code: str) -> str:
@@ -79,28 +103,31 @@ def hash_otp_code(code: str) -> str:
 
 
 def verify_otp_code(code: str, code_hash: str) -> bool:
-    return hash_otp_code(code) == code_hash
+    import hmac as _hmac
+    return _hmac.compare_digest(hash_otp_code(code), code_hash)
 
 
-def issue_access_token(subject: str, expires_minutes: int = 60 * 24 * 7) -> str:
+def issue_access_token(subject: str, expires_minutes: int = 60 * 24 * 7, password_changed_at: float | None = None) -> str:
     secret = _required_app_secret()
-    algorithm = os.getenv("APP_JWT_ALG", "HS256")
-    now = datetime.utcnow()
+    algorithm = _get_jwt_algorithm()
+    now = datetime.now(timezone.utc)
     payload: dict[str, Any] = {
         "sub": subject,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=expires_minutes)).timestamp()),
     }
+    if password_changed_at is not None:
+        payload["pwd_iat"] = int(password_changed_at)
     return jwt.encode(payload, secret, algorithm=algorithm)
 
 
 def decode_access_token(token: str) -> dict[str, Any]:
     secret = _required_app_secret()
-    algorithm = os.getenv("APP_JWT_ALG", "HS256")
+    algorithm = _get_jwt_algorithm()
     return jwt.decode(token, secret, algorithms=[algorithm])
 
 
 def random_otp(length: int = 6) -> str:
-    import random
+    import secrets
 
-    return "".join(str(random.randint(0, 9)) for _ in range(length))
+    return "".join(str(secrets.randbelow(10)) for _ in range(length))

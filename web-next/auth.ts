@@ -1,7 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
-import GitHub from "next-auth/providers/github";
-import Google from "next-auth/providers/google";
+import { cookies } from "next/headers";
+import { BACKEND_BASE_URL } from "@/lib/utils";
 
 type BackendUser = {
   id: number | string;
@@ -34,8 +34,6 @@ function isBackendRequestError(error: unknown): error is BackendRequestError {
   return "status" in error;
 }
 
-const BACKEND_BASE_URL = (process.env.BACKEND_BASE_URL || "http://127.0.0.1:8000").trim().replace(/\/$/, "");
-
 async function backendPost<T>(path: string, payload: Record<string, unknown>): Promise<T> {
   const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
     method: "POST",
@@ -53,16 +51,8 @@ async function backendPost<T>(path: string, payload: Record<string, unknown>): P
   return data;
 }
 
-const oauthProviders = [];
-if (process.env.AUTH_GITHUB_ID && process.env.AUTH_GITHUB_SECRET) {
-  oauthProviders.push(GitHub);
-}
-if (process.env.AUTH_GOOGLE_ID && process.env.AUTH_GOOGLE_SECRET) {
-  oauthProviders.push(Google);
-}
-
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  trustHost: true,
+  trustHost: process.env.NODE_ENV === "development",
   session: { strategy: "jwt" },
   pages: { signIn: "/" },
   providers: [
@@ -89,7 +79,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           if (isBackendRequestError(error) && error.status === 401) {
             return null;
           }
-          throw error;
+          console.error("[auth] backend login failed:", error);
+          return null;
         }
 
         if (!payload.user?.id || !payload.access_token) {
@@ -103,46 +94,37 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           authProvider: payload.user.auth_provider || "password",
           backendAccessToken: payload.access_token,
         };
+        // SECURITY: Set the backend access_token as an httpOnly cookie so the API proxy can read it.
+        // This keeps the token out of client-side JavaScript while allowing the proxy to forward it.
+        try {
+          const cookieStore = await cookies();
+          cookieStore.set("access_token", payload.access_token, {
+            httpOnly: true,
+            secure: process.env.NODE_ENV === "production",
+            sameSite: "lax",
+            path: "/",
+            maxAge: 60 * 60 * 24 * 7, // 7 days
+          });
+        } catch (e) {
+          console.error("[auth] failed to set access_token cookie:", e);
+        }
         return result;
       },
     }),
-    ...oauthProviders,
   ],
   callbacks: {
-    signIn: async ({ user, account }) => {
-      if (!account) {
-        return true;
-      }
-      if (account.provider !== "github" && account.provider !== "google") {
-        return true;
-      }
-      if (!user.email || !account.providerAccountId) {
-        return false;
-      }
-
-      const payload = await backendPost<BackendAuthPayload>("/auth/login/oauth", {
-        provider: account.provider,
-        provider_user_id: account.providerAccountId,
-        email: user.email,
-        display_name: user.name,
-      });
-
-      if (!payload.user?.id || !payload.access_token) {
-        return false;
-      }
-
-      user.id = String(payload.user.id);
-      user.authProvider = account.provider;
-      user.backendAccessToken = payload.access_token;
-      return true;
-    },
-    jwt: async ({ token, user, account }) => {
+    jwt: async ({ token, user }) => {
       if (user) {
-        token.sub = String(user.id || token.sub || "");
-        token.email = user.email || token.email;
-        token.name = user.name || token.name;
-        token.authProvider = user.authProvider || account?.provider || token.authProvider;
-        token.backendAccessToken = user.backendAccessToken || token.backendAccessToken;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const u = user as any;
+        return {
+          ...token,
+          sub: String(u.id || token.sub || ""),
+          email: u.email || token.email,
+          name: u.name || token.name,
+          authProvider: u.authProvider || token.authProvider,
+          access_token: u.backendAccessToken || (token as any).access_token,
+        };
       }
       return token;
     },
@@ -150,6 +132,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         session.user.id = token.sub || "";
         session.user.authProvider = String(token.authProvider || "");
+        (session.user as any).access_token = (token as any).access_token || "";
       }
       return session;
     },
