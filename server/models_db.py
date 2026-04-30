@@ -24,6 +24,7 @@ class User(Base, TimestampMixin):
     encrypted_api_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
 
 class UserConfig(Base, TimestampMixin):

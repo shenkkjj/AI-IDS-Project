@@ -130,7 +130,7 @@ export default function AnimatedCharacters({
         orange: generateHex(10),
         yellow: generateHex(8),
       });
-    }, 1500);
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -176,6 +176,10 @@ export default function AnimatedCharacters({
     const angle = Math.atan2(dy, dx);
     return { x: Math.cos(angle) * dist, y: Math.sin(angle) * dist };
   }, []);
+
+  // Throttled mouse position update to reduce rAF calculations
+  const mousePosRef = useRef({ x: 0, y: 0 });
+  const lastMouseUpdateRef = useRef(0);
 
   const handleCharacterClick = useCallback((character: string) => {
     const moodsList: CharacterMood[] = ["normal", "hacking", "surprised", "locked", "unlocked"];
@@ -291,7 +295,9 @@ export default function AnimatedCharacters({
     gsap.set(".eyeball-pupil", { x: 0, y: 0 });
 
     const posCache = new Map<HTMLElement, DOMRect>();
+    let posCacheDirty = true;
     const updatePosCache = () => {
+      if (!posCacheDirty) return;
       posCache.clear();
       [purpleRef.current, blackRef.current, orangeRef.current, yellowRef.current].forEach((el) => {
         if (el) posCache.set(el, el.getBoundingClientRect());
@@ -304,6 +310,7 @@ export default function AnimatedCharacters({
         const el = eb as HTMLElement;
         posCache.set(el, el.getBoundingClientRect());
       });
+      posCacheDirty = false;
     };
     updatePosCache();
 
@@ -311,7 +318,7 @@ export default function AnimatedCharacters({
     let cachedEyeballs: HTMLElement[] = Array.from(containerRef.current?.querySelectorAll(".eyeball") ?? []) as HTMLElement[];
 
     const onResize = () => {
-      updatePosCache();
+      posCacheDirty = true;
       cachedPupils = Array.from(containerRef.current?.querySelectorAll(".pupil") ?? []) as HTMLElement[];
       cachedEyeballs = Array.from(containerRef.current?.querySelectorAll(".eyeball") ?? []) as HTMLElement[];
     };
@@ -320,6 +327,9 @@ export default function AnimatedCharacters({
     const tick = () => {
       const container = containerRef.current;
       if (!container) return;
+
+      // Update position cache if dirty (e.g., after resize)
+      updatePosCache();
 
       const { isTyping: typing, isHidingPassword: hiding, isShowingPassword: showing, isLooking: looking } = stateRef.current;
 
@@ -409,6 +419,10 @@ export default function AnimatedCharacters({
     };
 
     const onMove = (e: MouseEvent) => {
+      const now = performance.now();
+      // Throttle mouse updates to every 16ms (~60fps) to reduce calculations
+      if (now - lastMouseUpdateRef.current < 16) return;
+      lastMouseUpdateRef.current = now;
       mouseRef.current.x = e.clientX;
       mouseRef.current.y = e.clientY;
     };

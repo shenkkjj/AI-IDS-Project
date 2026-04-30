@@ -107,7 +107,7 @@ def verify_otp_code(code: str, code_hash: str) -> bool:
     return _hmac.compare_digest(hash_otp_code(code), code_hash)
 
 
-def issue_access_token(subject: str, expires_minutes: int = 60 * 24 * 7, password_changed_at: float | None = None) -> str:
+def issue_access_token(subject: str, expires_minutes: int = 60 * 24 * 7, password_changed_at: float | None = None, token_version: int = 0) -> str:
     secret = _required_app_secret()
     algorithm = _get_jwt_algorithm()
     now = datetime.now(timezone.utc)
@@ -115,6 +115,7 @@ def issue_access_token(subject: str, expires_minutes: int = 60 * 24 * 7, passwor
         "sub": subject,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=expires_minutes)).timestamp()),
+        "tv": token_version,
     }
     if password_changed_at is not None:
         payload["pwd_iat"] = int(password_changed_at)

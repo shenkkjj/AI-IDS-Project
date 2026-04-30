@@ -1,0 +1,14 @@
+__pycache__
+*.pyc
+*.pyo
+*.db
+.env
+.git
+.gitignore
+node_modules
+.next
+*.pkl
+data/KDDTrain.csv
+data/new_threats.csv
+.claude
+.omc

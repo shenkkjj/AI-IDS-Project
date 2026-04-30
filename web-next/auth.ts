@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
 import { cookies } from "next/headers";
+
 import { BACKEND_BASE_URL } from "@/lib/utils";
 
 type BackendUser = {
@@ -53,6 +54,7 @@ async function backendPost<T>(path: string, payload: Record<string, unknown>): P
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: process.env.NODE_ENV === "development",
+  secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "your-super-secret-key-change-in-production",
   session: { strategy: "jwt" },
   pages: { signIn: "/" },
   providers: [
@@ -94,8 +96,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           authProvider: payload.user.auth_provider || "password",
           backendAccessToken: payload.access_token,
         };
-        // SECURITY: Set the backend access_token as an httpOnly cookie so the API proxy can read it.
-        // This keeps the token out of client-side JavaScript while allowing the proxy to forward it.
+
+        // Set access_token as httpOnly cookie for API proxy to read
         try {
           const cookieStore = await cookies();
           cookieStore.set("access_token", payload.access_token, {
@@ -108,6 +110,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         } catch (e) {
           console.error("[auth] failed to set access_token cookie:", e);
         }
+
         return result;
       },
     }),
@@ -117,6 +120,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const u = user as any;
+
         return {
           ...token,
           sub: String(u.id || token.sub || ""),

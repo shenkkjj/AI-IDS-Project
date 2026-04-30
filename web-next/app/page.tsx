@@ -236,15 +236,18 @@ export default function HomePage() {
     }
   }, [isAuthenticated, router]);
 
-  // Generate hex stream effect
+  // Generate hex stream effect - using CSS animation for performance
   useEffect(() => {
     const el = hexStreamRef.current;
     if (!el) return;
-    const interval = setInterval(() => {
+    let frameId: number;
+    const updateHex = () => {
       const hex = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16).toUpperCase()).join("");
-      el.textContent = hex;
-    }, 100);
-    return () => clearInterval(interval);
+      if (el) el.textContent = hex;
+      frameId = window.setTimeout(updateHex, 800);
+    };
+    updateHex();
+    return () => window.clearTimeout(frameId);
   }, []);
 
   const handleCredentialsLogin = useCallback(
@@ -320,7 +323,24 @@ export default function HomePage() {
           return;
         }
 
-        setMessage("REGISTRATION_SUCCESS: 用户已创建，请登录");
+        setMessage("REGISTRATION_SUCCESS: 用户已创建，正在自动登录...");
+
+        // Auto-login after successful registration
+        const loginResult = await signIn("credentials", {
+          email,
+          password,
+          redirect: false,
+        });
+
+        if (loginResult?.ok) {
+          const ready = await waitForSessionReady();
+          if (ready) {
+            router.push("/dashboard");
+            return;
+          }
+        }
+
+        // Fallback: switch to login mode if auto-login fails
         setTimeout(() => setMode("login"), 1500);
       } catch {
         setMessage("NETWORK_ERROR: 注册请求失败");
@@ -328,7 +348,7 @@ export default function HomePage() {
         setLoading(false);
       }
     },
-    [email, password, confirmPassword, displayName]
+    [email, password, confirmPassword, displayName, router]
   );
 
   const handleForgotPassword = useCallback(
@@ -389,7 +409,23 @@ export default function HomePage() {
           return;
         }
 
-        setMessage("RESET_SUCCESS: 密码已重置，请登录");
+        setMessage("RESET_SUCCESS: 密码已重置，正在自动登录...");
+
+        // Auto-login after successful password reset
+        const loginResult = await signIn("credentials", {
+          email: lockedResetEmail || email,
+          password,
+          redirect: false,
+        });
+
+        if (loginResult?.ok) {
+          const ready = await waitForSessionReady();
+          if (ready) {
+            router.push("/dashboard");
+            return;
+          }
+        }
+
         setTimeout(() => setMode("login"), 1500);
       } catch {
         setMessage("NETWORK_ERROR: 重置请求失败");

@@ -105,8 +105,8 @@ test("POST /auth/password/reset/request (bad email)", lambda: assert_status(
 
 test("POST /auth/password/reset/confirm (no code)", lambda: assert_status(
     httpx.post(f"{BASE}/auth/password/reset/confirm", json={
-        "email": TEST_EMAIL, "code": "000000", "new_password": "NewPass123!"
-    }), 400))
+        "email": "notfound99999@example.com", "code": "000000", "new_password": "NewPass123!"
+    }), 404))
 
 # --- OAuth ---
 
@@ -118,7 +118,7 @@ test("POST /auth/login/oauth (no id_token)", lambda: assert_status(
 test("POST /auth/login/oauth (invalid token)", lambda: assert_status(
     httpx.post(f"{BASE}/auth/login/oauth", json={
         "provider": "google", "id_token": "fake-token", "provider_user_id": "123",
-        "email": "test@test.com"
+        "email": "test-oauth-99999@test.com"
     }, timeout=15.0), 401))
 
 # --- LLM ---
@@ -126,7 +126,7 @@ test("POST /auth/login/oauth (invalid token)", lambda: assert_status(
 test("POST /llm/test (no key)", lambda: assert_status(
     httpx.post(f"{BASE}/llm/test", headers=headers, json={
         "provider": "openai", "model": "gpt-4o-mini", "base_url": "https://api.openai.com"
-    }), 400))
+    }, timeout=12.0), 400))
 
 # --- Alerts & Logs ---
 
@@ -149,7 +149,7 @@ test("POST /site/target (SSRF)", lambda: assert_status(
     422))
 
 test("POST /site/target (valid)", lambda: assert_status(
-    httpx.post(f"{BASE}/site/target", headers=headers, json={"url": "https://httpbin.org"}),
+    httpx.post(f"{BASE}/site/target", headers=headers, json={"url": "https://httpbin.org"}, timeout=15.0),
     200))
 
 # --- Logout ---

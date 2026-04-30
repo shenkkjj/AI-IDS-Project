@@ -480,19 +480,22 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
     const current: string[] = [];
     setReportTyping(true);
 
-    for (const line of lines) {
-      if (token !== reportTypingToken.current) {
-        return;
+    try {
+      for (const line of lines) {
+        if (token !== reportTypingToken.current) {
+          setReportTyping(false);
+          return;
+        }
+        current.push(line);
+        setReportMarkdown(current.join("\n"));
+        await new Promise((resolve) => {
+          window.setTimeout(resolve, line.startsWith("#") ? 80 : 26);
+        });
       }
-      current.push(line);
-      setReportMarkdown(current.join("\n"));
-      await new Promise((resolve) => {
-        window.setTimeout(resolve, line.startsWith("#") ? 80 : 26);
-      });
-    }
-
-    if (token === reportTypingToken.current) {
-      setReportTyping(false);
+    } finally {
+      if (token === reportTypingToken.current) {
+        setReportTyping(false);
+      }
     }
   }
 
@@ -517,13 +520,21 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
     appendTerminalLogs(outputLines, hasUnknown ? "warn" : "normal");
   }
 
-  async function loadUserConfig(signal?: AbortSignal) {
-    const response = await fetch(`/api/backend/user/config`, {
-      method: "GET",
+  async function fetchWithRetry(url: string, options?: RequestInit & { retries?: number }): Promise<Response> {
+    const headers: Record<string, string> = {
+      ...(options?.headers as Record<string, string> || {}),
+    };
+    const response = await fetch(url, {
+      ...options,
+      headers,
       credentials: "include",
       cache: "no-store",
-      signal,
     });
+    return response;
+  }
+
+  async function loadUserConfig(signal?: AbortSignal) {
+    const response = await fetchWithRetry(`/api/backend/user/config`, { signal });
 
     const data = (await response.json().catch(() => ({}))) as PersistedUserConfig & { detail?: string };
     if (!response.ok) {
@@ -545,12 +556,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
     if (showLoading) {
       setAlertsLoadState("loading");
     }
-    const response = await fetch(`/api/backend/alerts?limit=100`, {
-      method: "GET",
-      credentials: "include",
-      cache: "no-store",
-      signal: options?.signal,
-    });
+    const response = await fetchWithRetry(`/api/backend/alerts?limit=100`, { signal: options?.signal });
 
     if (!response.ok) {
       const payload = (await response.json().catch(() => ({}))) as { detail?: string };
@@ -582,21 +588,24 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   }
 
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
     setConfigStatus("正在同步配置...");
+    console.log("[dashboard] useEffect running, loading data...");
 
-    loadUserConfig(controller.signal).catch((error: unknown) => {
-      if (controller.signal.aborted) {
-        return;
-      }
+    loadUserConfig().then(() => {
+      console.log("[dashboard] loadUserConfig success");
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      console.log("[dashboard] loadUserConfig error:", error);
       const message = error instanceof Error ? error.message : String(error);
       setConfigStatus(formatLoadError(message));
     });
 
-    loadAlerts({ signal: controller.signal, showLoading: true }).catch(() => {
-      if (controller.signal.aborted) {
-        return;
-      }
+    loadAlerts({ showLoading: true }).then(() => {
+      console.log("[dashboard] loadAlerts success");
+    }).catch((error: unknown) => {
+      if (cancelled) return;
+      console.log("[dashboard] loadAlerts error:", error);
       setAlerts([]);
       setSelected(null);
       setAlertsLoadState("error");
@@ -604,12 +613,14 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
 
     const timer = window.setInterval(() => {
       loadAlerts({ showLoading: false }).catch(() => {
-        setConfigStatus("告警自动刷新失败，当前显示上次成功数据");
+        if (!cancelled) {
+          setConfigStatus("告警自动刷新失败，当前显示上次成功数据");
+        }
       });
     }, ALERTS_POLL_MS);
 
     return () => {
-      controller.abort();
+      cancelled = true;
       window.clearInterval(timer);
     };
   }, []);
@@ -636,11 +647,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   }, [selected]);
 
   async function pingSiteHealth(signal?: AbortSignal) {
-    const response = await fetch(`/api/backend/site/health`, {
-      method: "GET",
-      credentials: "include",
-      signal,
-    });
+    const response = await fetchWithRetry(`/api/backend/site/health`, { signal });
 
     const payload = (await response.json().catch(() => ({}))) as SiteHealthPayload & { detail?: string };
     if (!response.ok) {
@@ -819,17 +826,15 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   }
 
   useEffect(() => {
-    const controller = new AbortController();
-    pingSiteHealth(controller.signal).catch(() => {
-      if (controller.signal.aborted) {
-        return;
-      }
+    let cancelled = false;
+    pingSiteHealth().catch(() => {
+      if (cancelled) return;
       setSiteHealthUi({ tone: "offline", text: "离线" });
     });
     startSiteHealthPolling();
 
     return () => {
-      controller.abort();
+      cancelled = true;
       if (siteHealthTimer.current) {
         window.clearInterval(siteHealthTimer.current);
         siteHealthTimer.current = null;
@@ -881,7 +886,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
         credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          },
+        },
         body: JSON.stringify({
           message,
           alert_id: selected?.alertId || null,
@@ -899,42 +904,46 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
       let buffer = "";
       let assistantContent = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (requestId !== activeCopilotRequestId.current) {
-          return;
-        }
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const parsed = parseSseBuffer(buffer);
-        buffer = parsed.rest;
-
-        for (const eventItem of parsed.events) {
-          if (eventItem.event === "done") {
-            continue;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (requestId !== activeCopilotRequestId.current) {
+            return;
+          }
+          if (done) {
+            break;
           }
 
-          if (eventItem.event === "error") {
-            const errorData = parseSseJson(eventItem.dataText);
-            throw new Error(String(errorData.message || "流式响应错误"));
-          }
+          buffer += decoder.decode(value, { stream: true });
+          const parsed = parseSseBuffer(buffer);
+          buffer = parsed.rest;
 
-          const data = parseSseJson(eventItem.dataText);
-          const token = String(data.token || "");
-          if (!token) {
-            continue;
-          }
+          for (const eventItem of parsed.events) {
+            if (eventItem.event === "done") {
+              continue;
+            }
 
-          assistantContent += token;
-          updateLastAssistantMessage(assistantContent);
+            if (eventItem.event === "error") {
+              const errorData = parseSseJson(eventItem.dataText);
+              throw new Error(String(errorData.message || "流式响应错误"));
+            }
+
+            const data = parseSseJson(eventItem.dataText);
+            const token = String(data.token || "");
+            if (!token) {
+              continue;
+            }
+
+            assistantContent += token;
+            updateLastAssistantMessage(assistantContent);
+          }
         }
-      }
 
-      if (!assistantContent.trim()) {
-        updateLastAssistantMessage("模型未返回内容，请稍后重试。");
+        if (!assistantContent.trim()) {
+          updateLastAssistantMessage("模型未返回内容，请稍后重试。");
+        }
+      } finally {
+        reader.cancel().catch(() => {});
       }
     } catch (error: unknown) {
       const messageText = error instanceof Error ? error.message : String(error);

@@ -1,32 +1,10 @@
-import { auth } from "@/auth";
-import { getToken } from "next-auth/jwt";
 import { NextRequest, NextResponse } from "next/server";
 import { BACKEND_BASE_URL } from "@/lib/utils";
 
 type ProxyMethod = "GET" | "POST" | "PUT";
 
 const BACKEND_REQUEST_TIMEOUT_MS = 15000;
-const AUTH_SECRET = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET || "";
-
-const WEAK_AUTH_SECRETS = new Set([
-  "dev-secret-change-me",
-  "change-me-to-a-long-random-secret",
-  "changeme",
-  "change-me",
-  "default",
-  "secret",
-  "",
-]);
-
-if (WEAK_AUTH_SECRETS.has(AUTH_SECRET.toLowerCase())) {
-  console.error(
-    "FATAL: AUTH_SECRET is not set or uses a weak default value. " +
-    "Please set a strong random secret in your environment variables."
-  );
-  if (process.env.NODE_ENV === "production") {
-    process.exit(1);
-  }
-}
+const COPILOT_STREAM_TIMEOUT_MS = 180000; // 3 minutes for copilot streaming
 
 type RouteContext = {
   params: Promise<{ path?: string[] }>;
@@ -68,7 +46,6 @@ const PUBLIC_AUTH_PATHS = new Set([
   "/auth/login/oauth",
   "/auth/password/reset/request",
   "/auth/password/reset/confirm",
-  "/site/health",
 ]);
 
 function isPublicAuthPath(backendPath: string): boolean {
@@ -77,14 +54,48 @@ function isPublicAuthPath(backendPath: string): boolean {
 
 function validateOrigin(request: NextRequest): boolean {
   const origin = request.headers.get("origin");
-  if (!origin) return true;
+  // For same-origin requests, Origin header may be omitted; require it for cross-origin
+  if (!origin) {
+    // Allow if it's a direct same-origin request (no Origin header on same-origin GET)
+    const referer = request.headers.get("referer");
+    if (!referer) return true; // Same-origin GET/HEAD often omits Origin
+    try {
+      const refererUrl = new URL(referer);
+      const allowed = _allowedHosts();
+      return allowed.some((host) => refererUrl.host === host);
+    } catch {
+      return false;
+    }
+  }
   try {
     const url = new URL(origin);
-    const allowed = [process.env.NEXT_PUBLIC_APP_HOST, "localhost:3000", "127.0.0.1:3000"].filter(Boolean);
+    const allowed = _allowedHosts();
     return allowed.some((host) => url.host === host);
   } catch {
     return false;
   }
+}
+
+function _allowedHosts(): string[] {
+  return [
+    process.env.NEXT_PUBLIC_APP_HOST,
+    "localhost:3000", "127.0.0.1:3000",
+    "localhost:3001", "127.0.0.1:3001",
+    "localhost:3002", "127.0.0.1:3002",
+    "localhost:3003", "127.0.0.1:3003",
+  ].filter(Boolean) as string[];
+}
+
+function getAccessTokenFromCookie(request: NextRequest): string {
+  const cookieHeader = request.headers.get("cookie") || "";
+  const match = cookieHeader.match(/access_token=([^;]+)/);
+  return match ? decodeURIComponent(match[1]) : "";
+}
+
+function getAccessTokenFromHeader(request: NextRequest): string {
+  const authHeader = request.headers.get("authorization") || "";
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1].trim() : "";
 }
 
 async function buildBackendRequest(method: ProxyMethod, request: NextRequest, backendPath: string): Promise<Response> {
@@ -96,8 +107,7 @@ async function buildBackendRequest(method: ProxyMethod, request: NextRequest, ba
   const headers: Record<string, string> = {};
 
   if (!isPublic) {
-    const session = await auth();
-    const accessToken = (session?.user as any)?.access_token || "";
+    const accessToken = getAccessTokenFromCookie(request) || getAccessTokenFromHeader(request);
     if (!accessToken) {
       return NextResponse.json({ detail: "UNAUTHORIZED" }, { status: 401 });
     }
@@ -106,6 +116,7 @@ async function buildBackendRequest(method: ProxyMethod, request: NextRequest, ba
 
   const url = new URL(request.url);
   const targetUrl = `${BACKEND_BASE_URL}${backendPath}${url.search}`;
+  console.log("[proxy] targetUrl:", targetUrl, "headers:", Object.keys(headers));
 
   const contentType = request.headers.get("content-type");
   if (contentType) {
@@ -114,9 +125,14 @@ async function buildBackendRequest(method: ProxyMethod, request: NextRequest, ba
 
   const body = method === "GET" ? undefined : await request.text();
   const controller = new AbortController();
+  
+  // Use longer timeout for copilot streaming endpoints
+  const isCopilotStream = backendPath.includes("/copilot/stream");
+  const timeoutMs = isCopilotStream ? COPILOT_STREAM_TIMEOUT_MS : BACKEND_REQUEST_TIMEOUT_MS;
+  
   const timeoutId = setTimeout(() => {
     controller.abort();
-  }, BACKEND_REQUEST_TIMEOUT_MS);
+  }, timeoutMs);
 
   try {
     return await fetch(targetUrl, {
