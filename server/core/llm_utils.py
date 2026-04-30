@@ -47,8 +47,13 @@ def infer_provider_from_model(model_name: str) -> str:
 
 def choose_provider(preferred: str | None, model_name: str, base_url: str) -> str:
     normalized = normalize_ai_provider(preferred)
-    if normalized != "custom":
+    # If user explicitly set a provider (not empty and not "custom"), respect it
+    if preferred and str(preferred).strip().lower() not in {"", "custom"}:
         return normalized
+    
+    # If preferred is "custom", respect that choice too
+    if normalized == "custom":
+        return "custom"
 
     by_url = infer_provider_from_base_url(base_url)
     if by_url != "custom":

@@ -81,9 +81,8 @@ async def register_user(data: UserRegisterIn, request: Request, db: Session) -> 
 
 
 async def login_password(data: LoginPasswordIn, response: Response, db: Session) -> dict[str, Any]:
-    async with app_state.rate_limit.login_lock:
-        if not await app_state.rate_limit.check_login_limit(data.email):
-            raise HTTPException(status_code=429, detail="登录尝试过于频繁，请5分钟后再试")
+    if not await app_state.rate_limit.check_login_limit(data.email):
+        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请5分钟后再试")
 
     user = db.query(User).filter(User.email == data.email.lower(), User.is_active.is_(True)).first()
     if not user or not user.password_hash:
@@ -258,9 +257,8 @@ async def login_oauth(data: OAuthLoginIn, response: Response, request: Request, 
 
 
 async def otp_request(data: OTPRequestIn, db: Session) -> dict[str, Any]:
-    async with app_state.rate_limit.otp_lock:
-        if not await app_state.rate_limit.check_otp_limit(data.email):
-            raise HTTPException(status_code=429, detail="验证码请求过于频繁，请10分钟后再试")
+    if not await app_state.rate_limit.check_otp_limit(data.email):
+        raise HTTPException(status_code=429, detail="验证码请求过于频繁，请10分钟后再试")
 
     async with app_state.rate_limit.otp_verify_lock:
         app_state.rate_limit.otp_verify_failures.pop(data.email.lower(), None)
@@ -332,9 +330,8 @@ async def otp_verify(data: OTPVerifyIn, response: Response, db: Session) -> dict
 
 
 async def password_reset_request(data: PasswordResetRequestIn, db: Session) -> dict[str, Any]:
-    async with app_state.rate_limit.otp_lock:
-        if not await app_state.rate_limit.check_otp_limit(data.email):
-            raise HTTPException(status_code=429, detail="请求过于频繁，请10分钟后再试")
+    if not await app_state.rate_limit.check_otp_limit(data.email):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请10分钟后再试")
 
     async with app_state.rate_limit.otp_verify_lock:
         app_state.rate_limit.otp_verify_failures.pop(data.email.lower(), None)
@@ -354,9 +351,8 @@ async def password_reset_request(data: PasswordResetRequestIn, db: Session) -> d
 
 
 async def password_reset_confirm(data: PasswordResetConfirmIn, db: Session) -> dict[str, Any]:
-    async with app_state.rate_limit.otp_lock:
-        if not await app_state.rate_limit.check_otp_limit(data.email):
-            raise HTTPException(status_code=429, detail="请求过于频繁，请10分钟后再试")
+    if not await app_state.rate_limit.check_otp_limit(data.email):
+        raise HTTPException(status_code=429, detail="请求过于频繁，请10分钟后再试")
 
     email_key = data.email.lower()
     async with app_state.rate_limit.otp_verify_lock:
@@ -456,6 +452,7 @@ def _consume_valid_challenge(db: Session, email: str, challenge_type: str, code:
         .order_by(AuthChallenge.created_at.desc())
         .first()
     )
+    from server.core.utils import _now
     if not challenge:
         raise HTTPException(status_code=400, detail="验证码不存在，请先获取验证码")
     if challenge.expires_at < _now():
@@ -465,7 +462,6 @@ def _consume_valid_challenge(db: Session, email: str, challenge_type: str, code:
     if not hmac.compare_digest(expected, challenge.code_hash):
         raise HTTPException(status_code=400, detail="验证码错误")
 
-    from server.core.utils import _now
     challenge.consumed_at = _now()
     db.add(challenge)
     db.commit()
