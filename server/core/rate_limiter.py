@@ -34,9 +34,36 @@ async def _get_redis():
 
 _in_memory_buckets: dict[str, deque[float]] = {}
 _in_memory_lock = asyncio.Lock()
+_cleanup_task: asyncio.Task[Any] | None = None
+_CLEANUP_INTERVAL = 300
+_BUCKET_MAX_IDLE = 600
+
+
+def _start_background_cleanup() -> None:
+    global _cleanup_task
+    if _cleanup_task is not None and not _cleanup_task.done():
+        return
+
+    async def _purge_expired() -> None:
+        while True:
+            await asyncio.sleep(_CLEANUP_INTERVAL)
+            now = time.time()
+            async with _in_memory_lock:
+                stale_ips = [
+                    ip for ip, bucket in _in_memory_buckets.items()
+                    if not bucket or now - bucket[-1] > _BUCKET_MAX_IDLE
+                ]
+                for ip in stale_ips:
+                    _in_memory_buckets.pop(ip, None)
+                if stale_ips:
+                    logger.debug("Rate limiter cleaned {} idle buckets, {} remaining",
+                                 len(stale_ips), len(_in_memory_buckets))
+
+    _cleanup_task = asyncio.ensure_future(_purge_expired())
 
 
 async def check_rate_limit(client_ip: str) -> bool:
+    _start_background_cleanup()
     redis = await _get_redis()
     if redis is not None:
         return await _redis_rate_limit(redis, client_ip)

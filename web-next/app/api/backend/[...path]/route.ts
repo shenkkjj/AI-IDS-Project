@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getToken } from "next-auth/jwt";
 import { BACKEND_BASE_URL } from "@/lib/utils";
 
 type ProxyMethod = "GET" | "POST" | "PUT";
@@ -39,6 +40,7 @@ function joinBackendPath(path?: string[]): string {
 }
 
 const PUBLIC_AUTH_PATHS = new Set([
+  "/health",
   "/auth/register",
   "/auth/login/password",
   "/auth/login/otp/request",
@@ -86,16 +88,47 @@ function _allowedHosts(): string[] {
   ].filter(Boolean) as string[];
 }
 
-function getAccessTokenFromCookie(request: NextRequest): string {
-  const cookieHeader = request.headers.get("cookie") || "";
-  const match = cookieHeader.match(/access_token=([^;]+)/);
-  return match ? decodeURIComponent(match[1]) : "";
-}
-
 function getAccessTokenFromHeader(request: NextRequest): string {
   const authHeader = request.headers.get("authorization") || "";
   const match = authHeader.match(/^Bearer\s+(.+)$/i);
   return match ? match[1].trim() : "";
+}
+
+function getAuthCookieConfig(request: NextRequest): { cookieName: string; salt: string } {
+  const proto = request.headers.get("x-forwarded-proto");
+  const isSecure = proto === "https" || request.url.startsWith("https://");
+  const cookieName = isSecure ? "__Secure-authjs.session-token" : "authjs.session-token";
+  return { cookieName, salt: cookieName };
+}
+
+const ALT_COOKIE_CONFIGS = [
+  { cookieName: "authjs.session-token", salt: "authjs.session-token" },
+  { cookieName: "__Secure-authjs.session-token", salt: "__Secure-authjs.session-token" },
+];
+
+function getAuthSecret(): string {
+  const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+  if (secret) return secret;
+  if (process.env.NODE_ENV === "development") return "dev-insecure-secret-do-not-use-in-production";
+  return "";
+}
+
+async function getAccessTokenFromSession(request: NextRequest): Promise<string> {
+  const secret = getAuthSecret();
+  if (!secret) return "";
+  const primary = getAuthCookieConfig(request);
+  const token = await getToken({ req: request, secret, salt: primary.salt, cookieName: primary.cookieName });
+  if (token) {
+    return String((token as Record<string, unknown>)?.access_token || "").trim();
+  }
+  for (const alt of ALT_COOKIE_CONFIGS) {
+    if (alt.cookieName === primary.cookieName) continue;
+    const altToken = await getToken({ req: request, secret, salt: alt.salt, cookieName: alt.cookieName });
+    if (altToken) {
+      return String((altToken as Record<string, unknown>)?.access_token || "").trim();
+    }
+  }
+  return "";
 }
 
 async function buildBackendRequest(method: ProxyMethod, request: NextRequest, backendPath: string): Promise<Response> {
@@ -107,7 +140,7 @@ async function buildBackendRequest(method: ProxyMethod, request: NextRequest, ba
   const headers: Record<string, string> = {};
 
   if (!isPublic) {
-    const accessToken = getAccessTokenFromCookie(request) || getAccessTokenFromHeader(request);
+    const accessToken = await getAccessTokenFromSession(request) || getAccessTokenFromHeader(request);
     if (!accessToken) {
       return NextResponse.json({ detail: "UNAUTHORIZED" }, { status: 401 });
     }
@@ -155,8 +188,9 @@ async function buildBackendRequest(method: ProxyMethod, request: NextRequest, ba
 
 function toClientResponse(backendResponse: Response): Response {
   const contentType = backendResponse.headers.get("content-type") || "application/json; charset=utf-8";
+  const body = backendResponse.body;
 
-  return new Response(backendResponse.body, {
+  return new Response(body, {
     status: backendResponse.status,
     headers: {
       "Content-Type": contentType,

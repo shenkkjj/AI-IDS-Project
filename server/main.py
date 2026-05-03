@@ -4,27 +4,30 @@ import re
 import sys
 from pathlib import Path
 
+_ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+if _ENV_PATH.exists():
+    with open(_ENV_PATH, "r", encoding="utf-8") as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if not _line or _line.startswith("#") or "=" not in _line:
+                continue
+            _key, _value = _line.split("=", 1)
+            if _key.strip() and _key.strip() not in os.environ:
+                os.environ[_key.strip()] = _value.strip().strip('"').strip("'")
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
 from server.analyzer import AnalyzerConfig
 from server.core.config import (
-    load_dotenv_file,
     load_timeout_seconds,
     validate_cookie_config,
 )
 from server.core.database import init_db, ensure_user_config_columns
 from server.core.state import app_state
 from server.routers import (
-    auth_router,
-    user_router,
-    logs_router,
-    site_router,
-    copilot_router,
-    alerts_router,
-    llm_router,
-    waf_router,
+    auth_router, user_router, logs_router, site_router, copilot_router, alerts_router, llm_router, waf_router, export_router,
 )
 from server.services.alert_service import alert_worker
 from server.services.site_monitor_service import _ssl_monitor_loop
@@ -37,7 +40,6 @@ except ModuleNotFoundError:
         sys.path.insert(0, project_root)
     from models.train import FEATURE_COLUMNS
 
-load_dotenv_file(Path(__file__).resolve().parents[1] / ".env")
 validate_cookie_config()
 init_db()
 ensure_user_config_columns()
@@ -51,9 +53,6 @@ _cors_origins = (
     else [
         "http://127.0.0.1:3000",
         "http://localhost:3000",
-        "http://127.0.0.1:8080",
-        "http://localhost:8080",
-        "http://192.168.28.1:3000",
     ]
 )
 if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"} and any(
@@ -73,7 +72,7 @@ app.add_middleware(
 _llm_config = AnalyzerConfig(
     api_key=os.getenv("LLM_API_KEY", "").strip(),
     base_url=os.getenv("LLM_BASE_URL", "").strip().rstrip("/"),
-    model=os.getenv("LLM_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini",
+    model=os.getenv("LLM_MODEL", "").strip(),
     timeout_seconds=load_timeout_seconds(),
 )
 
@@ -85,6 +84,7 @@ app.include_router(copilot_router.router)
 app.include_router(alerts_router.router)
 app.include_router(llm_router.router)
 app.include_router(waf_router.router)
+app.include_router(export_router.router)
 
 
 @app.on_event("startup")

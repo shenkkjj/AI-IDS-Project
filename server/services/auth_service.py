@@ -20,14 +20,40 @@ from server.models_db import AuthChallenge, User
 from server.security_utils import hash_password, verify_password, random_otp
 
 
-async def register_user(data: UserRegisterIn, request: Request, db: Session) -> dict[str, Any]:
+def _build_auth_payload(user: User, config: Any, token: str | None = None) -> dict[str, Any]:
+    from server.core.llm_utils import choose_provider
+    provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
+    payload: dict[str, Any] = {
+        "user": {
+            "id": user.id,
+            "email": user.email,
+            "display_name": user.display_name,
+            "auth_provider": user.auth_provider,
+        },
+        "config": {
+            "ai_provider": provider,
+            "model": config.model,
+            "base_url": config.base_url,
+            "timeout_seconds": config.timeout_seconds,
+            "alert_email_enabled": config.alert_email_enabled,
+            "alert_voice_enabled": config.alert_voice_enabled,
+            "ui_theme": config.ui_theme,
+            "ui_density": config.ui_density,
+            "has_api_key": bool(_safe_decrypt(user.encrypted_api_key)),
+            "api_key_masked": _mask_key(_safe_decrypt(user.encrypted_api_key)),
+        },
+    }
+    if token:
+        payload["access_token"] = token
+    return payload
+
+
+async def register_user(data: UserRegisterIn, request: Request, response: Response, db: Session) -> dict[str, Any]:
     from server.core.utils import _get_client_ip
-    from server.core.config import REGISTER_RATE_LIMIT_WINDOW, REGISTER_RATE_LIMIT_MAX
 
     client_ip = _get_client_ip(request)
-    async with app_state.rate_limit.register_lock:
-        if not app_state.rate_limit._check_rate_limit(app_state.rate_limit.register_attempts, client_ip, REGISTER_RATE_LIMIT_WINDOW, REGISTER_RATE_LIMIT_MAX):
-            raise HTTPException(status_code=429, detail="注册尝试过于频繁，请1小时后再试")
+    if not await app_state.rate_limit.check_register_limit(client_ip):
+        raise HTTPException(status_code=429, detail="注册尝试过于频繁，请1小时后再试")
 
     existing = db.query(User).filter(User.email == data.email.lower()).first()
     if existing:
@@ -47,37 +73,13 @@ async def register_user(data: UserRegisterIn, request: Request, db: Session) -> 
     db.refresh(user)
 
     token = _issue_token_for_user(user)
-    set_access_cookie(Response(), token)
+    set_access_cookie(response, token)
 
     from server.services.user_service import get_or_create_user_config
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="register", detail="password register")
 
-    from server.core.llm_utils import choose_provider
-    provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
-    payload = {
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "display_name": user.display_name,
-            "auth_provider": user.auth_provider,
-        },
-        "config": {
-            "ai_provider": provider,
-            "model": config.model,
-            "base_url": config.base_url,
-            "timeout_seconds": config.timeout_seconds,
-            "alert_email_enabled": config.alert_email_enabled,
-            "alert_voice_enabled": config.alert_voice_enabled,
-            "ui_theme": config.ui_theme,
-            "ui_density": config.ui_density,
-            "has_api_key": bool(_safe_decrypt(user.encrypted_api_key)),
-            "api_key_masked": _mask_key(_safe_decrypt(user.encrypted_api_key)),
-        },
-    }
-    if token:
-        payload["access_token"] = token
-    return payload
+    return _build_auth_payload(user, config, token)
 
 
 async def login_password(data: LoginPasswordIn, response: Response, db: Session) -> dict[str, Any]:
@@ -97,31 +99,7 @@ async def login_password(data: LoginPasswordIn, response: Response, db: Session)
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="login_password", detail="password login")
 
-    from server.core.llm_utils import choose_provider
-    provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
-    payload = {
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "display_name": user.display_name,
-            "auth_provider": user.auth_provider,
-        },
-        "config": {
-            "ai_provider": provider,
-            "model": config.model,
-            "base_url": config.base_url,
-            "timeout_seconds": config.timeout_seconds,
-            "alert_email_enabled": config.alert_email_enabled,
-            "alert_voice_enabled": config.alert_voice_enabled,
-            "ui_theme": config.ui_theme,
-            "ui_density": config.ui_density,
-            "has_api_key": bool(_safe_decrypt(user.encrypted_api_key)),
-            "api_key_masked": _mask_key(_safe_decrypt(user.encrypted_api_key)),
-        },
-    }
-    if token:
-        payload["access_token"] = token
-    return payload
+    return _build_auth_payload(user, config, token)
 
 
 async def _verify_google_token(id_token: str) -> dict[str, Any] | None:
@@ -167,12 +145,10 @@ async def _verify_github_token(access_token: str) -> dict[str, Any] | None:
 
 async def login_oauth(data: OAuthLoginIn, response: Response, request: Request, db: Session) -> dict[str, Any]:
     from server.core.utils import _get_client_ip
-    from server.core.config import REGISTER_RATE_LIMIT_WINDOW, REGISTER_RATE_LIMIT_MAX
 
     client_ip = _get_client_ip(request)
-    async with app_state.rate_limit.register_lock:
-        if not app_state.rate_limit._check_rate_limit(app_state.rate_limit.register_attempts, client_ip, REGISTER_RATE_LIMIT_WINDOW, REGISTER_RATE_LIMIT_MAX):
-            raise HTTPException(status_code=429, detail="注册尝试过于频繁，请稍后再试")
+    if not await app_state.rate_limit.check_register_limit(client_ip):
+        raise HTTPException(status_code=429, detail="注册尝试过于频繁，请稍后再试")
 
     if not data.provider_user_id or len(data.provider_user_id) < 2:
         raise HTTPException(status_code=400, detail="OAuth 身份验证信息无效")
@@ -229,31 +205,7 @@ async def login_oauth(data: OAuthLoginIn, response: Response, request: Request, 
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="login_oauth", detail=f"oauth login {data.provider}")
 
-    from server.core.llm_utils import choose_provider
-    provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
-    payload = {
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "display_name": user.display_name,
-            "auth_provider": user.auth_provider,
-        },
-        "config": {
-            "ai_provider": provider,
-            "model": config.model,
-            "base_url": config.base_url,
-            "timeout_seconds": config.timeout_seconds,
-            "alert_email_enabled": config.alert_email_enabled,
-            "alert_voice_enabled": config.alert_voice_enabled,
-            "ui_theme": config.ui_theme,
-            "ui_density": config.ui_density,
-            "has_api_key": bool(_safe_decrypt(user.encrypted_api_key)),
-            "api_key_masked": _mask_key(_safe_decrypt(user.encrypted_api_key)),
-        },
-    }
-    if token:
-        payload["access_token"] = token
-    return payload
+    return _build_auth_payload(user, config, token)
 
 
 async def otp_request(data: OTPRequestIn, db: Session) -> dict[str, Any]:
@@ -265,13 +217,29 @@ async def otp_request(data: OTPRequestIn, db: Session) -> dict[str, Any]:
 
     user = db.query(User).filter(User.email == data.email.lower(), User.is_active.is_(True)).first()
     code = _issue_challenge(db, data.email.lower(), "otp", user.id if user else None)
-    try:
-        await send_otp_email(data.email.lower(), code)
-    except Exception as exc:
-        logger.warning("send otp email failed: {}", exc)
-        raise HTTPException(status_code=500, detail="邮件发送失败，请检查 SMTP 配置") from exc
-    create_log(db, user_id=user.id if user else None, level="info", action="otp_request", detail="otp requested")
-    return {"status": "ok", "message": "验证码已发送"}
+
+    import os
+    mail_user = os.getenv("MAIL_USERNAME", "").strip()
+    mail_pass = os.getenv("MAIL_PASSWORD", "").strip()
+    mail_server = os.getenv("MAIL_SERVER", "").strip()
+    mail_configured = bool(mail_user and mail_pass and mail_server and mail_server != "smtp.example.com")
+
+    if mail_configured:
+        try:
+            await send_otp_email(data.email.lower(), code)
+        except Exception as exc:
+            logger.warning("send otp email failed: {}", exc)
+            raise HTTPException(status_code=500, detail="邮件发送失败，请检查 SMTP 配置") from exc
+        create_log(db, user_id=user.id if user else None, level="info", action="otp_request", detail="otp requested")
+        return {"status": "ok", "message": "验证码已发送至邮箱"}
+    else:
+        is_dev = os.getenv("APP_ENV", "development").strip().lower() in ("development", "dev")
+        if is_dev:
+            logger.debug("[dev] OTP code for {}: {}", data.email.lower(), code)
+            create_log(db, user_id=user.id if user else None, level="info", action="otp_request", detail="otp requested (dev mode)")
+            return {"status": "ok", "message": "验证码已发送", "dev_code": code}
+        else:
+            raise HTTPException(status_code=500, detail="邮件服务未配置")
 
 
 async def otp_verify(data: OTPVerifyIn, response: Response, db: Session) -> dict[str, Any]:
@@ -283,7 +251,7 @@ async def otp_verify(data: OTPVerifyIn, response: Response, db: Session) -> dict
 
     user = db.query(User).filter(User.email == email_key, User.is_active.is_(True)).first()
     if not user:
-        raise HTTPException(status_code=404, detail="用户不存在，请先注册")
+        raise HTTPException(status_code=400, detail="验证码无效或已过期")
 
     try:
         _consume_valid_challenge(db, email_key, "otp", data.code)
@@ -302,31 +270,7 @@ async def otp_verify(data: OTPVerifyIn, response: Response, db: Session) -> dict
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="login_otp", detail="otp login")
 
-    from server.core.llm_utils import choose_provider
-    provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
-    payload = {
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "display_name": user.display_name,
-            "auth_provider": user.auth_provider,
-        },
-        "config": {
-            "ai_provider": provider,
-            "model": config.model,
-            "base_url": config.base_url,
-            "timeout_seconds": config.timeout_seconds,
-            "alert_email_enabled": config.alert_email_enabled,
-            "alert_voice_enabled": config.alert_voice_enabled,
-            "ui_theme": config.ui_theme,
-            "ui_density": config.ui_density,
-            "has_api_key": bool(_safe_decrypt(user.encrypted_api_key)),
-            "api_key_masked": _mask_key(_safe_decrypt(user.encrypted_api_key)),
-        },
-    }
-    if token:
-        payload["access_token"] = token
-    return payload
+    return _build_auth_payload(user, config, token)
 
 
 async def password_reset_request(data: PasswordResetRequestIn, db: Session) -> dict[str, Any]:
@@ -341,13 +285,29 @@ async def password_reset_request(data: PasswordResetRequestIn, db: Session) -> d
         return {"status": "ok", "message": "如果邮箱存在，验证码已发送"}
 
     code = _issue_challenge(db, data.email.lower(), "reset", user.id)
-    try:
-        await send_reset_email(data.email.lower(), code)
-    except Exception as exc:
-        logger.warning("send reset email failed: {}", exc)
-        raise HTTPException(status_code=500, detail="邮件发送失败，请检查 SMTP 配置") from exc
-    create_log(db, user_id=user.id, level="info", action="password_reset_request", detail="reset requested")
-    return {"status": "ok", "message": "如果邮箱存在，验证码已发送"}
+
+    import os
+    mail_user = os.getenv("MAIL_USERNAME", "").strip()
+    mail_pass = os.getenv("MAIL_PASSWORD", "").strip()
+    mail_server = os.getenv("MAIL_SERVER", "").strip()
+    mail_configured = bool(mail_user and mail_pass and mail_server and mail_server != "smtp.example.com")
+
+    if mail_configured:
+        try:
+            await send_reset_email(data.email.lower(), code)
+        except Exception as exc:
+            logger.warning("send reset email failed: {}", exc)
+            raise HTTPException(status_code=500, detail="邮件发送失败，请检查 SMTP 配置") from exc
+        create_log(db, user_id=user.id, level="info", action="password_reset_request", detail="reset requested")
+        return {"status": "ok", "message": "验证码已发送至邮箱"}
+    else:
+        is_dev = os.getenv("APP_ENV", "development").strip().lower() in ("development", "dev")
+        if is_dev:
+            logger.debug("[dev] reset code for {}: {}", data.email.lower(), code)
+            create_log(db, user_id=user.id, level="info", action="password_reset_request", detail="reset requested (dev mode)")
+            return {"status": "ok", "message": "验证码已发送", "dev_code": code}
+        else:
+            raise HTTPException(status_code=500, detail="邮件服务未配置")
 
 
 async def password_reset_confirm(data: PasswordResetConfirmIn, db: Session) -> dict[str, Any]:
@@ -362,7 +322,7 @@ async def password_reset_confirm(data: PasswordResetConfirmIn, db: Session) -> d
 
     user = db.query(User).filter(User.email == email_key, User.is_active.is_(True)).first()
     if not user:
-        raise HTTPException(status_code=404, detail="用户不存在")
+        raise HTTPException(status_code=400, detail="验证码无效或已过期")
 
     try:
         _consume_valid_challenge(db, email_key, "reset", data.code)
@@ -384,8 +344,11 @@ async def password_reset_confirm(data: PasswordResetConfirmIn, db: Session) -> d
     return {"status": "ok", "message": "密码已更新"}
 
 
-def logout(response: Response) -> dict[str, Any]:
+def logout(response: Response, db: Session, user: User) -> dict[str, Any]:
     from server.core.security import clear_access_cookie
+    user.token_version = user.token_version + 1
+    db.add(user)
+    db.commit()
     clear_access_cookie(response)
     return {"status": "ok"}
 
@@ -393,29 +356,7 @@ def logout(response: Response) -> dict[str, Any]:
 def get_session(user: User, db: Session) -> dict[str, Any]:
     from server.services.user_service import get_or_create_user_config
     config = get_or_create_user_config(db, user.id)
-
-    from server.core.llm_utils import choose_provider
-    provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
-    return {
-        "user": {
-            "id": user.id,
-            "email": user.email,
-            "display_name": user.display_name,
-            "auth_provider": user.auth_provider,
-        },
-        "config": {
-            "ai_provider": provider,
-            "model": config.model,
-            "base_url": config.base_url,
-            "timeout_seconds": config.timeout_seconds,
-            "alert_email_enabled": config.alert_email_enabled,
-            "alert_voice_enabled": config.alert_voice_enabled,
-            "ui_theme": config.ui_theme,
-            "ui_density": config.ui_density,
-            "has_api_key": bool(_safe_decrypt(user.encrypted_api_key)),
-            "api_key_masked": _mask_key(_safe_decrypt(user.encrypted_api_key)),
-        },
-    }
+    return _build_auth_payload(user, config)
 
 
 def _challenge_hash_material(email: str, challenge_type: str, code: str) -> str:

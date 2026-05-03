@@ -72,8 +72,8 @@ def user_config_to_llm_runtime(config, user) -> tuple[AnalyzerConfig, str]:
     except DecryptionError:
         api_key = ""
     provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
-    model = (config.model or "").strip() or PROVIDER_MODEL_DEFAULTS[provider]
-    base_url = (config.base_url or "").strip().rstrip("/") or PROVIDER_BASE_URL_DEFAULTS[provider]
+    model = (config.model or PROVIDER_MODEL_DEFAULTS.get(provider, "")).strip()
+    base_url = (config.base_url or PROVIDER_BASE_URL_DEFAULTS.get(provider, "")).strip().rstrip("/")
 
     runtime = AnalyzerConfig(
         api_key=api_key,

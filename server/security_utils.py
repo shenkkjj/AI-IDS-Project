@@ -31,6 +31,7 @@ def _get_jwt_algorithm() -> str:
 WEAK_APP_SECRETS = {
     "dev-secret-change-me",
     "change-me-to-a-long-random-secret",
+    "change-this-to-a-strong-random-secret",
     "changeme",
     "change-me",
     "default",

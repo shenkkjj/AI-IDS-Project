@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import Cookie, Depends, Header, HTTPException, Request, Response
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from server.core.config import cookie_secure, cookie_samesite, LLM_ADMIN_TOKEN_ENV, LLM_ADMIN_TOKEN_HEADER, INTERNAL_ALERT_TOKEN_ENV, INTERNAL_ALERT_TOKEN_HEADER
@@ -52,7 +53,7 @@ def _extract_bearer_token(authorization: str | None) -> str | None:
 
 def resolve_token(access_token_cookie: str | None, authorization: str | None) -> str:
     bearer = _extract_bearer_token(authorization)
-    token = access_token_cookie or bearer
+    token = bearer or access_token_cookie
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     return token
@@ -64,13 +65,13 @@ def get_current_user(
     authorization: str | None,
 ) -> User:
     token = resolve_token(access_token_cookie, authorization)
-    print(f"[auth] token received: {token[:20]}..." if token else "[auth] no token")
+    logger.debug("[auth] token received")
     try:
         payload = decode_access_token(token)
         user_id = int(payload.get("sub", "0"))
-        print(f"[auth] decoded user_id: {user_id}")
+        logger.debug("[auth] decoded user_id: {}", user_id)
     except Exception as exc:
-        print(f"[auth] decode error: {exc}")
+        logger.debug("[auth] decode error: {}", exc)
         raise HTTPException(status_code=401, detail="Invalid token") from exc
 
     user = db.query(User).filter(User.id == user_id, User.is_active.is_(True)).first()
@@ -85,7 +86,7 @@ def get_current_user(
             changed_ts = user.password_changed_at.replace(tzinfo=timezone.utc).timestamp()
         else:
             changed_ts = user.password_changed_at.timestamp()
-        if changed_ts > token_pwd_iat:
+        if int(changed_ts) > int(token_pwd_iat):
             raise HTTPException(status_code=401, detail="密码已更改，请重新登录")
 
     token_version = payload.get("tv", 0)
@@ -107,8 +108,8 @@ def require_llm_admin_token(token: str | None = Header(default=None, alias=LLM_A
     expected = os.getenv(LLM_ADMIN_TOKEN_ENV, "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail=f"{LLM_ADMIN_TOKEN_ENV} not configured")
-    if len(expected) < 16:
-        raise HTTPException(status_code=503, detail=f"{LLM_ADMIN_TOKEN_ENV} too short (min 16 chars)")
+    if len(expected) < 32:
+        raise HTTPException(status_code=503, detail=f"{LLM_ADMIN_TOKEN_ENV} too short (min 32 chars)")
     if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Invalid admin token")
 
@@ -117,8 +118,8 @@ def require_alert_ingest_token(token: str | None = Header(default=None, alias=IN
     expected = os.getenv(INTERNAL_ALERT_TOKEN_ENV, "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail=f"{INTERNAL_ALERT_TOKEN_ENV} not configured")
-    if len(expected) < 16:
-        raise HTTPException(status_code=503, detail=f"{INTERNAL_ALERT_TOKEN_ENV} too short (min 16 chars)")
+    if len(expected) < 32:
+        raise HTTPException(status_code=503, detail=f"{INTERNAL_ALERT_TOKEN_ENV} too short (min 32 chars)")
     if not token or not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=401, detail="Invalid alerts token")
 

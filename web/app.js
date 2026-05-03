@@ -750,6 +750,9 @@ function getAuthInputValues() {
   };
 }
 
+// 警告: URL hash token 传递方案仅用于开发调试
+// 生产环境应使用 httpOnly cookie，避免 token 通过 URL 泄露
+// 迁移指南: 使用 Next.js 前端的 NextAuth.js 方案替代
 function initAuthTokenBridge() {
   const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : "";
   const params = new URLSearchParams(hash);
@@ -798,10 +801,10 @@ function setUserSession(payload) {
   if (config) {
     providerInput.value = String(config.ai_provider || "openai");
     baseUrlInput.value = config.base_url || "";
-    modelInput.value = config.model || "gpt-4o-mini";
+    modelInput.value = config.model || "";
     apiKeyInput.value = "";
     const provider = String(config.ai_provider || "openai");
-    setConfigStatus(`已恢复用户配置: ${provider} / ${config.model || "gpt-4o-mini"}，API Key: ${config.has_api_key ? "已配置" : "未配置"}`);
+    setConfigStatus(`已恢复用户配置: ${provider} / ${config.model || "未设置"}，API Key: ${config.has_api_key ? "已配置" : "未配置"}`);
     if (typeof config.alert_voice_enabled === "boolean") {
       state.voiceEnabled = config.alert_voice_enabled;
       voiceToggleBtn.textContent = state.voiceEnabled ? "关闭语音预警" : "开启语音预警";
@@ -1528,12 +1531,12 @@ async function loadConfig() {
     const config = await apiRequest("/user/config", { method: "GET" });
     providerInput.value = String(config.ai_provider || "openai");
     baseUrlInput.value = config.base_url || "";
-    modelInput.value = config.model || "gpt-4o-mini";
+    modelInput.value = config.model || "";
     apiKeyInput.value = "";
 
     const apiKeyState = config.has_api_key ? "已配置" : "未配置";
     const provider = String(config.ai_provider || "openai");
-    setConfigStatus(`配置已加载: ${provider} / ${config.model || "gpt-4o-mini"}，API Key: ${apiKeyState}`);
+    setConfigStatus(`配置已加载: ${provider} / ${config.model || "未设置"}，API Key: ${apiKeyState}`);
 
     if (typeof config.alert_voice_enabled === "boolean") {
       state.voiceEnabled = config.alert_voice_enabled;
@@ -1693,7 +1696,11 @@ async function confirmThreat() {
   try {
     const response = await fetch(`${API_BASE}/threats/confirm`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(state.authToken ? { Authorization: `Bearer ${state.authToken}` } : {}),
+      },
       body: JSON.stringify({
         alert_id: alertId,
         label: "user_confirmed_threat",

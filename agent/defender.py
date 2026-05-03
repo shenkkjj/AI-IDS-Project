@@ -7,6 +7,20 @@ import time
 from loguru import logger
 
 
+import re
+
+_IPV4_PATTERN = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+_IPV6_PATTERN = re.compile(r"^[0-9a-fA-F:]+$")
+
+
+def _is_valid_ip(ip: str) -> bool:
+    if _IPV4_PATTERN.match(ip):
+        return all(0 <= int(o) <= 255 for o in ip.split("."))
+    if _IPV6_PATTERN.match(ip):
+        return 2 <= len(ip) <= 45
+    return False
+
+
 class IPBlocker:
     def __init__(self) -> None:
         self._platform = platform.system().lower()
@@ -59,6 +73,10 @@ class IPBlocker:
         return self._run_command(["iptables", "-D", "INPUT", "-s", ip, "-j", "DROP"])
 
     def block_ip(self, ip: str, duration_seconds: int = 600) -> bool:
+        if not _is_valid_ip(ip):
+            logger.warning("Refusing to block invalid IP: {}", ip)
+            return False
+
         blocked = False
 
         if self._platform.startswith("win"):
@@ -79,6 +97,10 @@ class IPBlocker:
         return True
 
     def unblock_ip(self, ip: str) -> bool:
+        if not _is_valid_ip(ip):
+            logger.warning("Refusing to unblock invalid IP: {}", ip)
+            return False
+
         if self._platform.startswith("win"):
             ok = self._unblock_windows(ip)
         elif self._platform.startswith("linux"):

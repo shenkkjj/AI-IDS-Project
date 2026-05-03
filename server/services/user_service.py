@@ -4,9 +4,8 @@ from typing import Any
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from server.core.config import PROVIDER_BASE_URL_DEFAULTS, PROVIDER_MODEL_DEFAULTS
 from server.core.database import create_log
-from server.core.llm_utils import choose_provider, normalize_ai_provider
+from server.core.llm_utils import normalize_ai_provider
 from server.core.security import _mask_key, _safe_decrypt
 from server.models.schemas import UserConfigIn
 from server.models_db import User, UserConfig
@@ -16,8 +15,8 @@ def build_default_config(user_id: int) -> UserConfig:
     from server.core.config import load_timeout_seconds
     return UserConfig(
         user_id=user_id,
-        ai_provider="openai",
-        model="gpt-4o-mini",
+        ai_provider="custom",
+        model="",
         base_url="",
         timeout_seconds=load_timeout_seconds(),
         alert_email_enabled=True,
@@ -46,9 +45,8 @@ def get_user_config(user: User, db: Session) -> dict[str, Any]:
     except Exception:
         api_key_plain = None
 
-    provider = choose_provider(getattr(config, "ai_provider", None), config.model, config.base_url)
     return {
-        "ai_provider": provider,
+        "ai_provider": config.ai_provider,
         "model": config.model,
         "base_url": config.base_url,
         "timeout_seconds": config.timeout_seconds,
@@ -71,7 +69,7 @@ def update_user_config(user: User, data: UserConfigIn, db: Session) -> dict[str,
     if "ai_provider" in payload:
         config.ai_provider = normalize_ai_provider(payload["ai_provider"])
     if "model" in payload:
-        config.model = str(payload["model"]).strip() or config.model
+        config.model = str(payload["model"]).strip()
     if "base_url" in payload:
         config.base_url = str(payload["base_url"]).strip().rstrip("/")
     if "timeout_seconds" in payload:
@@ -90,13 +88,6 @@ def update_user_config(user: User, data: UserConfigIn, db: Session) -> dict[str,
         from server.security_utils import encrypt_api_key
         user.encrypted_api_key = encrypt_api_key(key_text) if key_text else user.encrypted_api_key
 
-    provider = choose_provider(config.ai_provider, config.model, config.base_url)
-    config.ai_provider = provider
-    if not config.base_url:
-        config.base_url = PROVIDER_BASE_URL_DEFAULTS[provider]
-    if not config.model:
-        config.model = PROVIDER_MODEL_DEFAULTS[provider]
-
     db.add(config)
     db.add(user)
     db.commit()
@@ -106,7 +97,7 @@ def update_user_config(user: User, data: UserConfigIn, db: Session) -> dict[str,
     return {
         "status": "updated",
         "config": {
-            "ai_provider": provider,
+            "ai_provider": config.ai_provider,
             "model": config.model,
             "base_url": config.base_url,
             "timeout_seconds": config.timeout_seconds,

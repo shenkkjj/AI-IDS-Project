@@ -21,6 +21,7 @@ function sanitizeBackendError(detail: string): string {
   if (detail.includes("invalid") || detail.includes("无效")) return "输入信息无效";
   if (detail.includes("expired") || detail.includes("过期")) return "验证码已过期，请重新获取";
   if (detail.includes("rate") || detail.includes("频繁")) return "请求过于频繁，请稍后重试";
+  if (detail.includes("SMTP") || detail.includes("邮件")) return "邮件服务未配置，请联系管理员或使用密码登录";
   return "操作失败，请稍后重试";
 }
 
@@ -370,7 +371,11 @@ export default function HomePage() {
           return;
         }
 
-        setMessage("验证码已发送至邮箱");
+        if (data.dev_code) {
+          setMessage(`DEV_MODE: 验证码为 ${data.dev_code}（开发模式）`);
+        } else {
+          setMessage("验证码已发送至邮箱");
+        }
         setLockedResetEmail(email);
         setMode("reset");
       } catch {

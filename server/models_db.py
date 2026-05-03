@@ -34,7 +34,7 @@ class UserConfig(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     ai_provider: Mapped[str] = mapped_column(String(24), default="openai", nullable=False)
-    model: Mapped[str] = mapped_column(String(120), default="gpt-4o-mini", nullable=False)
+    model: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     base_url: Mapped[str] = mapped_column(String(500), default="", nullable=False)
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     alert_email_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)

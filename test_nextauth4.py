@@ -1,6 +1,10 @@
+import os
 import urllib.request
 import urllib.parse
 import json
+
+TEST_EMAIL = os.environ.get("TEST_EMAIL", "test@example.com")
+TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "TestPassword123!")
 
 # Step 1: Get CSRF token
 csrf_req = urllib.request.Request('http://localhost:3000/api/auth/csrf')
@@ -24,8 +28,8 @@ opener = urllib.request.build_opener(NoRedirectHandler())
 req = urllib.request.Request(
     'http://localhost:3000/api/auth/callback/credentials',
     data=urllib.parse.urlencode({
-        'email': '2762919805@qq.com',
-        'password': 'S2762919805s',
+        'email': TEST_EMAIL,
+        'password': TEST_PASSWORD,
         'csrfToken': csrf_token,
         'callbackUrl': 'http://localhost:3000/dashboard',
         'json': 'true'

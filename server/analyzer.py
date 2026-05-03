@@ -2,10 +2,34 @@ import json
 import os
 import time
 from dataclasses import dataclass
+from ipaddress import ip_address
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
+
+CLOUD_METADATA_HOSTS = frozenset({"metadata.google.internal", "169.254.169.254"})
+
+
+def _is_ssrf_safe(url: str) -> bool:
+    try:
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        if hostname.lower() in CLOUD_METADATA_HOSTS:
+            return False
+        try:
+            addr = ip_address(hostname)
+            if addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_reserved or addr.is_multicast:
+                return False
+            return True
+        except ValueError:
+            pass
+        from server.core.utils import _is_url_pointing_to_internal
+        return not _is_url_pointing_to_internal(url)
+    except Exception:
+        return False
 
 
 SOC_SYSTEM_PROMPT = """
@@ -57,6 +81,9 @@ def build_chat_completions_url(base_url: str) -> str:
     if not normalized:
         raise ValueError("Missing base URL.")
 
+    if not _is_ssrf_safe(normalized):
+        raise ValueError("Base URL resolves to an internal or restricted address.")
+
     parsed = urlsplit(normalized)
     path = parsed.path.rstrip("/")
 
@@ -78,7 +105,7 @@ class LLMAnalyzer:
     def _load_config() -> AnalyzerConfig:
         api_key = os.getenv("LLM_API_KEY", "").strip()
         base_url = os.getenv("LLM_BASE_URL", "").strip().rstrip("/")
-        model = os.getenv("LLM_MODEL", "gpt-4o-mini").strip()
+        model = os.getenv("LLM_MODEL", "").strip()
         timeout_seconds = int(os.getenv("LLM_TIMEOUT_SECONDS", "20"))
 
         if not api_key or not base_url:

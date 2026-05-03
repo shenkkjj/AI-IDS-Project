@@ -11,6 +11,10 @@ class ConnectionManager:
         self._lock = asyncio.Lock()
 
     async def connect(self, user_id: int, websocket: WebSocket) -> None:
+        if user_id <= 0:
+            await websocket.close(code=4001, reason="Authentication required")
+            logger.warning("WebSocket rejected: missing user_id")
+            return
         await websocket.accept()
         async with self._lock:
             user_connections = self.active_connections.setdefault(user_id, set())

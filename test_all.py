@@ -1,9 +1,10 @@
+import os
 import sys
 import httpx
 
-BASE = "http://127.0.0.1:8000"
-TEST_EMAIL = "2762919805@qq.com"
-TEST_PASSWORD = "S2762919805s"
+BASE = os.environ.get("TEST_BASE_URL", "http://127.0.0.1:8000")
+TEST_EMAIL = os.environ.get("TEST_EMAIL", "test@example.com")
+TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "TestPassword123!")
 
 passed = 0
 failed = 0

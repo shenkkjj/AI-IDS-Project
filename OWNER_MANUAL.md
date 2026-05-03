@@ -1,467 +1,579 @@
-# OWNER_MANUAL
+# AI-CyberSentinel 拥有者手册
 
-> 本手册面向“站长/运维负责人”，目标是让非开发人员也能看懂并操作本平台。
-> 所有命令、端口、接口、路径均来自当前仓库代码，不是模板文案。
-
----
-
-## 一、平台能力地图（模块 -> 代码入口 -> 对用户的可见效果）
-
-### 1. 认证与会话系统
-
-- **后端入口**：`server/main.py:1319`（`/auth/register`）、`server/main.py:1346`（`/auth/login/password`）、`server/main.py:1362`（`/auth/login/oauth`）、`server/main.py:1460`（`/auth/session`）
-- **前端入口**：`web-next/auth.ts:63`（NextAuth 配置）、`web-next/app/page.tsx:63`（邮箱密码登录）、`web-next/app/page.tsx:107`（OAuth 登录）
-- **代理入口**：`web-next/app/api/auth/[...nextauth]/route.ts:1`
-- **用户看到的效果**：
-  - 可以用邮箱密码登录
-  - 若配置了 OAuth 变量，可点击 GitHub/Google 登录
-  - 登录成功自动跳转 `/dashboard`
-
-#### 关键机制
-- FastAPI 在登录成功后设置 `access_token` Cookie：`server/main.py:1355`
-- NextAuth 会把后端 `access_token` 保存到 JWT 中：`web-next/auth.ts:144`
-- 前端调用后端时通过中间代理自动带 `Authorization: Bearer ...`：`web-next/app/api/backend/[...path]/route.ts:38-40`
+> 赛博朋克风格 AI 入侵检测与防御平台 —— 从流量嗅探、AI 分析、自动拦截到邮件告警的一体化防护系统。
 
 ---
 
-### 2. 用户配置中心（AI 模型、告警偏好、UI 偏好）
+## 目录
 
-- **后端接口**：
-  - 读取：`GET /user/config` -> `server/main.py:1471`
-  - 更新：`PUT /user/config` -> `server/main.py:1496`
-- **前端调用点**：`web-next/app/dashboard/dashboard-client.tsx:499`（读取）、`web-next/app/dashboard/dashboard-client.tsx:939`（保存）
-- **数据库表**：`user_configs` -> `server/models_db.py:23`
-- **用户看到的效果**：
-  - 能切换 AI provider / model / base_url
-  - 能保存告警语音开关
-  - 下次登录后配置自动恢复
-
-#### 注意
-- API Key 加密存储（Fernet）：`server/security_utils.py:61-65`
-- 数据库路径固定为：`data/app.db`，定义在 `server/db.py:12`
+1. [项目愿景](#1-项目愿景)
+2. [架构全景](#2-架构全景)
+3. [技术栈](#3-技术栈)
+4. [功能清单](#4-功能清单)
+5. [项目结构](#5-项目结构)
+6. [本地启动指南](#6-本地启动指南)
+7. [完整 API 参考](#7-完整-api-参考)
+8. [部署与运维](#8-部署与运维)
+9. [安全配置说明](#9-安全配置说明)
+10. [故障排查](#10-故障排查)
 
 ---
 
-### 3. 多模型路由与连通性测试
+## 1. 项目愿景
 
-- **后端接口（管理员令牌保护）**：
-  - `GET /llm/config` -> `server/main.py:1754`
-  - `PUT /llm/config` -> `server/main.py:1763`
-  - `POST /llm/test` -> `server/main.py:1773`
-- **管理员令牌校验**：`server/main.py:881`（`LLM_ADMIN_TOKEN`）
-- **前端触发**：`web-next/app/dashboard/dashboard-client.tsx:978`（测试路由）
-- **用户看到的效果**：
-  - 配置模型后可点击“测试路由”验证可用性和延迟
-
-#### 支持的 provider（后端常量）
-- `openai / claude / gemini / grok / custom` -> `server/main.py:294`
+**AI-CyberSentinel** 是一句：用 AI 替代传统规则引擎，实现从"流量抓取 → 智能分析 → 自动防御"全链路的零延迟网络入侵检测系统。
 
 ---
 
-### 4. 告警采集、分析、回放
+## 2. 架构全景
 
-- **采集接口**：`POST /alerts` -> `server/main.py:1872`
-- **查询接口**：`GET /alerts` -> `server/main.py:1894`
-- **实时推送**：`WebSocket /ws/alerts` -> `server/main.py:1909`
-- **告警处理队列**：`_alert_queue` -> `server/main.py:385`
-- **用户看到的效果**：
-  - 看板实时出现告警
-  - 告警可被 Copilot 继续分析
-
-#### 安全边界
-- 告警入站需要 `x-alerts-token`：`server/main.py:889`
-- 来源 IP 还要匹配允许 CIDR：`server/main.py:123-147`
-
----
-
-### 5. WAF 代理防护
-
-- **核心接口**：`/site/proxy/{path:path}` -> `server/main.py:1811`
-- **策略匹配函数**：`_payload_has_attack_signature` -> `server/main.py:150`
-- **内置规则**：`WAF_BLOCK_PATTERNS` -> `server/main.py:63`
-- **用户看到的效果**：
-  - 命中规则请求返回 `403 blocked`
-  - 被拦截事件会进入告警队列并出现在看板
-
-#### 内置拦截范围（当前版本）
-- SQLi 特征（`union select`, `or 1=1`, `sleep(` 等）
-- XSS 特征（`<script`, `onerror=` 等）
-- 路径穿越特征（`../`, `%2e%2e%2f`, `/etc/passwd` 等）
-
----
-
-### 6. 站点健康监测（Uptime + SSL）
-
-- **设置目标站点**：`POST /site/target` -> `server/main.py:1599`
-- **查询健康状态**：`GET /site/health` -> `server/main.py:1646`
-- **后台巡检循环**：`_ssl_monitor_loop` -> `server/main.py:1258`
-- **巡检间隔**：60 秒 -> `server/main.py:55`
-- **用户看到的效果**：
-  - 看板显示站点在线状态
-  - 证书即将到期时会给预警
-
----
-
-### 7. Security Copilot（流式应答）
-
-- **接口**：`POST /copilot/stream` -> `server/main.py:1659`
-- **流式格式**：SSE（`text/event-stream`）-> `server/main.py:1691`
-- **前端解析入口**：`parseSseBuffer` -> `web-next/app/dashboard/dashboard-client.tsx:154`
-- **用户看到的效果**：
-  - 在右侧 Copilot 面板看到逐字流式返回
-  - 选中告警后，Copilot 自动带入告警上下文
-
----
-
-### 8. 新威胁确认与样本沉淀
-
-- **接口**：`POST /threats/confirm` -> `server/main.py:1694`
-- **写入目标文件**：`data/new_threats.csv` -> `server/main.py:391`
-- **用户看到的效果**：
-  - 在 UI 点击“确认威胁入库”后，样本落地 CSV
-
----
-
-### 9. 邮件验证码与密码重置
-
-- **接口**：
-  - OTP 申请：`/auth/login/otp/request` -> `server/main.py:1395`
-  - OTP 校验：`/auth/login/otp/verify` -> `server/main.py:1408`
-  - 重置申请：`/auth/password/reset/request` -> `server/main.py:1423`
-  - 重置确认：`/auth/password/reset/confirm` -> `server/main.py:1440`
-- **邮件发送实现**：`server/mailer.py:32`（OTP）、`server/mailer.py:48`（重置）
-- **用户看到的效果**：
-  - 能收到验证码邮件并完成登录/重置
-
----
-
-### 10. 数据模型总览（最重要三张业务表）
-
-- `users`：账号、密码哈希、OAuth 来源、加密 API Key -> `server/models_db.py:10`
-- `user_configs`：模型路由、告警、UI 偏好 -> `server/models_db.py:23`
-- `logs`：审计日志 -> `server/models_db.py:39`
-- `auth_challenges`：OTP/重置验证码挑战 -> `server/models_db.py:51`
-
----
-
-## 二、傻瓜式操作手册（从 0 到可用）
-
-> 默认你在项目根目录：`D:/Users/27629/Desktop/Claude/AI-IDS-Project`
-
-### A. 首次启动（推荐本地联调）
-
-#### 步骤 1：准备后端环境变量
-1. 复制 `.env.example` 为 `.env`
-2. 至少填写以下项（见 `./.env.example`）：
-   - `APP_SECRET`（必须是强随机，不能弱值）
-   - `LLM_ADMIN_TOKEN`
-   - `ALERTS_INGEST_TOKEN`
-   - 如果需要邮件功能，再填 SMTP 相关变量
-
-> `APP_SECRET` 若缺失或弱值会导致启动期安全组件报错，来源：`server/security_utils.py:26-30`
-
-#### 步骤 2：准备前端环境变量
-1. 复制 `web-next/.env.example` 为 `web-next/.env.local`
-2. 最少填写：
-   - `AUTH_SECRET`
-   - `BACKEND_BASE_URL=http://127.0.0.1:8000`
-3. 如需 OAuth，填写：
-   - `AUTH_GITHUB_ID / AUTH_GITHUB_SECRET`
-   - `AUTH_GOOGLE_ID / AUTH_GOOGLE_SECRET`
-   - 对应 `NEXT_PUBLIC_AUTH_GITHUB_ENABLED=true`、`NEXT_PUBLIC_AUTH_GOOGLE_ENABLED=true`
-
-#### 步骤 3：启动后端
-```bash
-.venv/Scripts/python.exe -m uvicorn server.main:app --host 127.0.0.1 --port 8000
+```
+┌─────────────────────────────────────────────────────┐
+│                     互联网流量                        │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│              agent/sniffer.py（Scapy 抓包引擎）        │
+│  混杂模式抓取 TCP/UDP/ICMP 包 → 提取特征向量           │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│           agent/defender.py（防火墙执行器）             │
+│  收到阻断指令 → 调用 netsh(Win) / iptables(Linux)     │
+│  添加/移除 IP 黑名单规则                               │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│         server/（FastAPI 后端 · 核心处理中枢）         │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ routers/waf_router.py → WAF 网关              │    │
+│  │  拦截 SQLi / XSS / 路径穿越 / 命令注入        │    │
+│  │  12 条正则规则 + 响应头注入                     │    │
+│  └─────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ services/auth_service.py → 认证中枢           │    │
+│  │  密码 / OTP / OAuth 登录 + 注册 + 密码重置    │    │
+│  │  JWT 签发 + bcrypt 哈希 + Fernet 加密存储    │    │
+│  └─────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ services/llm_service.py → AI 分析引擎         │    │
+│  │  支持 5 种 LLM 后端 + 自定义 Provider         │    │
+│  │  攻击载荷智能分类 + Security Copilot 对话     │    │
+│  └─────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ services/alert_service.py → 告警引擎          │    │
+│  │  4 线程 Worker 池 + 实时 WebSocket 推送       │    │
+│  │  邮件/桌面通知/Slack Webhook 多通道分发        │    │
+│  └─────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ core/rate_limiter.py → 速率限制器             │    │
+│  │  注册限流 / 登录限流 / IP 通用限流             │    │
+│  └─────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ core/state.py → 全局状态管理器                 │    │
+│  │  Redis 连接 / 限流器实例 / 蜜罐开关 / SSL 监控 │    │
+│  └─────────────────────────────────────────────┘    │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│              SQLite + Redis（数据层）                 │
+│  SQLite: 用户/告警/日志/配置持久化                     │
+│  Redis:  速率限制计数 / 会话缓存 / 热点数据             │
+└─────────────────┬───────────────────────────────────┘
+                  ▼
+┌─────────────────────────────────────────────────────┐
+│          web-next/（Next.js 15 前端）                 │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ app/page.tsx → 赛博朋克登录/注册页            │    │
+│  │  矩阵雨 + 电路板背景 + 光斑扫描动画            │    │
+│  └─────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ app/dashboard/ → 实时安全态势看板              │    │
+│  │  StatsCards / AttackLogTable / CopilotPanel │    │
+│  │  HackerTerminal / CyberSidebar / LLM配置     │    │
+│  └─────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────┐    │
+│  │ app/api/backend/[...path]/route.ts → 代理层  │    │
+│  │  请求转发 → 后端 127.0.0.1:8000               │    │
+│  │  Session JWT 解码提取 access_token            │    │
+│  └─────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────┘
 ```
 
-健康检查：
-```bash
-curl http://127.0.0.1:8000/health
-```
-预期：`{"status":"ok"}`（接口定义 `server/main.py:1749`）
-
-#### 步骤 4：启动前端
-```bash
-cd web-next
-npm run dev
-```
-默认打开：`http://127.0.0.1:3000`
-
-> 前端脚本定义：`web-next/package.json:5`
+**数据流向**：流量 → Scapy 抓包 → 特征提取 → WAF 过滤 → AI 分析（LLM） → 告警引擎 → 通知分发 → 防火墙阻断。前端通过 Next.js API 代理层调用后端，Session 由 NextAuth.js v5 管理。
 
 ---
 
-### B. 快速体验一条完整主流程（登录 -> 看板 -> 配置 AI -> 测试）
-
-1. 打开 `http://127.0.0.1:3000`
-2. 使用邮箱密码登录
-3. 登录后进入 `/dashboard`
-4. 在 AI 配置区填写 provider / model / base_url / api_key
-5. 点“测试路由”
-6. 看到类似“测试成功：provider / model / latency”即为链路正常
-
-相关代码：
-- 登录页：`web-next/app/page.tsx:31`
-- 看板页：`web-next/app/dashboard/page.tsx:4`
-- 测试按钮逻辑：`web-next/app/dashboard/dashboard-client.tsx:978`
-
----
-
-### C. 站点接入与 WAF 验证
-
-#### 步骤 1：配置受保护站点
-在看板输入目标 URL（如 `https://example.com`），点击保存。
-后端接口：`POST /site/target`（`server/main.py:1599`）
-
-#### 步骤 2：测试代理链路
-UI 输入代理路径 `/` 或完整 URL，点击“测试代理链路”。
-前端调用点：`web-next/app/dashboard/dashboard-client.tsx:694`
-
-#### 步骤 3：验证拦截是否生效
-可以构造带明显攻击特征的路径或 body（仅限本地安全测试）。
-命中时应返回 `403`，并在告警表中看到 `waf_block` 相关记录。
-
----
-
-### D. 接入外部告警源（Agent/探针）
-
-向后端发送：
-```http
-POST /alerts
-Header: x-alerts-token: <ALERTS_INGEST_TOKEN>
-Body: AlertIn JSON
-```
-
-字段结构见 `AlertIn`：`server/main.py:204`
-
-常见失败：
-- `401 Invalid alerts token`：token 错
-- `403 Alert ingest source is not allowed`：来源 IP 不在 `ALERTS_INGEST_ALLOWED_CIDRS`
-- `503 Alert queue is full`：队列满
-
----
-
-### E. 启动方式对照表
-
-#### 方式 1（推荐）：手工分开启动
-- 后端：uvicorn（8000）
-- 前端：Next dev（3000）
-- 优点：与当前 `web-next` 实际代码一致，功能最完整
-
-#### 方式 2：`start_all.bat` 一键启动
-- 文件：`start_all.bat:12-25`
-- 实际行为：
-  - 启后端 `8000`
-  - 启 Python 静态服务器 `8080`，目录 `web/`
-- 说明：这条是旧静态前端链路，不是 `web-next` NextAuth 看板链路。
-
----
-
-## 三、维护与排错指南（按症状定位）
-
-### 症状 1：页面能打开，但登录失败
-
-#### 检查点
-1. 后端是否存活：`GET /health`
-2. 前端 `BACKEND_BASE_URL` 是否指向 `http://127.0.0.1:8000`
-3. `AUTH_SECRET` 是否设置
-4. 数据库是否可写（`data/app.db`）
-
-#### 关键代码点
-- 账号密码登录请求：`web-next/auth.ts:83`
-- 登录错误映射：`web-next/app/page.tsx:6`
-- 后端密码登录：`server/main.py:1346`
-
----
-
-### 症状 2：OAuth 按钮灰色或点了没反应
-
-#### 根因
-按钮可用性由前端环境变量控制：
-- `NEXT_PUBLIC_AUTH_GITHUB_ENABLED`
-- `NEXT_PUBLIC_AUTH_GOOGLE_ENABLED`
-
-代码位置：`web-next/app/page.tsx:43-45`
-
-#### 处理
-- `.env.local` 把对应开关设为 `true`
-- 同时配置真实 `AUTH_GITHUB_*` / `AUTH_GOOGLE_*`
-- 重启前端
-
----
-
-### 症状 3：AI 测试失败 / Copilot 无响应
-
-#### 排查顺序
-1. 看板点击“测试路由”，确认 provider/base_url/api_key 可连通
-2. 若提示 `base_url must be a valid https URL`，说明 URL 不合规
-3. 若 provider 与 base_url 不匹配，会被拒绝
-4. Copilot 依赖用户配置中的 API Key，未配置会报“请先设置可用的 API Key 与 Base URL”
-
-关键代码：
-- LLM 测试：`server/main.py:1773`
-- Base URL 校验：`server/main.py:577`
-- Copilot 流式错误回包：`server/main.py:709`
-
----
-
-### 症状 4：看不到告警，或者只有历史没有实时
-
-#### 检查项
-1. 外部发送 `/alerts` 是否带 `x-alerts-token`
-2. 来源 IP 是否被允许
-3. 前端是否拿到登录态（未登录会拿不到 `/alerts`）
-4. WebSocket 是否建立（`/ws/alerts`）
-
-关键代码：
-- 告警入站：`server/main.py:1872`
-- 告警查询（按用户过滤）：`server/main.py:1894`
-- WS 推送：`server/main.py:1909`
-
----
-
-### 症状 5：配置保存了，但重启后丢失
-
-#### 正常行为
-- 配置默认持久化在 SQLite：`data/app.db`（`server/db.py:12`）
-- 表结构：`user_configs`（`server/models_db.py:23`）
-
-#### 异常排查
-1. 是否误删 `data/app.db`
-2. 是否多个环境启动到了不同目录
-3. 是否有权限问题导致写库失败
-
----
-
-### 症状 6：站点健康状态总是离线
-
-#### 检查项
-1. 先确认目标 URL 可从本机访问
-2. `POST /site/target` 是否返回成功
-3. `GET /site/health` 是否为 `idle`（说明没配置成功）
-4. 若 HTTPS 站点证书异常，会出现 warning/critical
-
-关键代码：
-- Uptime 检查：`server/main.py:1189`
-- SSL 检查：`server/main.py:1216`
-- 巡检循环：`server/main.py:1258`
-
----
-
-### 症状 7：WAF 没有拦截攻击样本
-
-#### 检查项
-1. 请求是否真的走 `/site/proxy/...`
-2. 载荷是否命中当前正则规则
-3. 是否在 UI 中配置了目标站点
-
-关键代码：
-- 规则表：`server/main.py:63`
-- 匹配函数：`server/main.py:150`
-- 拦截响应：`server/main.py:1846`
-
----
-
-### 症状 8：验证码邮件发不出去
-
-#### 根因常见
-- SMTP 变量未配置
-- SMTP 账号/密码不对
-- 端口与 TLS 组合不对
-
-配置项见：`.env.example:13-21`
-发送逻辑见：`server/mailer.py:17-29`
-
----
-
-## 四、运维安全基线（必须项）
-
-1. `APP_SECRET` 必须强随机，不可使用默认弱值
-2. `LLM_ADMIN_TOKEN` 与 `ALERTS_INGEST_TOKEN` 必须设置且定期轮换
-3. `.env` 与 `web-next/.env.local` 不入库
-4. `data/app.db` 属于运行时数据，不要纳入 Git
-5. 数据库备份默认写到仓库外目录（`../ai-ids-backups`），不要放在仓库内
-6. 对外部署时将 Cookie 安全策略配置为 HTTPS 生产值：`APP_COOKIE_SECURE=true`，并按跨站需求设置 `APP_COOKIE_SAMESITE`（本地默认 `true/lax`）
-
----
-
-## 五、常用命令清单
-
-### 后端
-```bash
-.venv/Scripts/python.exe -m uvicorn server.main:app --host 127.0.0.1 --port 8000
-```
+## 3. 技术栈
 
 ### 前端
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Next.js | 15.3.8 | React 全栈框架（App Router） |
+| React | 19.1 | UI 渲染 |
+| TypeScript | 5.9 | 类型安全 |
+| Tailwind CSS | 3.4 | 原子化样式 |
+| NextAuth.js | v5 beta | JWT 认证管理 |
+| GSAP | 3.15 | 高性能动画引擎 |
+| Framer Motion | 12.11 | 声明式动画 |
+| Lucide React | 0.544 | SVG 图标库 |
+
+### 后端
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| FastAPI | 0.136 | Python 异步 Web 框架 |
+| Uvicorn | 0.45 | ASGI 服务器 |
+| SQLAlchemy | 2.0 | ORM 数据库访问 |
+| Loguru | 0.7 | 结构化日志 |
+| bcrypt | 4.3 | 密码哈希 |
+| python-jose | 3.4 | JWT 签发/验证 |
+| cryptography | 46.0 | Fernet 加密（API Key） |
+| fastapi-mail | 2.1 | 邮件发送 |
+| Scapy | 2.7 | 网络包抓取/构造 |
+| scikit-learn | 1.8 | 机器学习（攻击分类） |
+| pandas | 3.0 | 数据预处理 |
+| httpx | 0.28 | 异步 HTTP 客户端 |
+
+### 基础设施
+
+| 组件 | 用途 |
+|------|------|
+| SQLite | 主数据库（用户/告警/日志/配置） |
+| Redis 7 | 限流计数 / 会话缓存 |
+| Docker Compose | 容器化编排 |
+
+---
+
+## 4. 功能清单
+
+### 认证与用户
+
+- [x] 邮箱密码注册（密码强度校验：8位+大小写+数字+符号）
+- [x] 邮箱密码登录 → JWT 令牌签发（TV 机制防旧令牌复用）
+- [x] OTP 验证码邮件登录（6 位数字，10 分钟过期，hmac 时序安全比较）
+- [x] 忘记密码（邮件验证码重置，10 分钟过期）
+- [x] OAuth 第三方登录（GitHub / Google）
+- [x] 安全登出（令牌版本号自增，旧令牌立即失效）
+- [x] Session 验证（Bearer Token + Cookie 双通道）
+- [x] 多层速率限制（注册 / 登录 / OTP / 通用 IP）
+
+### AI 智能分析
+
+- [x] 多 LLM 后端支持（OpenAI / DeepSeek / Claude / Gemini / 自定义 Provider）
+- [x] LLM 连通性测试（支持 5 种 Provider 端点自动适配）
+- [x] 攻击载荷智能分类（SQLi / XSS / 命令注入 / 路径穿越）
+- [x] Security Copilot 流式对话（SSE 实时返回）
+- [x] API Key Fernet 加密存储（DB 中不存明文）
+
+### 安全防护
+
+- [x] WAF 网关（12 条正则规则拦截 SQLi / XSS / 命令注入 / 路径穿越）
+- [x] WAF 响应安全头注入（X-Content-Type-Options 等）
+- [x] 自动防火墙阻断（IP 临时封禁 10 分钟）
+- [x] 攻击来源相关性分析
+- [x] AbuseIPDB 威胁情报查询
+- [x] 全局 CSP 安全策略（开发/生产环境分离）
+
+### 监控与告警
+
+- [x] 实时告警采集（4 线程 Worker 池）
+- [x] WebSocket 实时推送告警
+- [x] 多通道通知（邮件 / 桌面 Toast / Slack Webhook）
+- [x] 站点健康监测（Uptime 监控）
+- [x] SSL 证书到期预警
+- [x] 操作审计日志（200 条/用户隔离）
+
+### 前端交互
+
+- [x] 赛博朋克风格矩阵雨背景
+- [x] 电路板 + 光斑扫描动画
+- [x] 实时攻防态势看板 Dashboard
+- [x] 攻击日志表格（分页 / 级别筛选）
+- [x] 7 块统计卡片（流量 / 威胁 / 拦载率）
+- [x] 黑客终端模拟器（命令输入交互）
+- [x] 网络安全侧边栏导航
+- [x] LLM 配置面板（Provider 选择 / 模型切换 / Base URL）
+- [x] 全局错误边界 + 加载态
+
+### 数据管理
+
+- [x] 新威胁确认入库（CSV 沉淀至 `data/new_threats.csv`）
+- [x] 用户配置中心（AI / 告警 / UI 偏好持久化）
+- [x] 数据库自动迁移（列级验证 + ALTER TABLE 自动修补）
+
+---
+
+## 5. 项目结构
+
+```
+AI-IDS-Project/
+├── agent/                          # 抓包与防御引擎
+│   ├── sniffer.py                  # Scapy 网络包抓取 + 特征提取
+│   └── defender.py                 # 防火墙规则管理（IP 封禁/解封）
+│
+├── server/                         # FastAPI 后端
+│   ├── main.py                     # 应用入口（CORS / 中间件 / 路由注册）
+│   ├── security_utils.py           # JWT / bcrypt / Fernet 加密工具
+│   ├── mailer.py                   # 邮件发送（OTP / 重置 / 告警）
+│   ├── models/                     # Pydantic 请求/响应 Schema
+│   │   └── schemas.py
+│   ├── models_db.py                # SQLAlchemy ORM 模型
+│   ├── core/                       # 核心模块
+│   │   ├── config.py               # 环境变量加载 & WAF 规则定义
+│   │   ├── database.py             # SQLite 连接 & 自动迁移
+│   │   ├── security.py             # 认证依赖（require_auth_user）
+│   │   ├── state.py                # 全局状态（Redis / 限流器 / 开关）
+│   │   ├── rate_limiter.py         # 多层速率限制实现
+│   │   ├── llm_utils.py            # LLM 端点适配 & 测试请求构造
+│   │   └── utils.py                # 通用工具（IP 提取等）
+│   ├── routers/                    # API 路由层
+│   │   ├── auth_router.py          # /auth/*（注册/登录/OTP/重置/登出）
+│   │   ├── user_router.py          # /user/config（用户配置）
+│   │   ├── alerts_router.py        # /alerts（告警查询）
+│   │   ├── logs_router.py          # /logs（操作日志）
+│   │   ├── llm_router.py           # /llm/*（配置/测试）
+│   │   ├── site_router.py          # /site/*（目标/健康）
+│   │   ├── copilot_router.py       # /copilot/*（AI 对话）
+│   │   └── waf_router.py           # /waf/*（WAF 代理）
+│   └── services/                   # 业务服务层
+│       ├── auth_service.py         # 认证核心逻辑
+│       ├── user_service.py         # 配置读写逻辑
+│       ├── llm_service.py          # LLM 测试/调用逻辑
+│       ├── alert_service.py        # 告警 Worker 池
+│       └── site_monitor_service.py # 站点监控
+│
+├── web-next/                       # Next.js 15 前端
+│   ├── app/
+│   │   ├── layout.tsx              # 全局布局 + 元数据
+│   │   ├── page.tsx                # 赛博朋克登录/注册页
+│   │   ├── providers.tsx           # SessionProvider 配置
+│   │   ├── error.tsx               # 全局错误边界
+│   │   ├── dashboard/              # Dashboard 仪表盘
+│   │   │   ├── page.tsx            # 认证守卫 + 数据加载
+│   │   │   └── dashboard-client.tsx# 看板主组件
+│   │   ├── api/
+│   │   │   ├── auth/[...nextauth]/ # NextAuth 路由
+│   │   │   └── backend/[...path]/  # 后端 API 代理
+│   │   └── components/
+│   │       └── animated-characters/# 动画角色组件
+│   ├── components/
+│   │   ├── dashboard/              # Dashboard 组件库
+│   │   │   ├── AttackLogTable.tsx
+│   │   │   ├── CopilotPanel.tsx
+│   │   │   ├── CyberSidebar.tsx
+│   │   │   ├── HackerTerminal.tsx
+│   │   │   └── StatsCards.tsx
+│   │   └── ui/                     # 基础 UI 组件
+│   │       ├── button.tsx
+│   │       └── card.tsx
+│   ├── lib/
+│   │   ├── auth.ts                 # NextAuth 配置
+│   │   └── utils.ts                # 工具函数
+│   ├── middleware.ts               # 安全头注入
+│   ├── next.config.ts              # CSP + 重定向配置
+│   ├── package.json
+│   └── tsconfig.json
+│
+├── scripts/                        # 运维脚本
+│   ├── backup_db.sh                # 数据库备份
+│   └── daily_ops_check.sh          # 日检脚本
+│
+├── docker-compose.yml              # 容器编排
+├── .env                            # 当前环境变量（gitignore）
+├── .env.example                    # 环境变量模板
+├── requirements.txt                # Python 依赖
+└── OWNER_MANUAL.md                 # 本文档
+```
+
+---
+
+## 6. 本地启动指南
+
+### 前置条件
+
+- Python 3.12+
+- Node.js 20+
+- Redis 7（可选，限流功能需要）
+- Windows: Npcap（Scapy 抓包需要）
+
+### 6.1 后端启动
+
 ```bash
+# 1. 创建虚拟环境
+python -m venv .venv
+.venv\Scripts\activate     # Windows
+# source .venv/bin/activate # Linux/macOS
+
+# 2. 安装依赖
+pip install -r requirements.txt
+
+# 3. 配置环境变量（复制模板）
+cp .env.example .env
+# 编辑 .env 填入：APP_SECRET、SMTP 配置、LLM_API_KEY 等
+
+# 4. 初始化数据库（首次自动创建 SQLite）
+python -c "from server.core.database import init_db; init_db()"
+
+# 5. 启动后端（开发模式）
+python -m uvicorn server.main:app --host 127.0.0.1 --port 8000 --reload
+```
+
+### 6.2 前端启动
+
+```bash
+# 1. 进入前端目录
 cd web-next
+
+# 2. 安装依赖
 npm install
+
+# 3. 启动开发服务器
 npm run dev
+# → http://localhost:3000
 ```
 
-### 前端类型检查
+### 6.3 关键环境变量（`.env`）
+
+```env
+# ---------- 安全核心 ----------
+APP_SECRET=your-secret-at-least-32-chars  # JWT 签名密钥（必填）
+AUTH_SECRET=your-auth-secret              # NextAuth 加密密钥（必填）
+APP_JWT_ALG=HS256                         # JWT 算法
+APP_FERNET_KEY=                           # API Key 加密密钥（自动生成）
+
+# ---------- 数据库 ----------
+DATABASE_URL=sqlite:///./data/app.db
+REDIS_URL=redis://localhost:6379/0
+
+# ---------- SMTP 邮件 ----------
+MAIL_USERNAME=your@email.com
+MAIL_PASSWORD=your_smtp_auth_code
+MAIL_FROM=your@email.com
+MAIL_SERVER=smtp.qq.com
+MAIL_PORT=465
+MAIL_STARTTLS=false
+MAIL_SSL_TLS=true
+
+# ---------- AI 模型 ----------
+LLM_API_KEY=sk-your-key
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL=deepseek-v4-flash
+LLM_ADMIN_TOKEN=internal-token-for-admin
+
+# ---------- 威胁情报 ----------
+ABUSEIPDB_API_KEY=
+SHODAN_API_KEY=
+```
+
+---
+
+## 7. 完整 API 参考
+
+### 认证 `/auth`
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| `POST` | `/auth/register` | 无 | 邮箱密码注册 |
+| `POST` | `/auth/login/password` | 无 | 密码登录 → JWT |
+| `POST` | `/auth/login/otp/request` | 无 | 请求 OTP 验证码邮件 |
+| `POST` | `/auth/login/otp/verify` | 无 | OTP 验证码登录 |
+| `POST` | `/auth/password/reset/request` | 无 | 请求密码重置验证码 |
+| `POST` | `/auth/password/reset/confirm` | 无 | 验证码 + 新密码重置 |
+| `GET` | `/auth/session` | Bearer/Cookie | 验证当前令牌有效性 |
+| `POST` | `/auth/logout` | Bearer/Cookie | 登出（令牌版本号自增） |
+| `POST` | `/auth/login/oauth` | 无 | OAuth 登录（GitHub/Google） |
+
+### 用户配置 `/user`
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| `GET` | `/user/config` | Bearer/Cookie | 获取用户偏好配置 |
+| `PUT` | `/user/config` | Bearer/Cookie | 更新用户偏好配置 |
+
+### LLM 配置 `/llm`
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| `GET` | `/llm/config` | Admin Token | 获取运行时 LLM 配置 |
+| `PUT` | `/llm/config` | Admin Token | 更新运行时 LLM 配置 |
+| `POST` | `/llm/test` | Bearer/Cookie | 测试 LLM 连通性（支持 5 种 Provider） |
+
+### 告警 `/alerts`
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| `GET` | `/alerts` | Bearer/Cookie | 查询告警列表（`?limit=100`） |
+
+### 日志 `/logs`
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| `GET` | `/logs` | Bearer/Cookie | 查询操作日志（隔离到当前用户） |
+
+### 站点监控 `/site`
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| `POST` | `/site/target` | Bearer/Cookie | 设置监控站点 URL |
+| `GET` | `/site/health` | Bearer/Cookie | 查询站点健康状态 |
+
+### Copilot `/copilot`
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| `POST` | `/copilot/stream` | Bearer/Cookie | Security Copilot AI 流式对话（SSE） |
+
+### WAF `/waf`
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| `GET` | `/waf/traffic` | 无 | WAF 网关代理流量 |
+
+### 健康检查
+
+| 方法 | 路径 | 认证 | 说明 |
+|------|------|------|------|
+| `GET` | `/health` | 无 | 服务健康检查 |
+
+---
+
+## 8. 部署与运维
+
+### 8.1 Docker Compose 部署
+
 ```bash
-cd web-next
-npm run typecheck
+# 1. 配置环境变量
+cp .env.example .env
+# 编辑 .env 填入生产环境配置
+
+# 2. 构建并启动
+docker-compose up -d --build
+
+# 3. 查看日志
+docker-compose logs -f backend
+docker-compose logs -f frontend
+
+# 4. 停止
+docker-compose down
 ```
 
-### 日常健康检查
+服务分布：
+- **backend**: `server/Dockerfile` → Python slim 镜像，非 root 用户运行
+- **frontend**: `web-next/Dockerfile` → 多阶段构建，standalone 模式
+- **redis**: `redis:7-alpine` → 限流缓存
+
+### 8.2 后台运行（生产环境）
+
+```bash
+# Linux: systemd 服务
+sudo tee /etc/systemd/system/cybersentinel-backend.service << 'EOF'
+[Unit]
+Description=AI-CyberSentinel Backend
+After=network.target redis.service
+
+[Service]
+Type=simple
+User=app
+WorkingDirectory=/opt/cybersentinel
+EnvironmentFile=/opt/cybersentinel/.env
+ExecStart=/opt/cybersentinel/.venv/bin/uvicorn server.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl enable --now cybersentinel-backend
+```
+
+```bash
+# Linux: Nginx 反向代理前端
+# 构建后使用 pm2 管理
+cd web-next && npm run build
+pm2 start npm --name "cybersentinel-frontend" -- start
+```
+
+### 8.3 数据库备份
+
+```bash
+# 使用自带的备份脚本
+bash scripts/backup_db.sh
+
+# 或手动备份
+cp data/app.db data/backups/app_$(date +%Y%m%d_%H%M%S).db
+```
+
+### 8.4 日常巡检
+
 ```bash
 bash scripts/daily_ops_check.sh
-```
-
-### SQLite 备份
-```bash
-bash scripts/backup_db.sh
-# 可选：自定义目录（推荐仓库外）
-BACKUP_DIR="D:/ai-ids-backups" bash scripts/backup_db.sh
-```
-
-### 认证链路冒烟
-```bash
-cd web-next
-npm run smoke:auth
+# 检查项：服务存活 / 磁盘空间 / 近期告警数 / SSL 证书有效期
 ```
 
 ---
 
-## 六、升级/变更时的最小回归清单
+## 9. 安全配置说明
 
-每次改动后至少做以下 8 项：
+### 密钥管理
 
-1. `GET /health` 返回 ok
-2. 邮箱密码登录成功并进入 `/dashboard`
-3. （若启用）OAuth 登录成功
-4. `PUT /user/config` 后刷新页面配置仍存在
-5. `POST /llm/test` 返回成功
-6. `POST /site/target` + `GET /site/health` 正常
-7. `/site/proxy/...` 普通请求通过、攻击样本 403
-8. `/alerts` 入站后，UI 表格和 Copilot 能看到对应上下文
+| 密钥 | 位置 | 要求 |
+|------|------|------|
+| `APP_SECRET` | `.env` | 至少 32 字符，生产环境使用随机生成 |
+| `AUTH_SECRET` | `.env` | NextAuth 加密密钥，生产环境使用 `openssl rand -base64 32` |
+| `APP_FERNET_KEY` | `.env` | 留空则首次启动自动生成，用于 API Key 加密 |
+| `LLM_ADMIN_TOKEN` | `.env` | 访问 `/llm/config` 的管理令牌 |
+
+### WAF 防护规则（12 条）
+
+```
+[1] UNION SELECT          → 联合查询注入
+[2] UNION /**/ SELECT     → SQL 注释绕过注入
+[3] 1=1 / OR 1=1          → 永真条件注入
+[4] <script>              → XSS 脚本注入
+[5] javascript:           → JS 伪协议注入
+[6] exec(                 → 命令执行
+[7] eval(                 → 代码执行
+[8] DROP TABLE            → 表删除
+[9] INSERT INTO           → 数据插入
+[10] DELETE FROM          → 数据删除
+[11] SQL 注释事件绑定      → 事件属性注入
+[12] SQL 字符串拼接       → 字符串拼接注入
+```
+
+### 速率限制
+
+| 类型 | 限制 | 窗口 |
+|------|------|------|
+| 注册 | 3 次 | 1 小时 |
+| 登录 | 5 次 | 15 分钟 |
+| OTP 请求 | 3 次 | 10 分钟 |
+| 通用 IP | 100 次 | 1 分钟 |
+
+### CSP 策略
+
+| 环境 | script-src | connect-src |
+|------|-----------|-------------|
+| 开发 | `'unsafe-inline' 'unsafe-eval'` | WebSocket + localhost |
+| 生产 | `'self'` | `'self'` |
 
 ---
 
-## 七、附录：关键文件索引
+## 10. 故障排查
 
-- 后端总入口：`server/main.py`
-- LLM 分析器：`server/analyzer.py`
-- 安全工具（JWT/加密）：`server/security_utils.py`
-- DB 与引擎：`server/db.py`
-- DB 模型：`server/models_db.py`
-- 邮件发送：`server/mailer.py`
-- 登录页：`web-next/app/page.tsx`
-- 仪表盘主逻辑：`web-next/app/dashboard/dashboard-client.tsx`
-- NextAuth 配置：`web-next/auth.ts`
-- 前后端代理：`web-next/app/api/backend/[...path]/route.ts`
-- 根环境模板：`.env.example`
-- 前端环境模板：`web-next/.env.example`
+| 症状 | 可能原因 | 排查步骤 |
+|------|----------|----------|
+| 登录返回 401 | `APP_SECRET` 不匹配 / 密码已重置 | 检查 `.env` → 重启后端 |
+| 找回密码显示 dev_code | SMTP 未配置（开发模式降级） | 填入真实 MAIL_USERNAME/PASSWORD/SERVER |
+| LLM 测试失败 | API Key 无效 / 网络不通 / 缺少 `import time` | `curl https://api.deepseek.com/v1/models -H "Authorization: Bearer $KEY"` |
+| 注册永久挂起 | `register_lock` 死锁 | 已修复：检查 `auth_service.py` 中无外层锁 |
+| 前端 ERR_ABORTED | 旧 Session Cookie 签名不匹配 | 清除浏览器 Cookie 或使用无痕模式 |
+| 中间件报错 | 旧 `auth()` 类型断言失败 | 已移除中间件中的 `auth()` 调用 |
+| Redis 连接失败 | Redis 未启动 / 地址错误 | `redis-cli ping` → 检查 `REDIS_URL` |
+| 端口占用 | 旧进程未杀掉 | `netstat -ano \| findstr ":8000"` → `taskkill /PID xxx /F` |
 
 ---
 
-## 八、给站长的最后建议（非代码）
-
-如果你只记三件事：
-
-1. 先保证登录链路和 AI 测试链路通，再谈告警质量。
-2. 所有“看不到数据”的问题，优先检查 token、登录态、用户隔离（本系统按用户分流告警）。
-3. 每次发布前跑一遍“最小回归清单”，能拦住大多数线上事故。
+*文档版本：v4.0 | 更新日期：2026-05-03 | 基于模块化重构后的实际代码扫描生成*

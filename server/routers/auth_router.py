@@ -14,7 +14,7 @@ router = APIRouter(prefix="/auth", tags=["认证"])
 
 @router.post("/register")
 async def auth_register(data: UserRegisterIn, response: Response, request: Request, db: Session = Depends(get_db)) -> dict[str, Any]:
-    return await auth_service.register_user(data, request, db)
+    return await auth_service.register_user(data, request, response, db)
 
 
 @router.post("/login/password")
@@ -48,8 +48,14 @@ async def auth_password_reset_confirm(data: PasswordResetConfirmIn, db: Session 
 
 
 @router.post("/logout")
-async def auth_logout(response: Response) -> dict[str, Any]:
-    return auth_service.logout(response)
+async def auth_logout(
+    response: Response,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    access_token_cookie: str | None = Cookie(default=None, alias="access_token"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    user = get_current_user(db, access_token_cookie, authorization)
+    return auth_service.logout(response, db, user)
 
 
 @router.get("/session")

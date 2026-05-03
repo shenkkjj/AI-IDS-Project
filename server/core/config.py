@@ -44,11 +44,11 @@ THREAT_INTEL_SCORE_THRESHOLD = int(os.getenv("THREAT_INTEL_SCORE_THRESHOLD", "50
 
 ALLOWED_AI_PROVIDERS = {"openai", "claude", "gemini", "grok", "custom"}
 PROVIDER_MODEL_DEFAULTS = {
-    "openai": "gpt-4o-mini",
-    "claude": "claude-sonnet-4-6",
-    "gemini": "gemini-2.5-flash",
-    "grok": "grok-3-mini",
-    "custom": "gpt-4o-mini",
+    "openai": "",
+    "claude": "",
+    "gemini": "",
+    "grok": "",
+    "custom": "",
 }
 PROVIDER_BASE_URL_DEFAULTS = {
     "openai": "https://api.openai.com",
@@ -59,7 +59,8 @@ PROVIDER_BASE_URL_DEFAULTS = {
 }
 
 WAF_BLOCK_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"(?i)(\bunion\b\s+\bselect\b)"),
+    re.compile(r"(?i)(\bunion\b\s*\bselect\b)"),
+    re.compile(r"(?i)(\bunion\b\s+/\*[\s\S]*?\*/\s*\bselect\b)"),
     re.compile(r"(?i)(\b(or|and)\b\s+\d+\s*=\s*\d+)"),
     re.compile(r"(?i)(<\s*script\b)"),
     re.compile(r"(?i)(\bjavascript\s*:)"),
@@ -69,6 +70,8 @@ WAF_BLOCK_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"(?i)(\binsert\b\s+\binto\b)"),
     re.compile(r"(?i)(\bdelete\b\s+\bfrom\b)"),
     re.compile(r"(?i)(\bon\w+\s*=)"),
+    re.compile(r"(?i)'\s*\|\|?\s*\w+\s*\|\|?\s*'"),
+    re.compile(r"(?i)(\bur[li]\b\s*\(['\"])"),
 ]
 
 HOP_BY_HOP_HEADERS: set[str] = {

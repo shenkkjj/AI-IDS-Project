@@ -2,6 +2,7 @@
 .gstack/
 web-next/.gstack/
 .omc/state/hud-stdin-cache.json
+.claude/worktrees/
 
 # Secrets and local env
 .env
@@ -13,10 +14,15 @@ web-next/.env.*
 
 # Runtime data
 data/app.db
+*.db
 backups/
 
 # Build/cache artifacts
 __pycache__/
 *.pyc
 *.tsbuildinfo
-.claude/worktrees/
+.next/
+node_modules/
+.turbo/
+dist/
+build/

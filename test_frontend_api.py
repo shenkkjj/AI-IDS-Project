@@ -1,10 +1,14 @@
+import os
 import urllib.request
 import json
+
+TEST_EMAIL = os.environ.get("TEST_EMAIL", "test@example.com")
+TEST_PASSWORD = os.environ.get("TEST_PASSWORD", "TestPassword123!")
 
 # First login to get cookies via frontend
 req = urllib.request.Request(
     'http://localhost:3000/api/backend/auth/login/password',
-    data=json.dumps({'email': '2762919805@qq.com', 'password': 'S2762919805s'}).encode(),
+    data=json.dumps({'email': TEST_EMAIL, 'password': TEST_PASSWORD}).encode(),
     headers={'Content-Type': 'application/json'},
     method='POST'
 )

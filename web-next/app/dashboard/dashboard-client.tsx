@@ -542,12 +542,12 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
     }
 
     setConfig(data);
-    setConfigDraft({
+    setConfigDraft((prev) => ({
+      ...prev,
       ai_provider: normalizeProviderForDraft(data.ai_provider),
       model: data.model || "",
       base_url: data.base_url || "",
-      api_key: "",
-    });
+    }));
     setConfigStatus("配置已同步");
   }
 
@@ -1018,6 +1018,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
       ai_provider: configDraft.ai_provider,
       model: configDraft.model,
       base_url: configDraft.base_url,
+      timeout_seconds: config?.timeout_seconds || 30,
     };
     if (configDraft.api_key.trim()) {
       body.api_key = configDraft.api_key.trim();
@@ -1100,6 +1101,20 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
               <div className="xl:col-span-2 min-h-0 flex flex-col gap-4">
                 <div className="flex items-center justify-between">
                   <h2 className="text-sm uppercase tracking-widest text-cyber-text/70">实时告警流</h2>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      const link = document.createElement("a");
+                      link.href = "/api/backend/export/alerts?limit=1000";
+                      link.download = "alerts.csv";
+                      link.click();
+                    }}
+                    className="border-cyber-cyan/40 text-cyber-cyan"
+                  >
+                    导出CSV
+                  </Button>
                   <Button
                     variant="outline"
                     size="sm"
@@ -1112,6 +1127,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                   >
                     刷新
                   </Button>
+                </div>
                 </div>
                 <div className="min-h-0 flex-1">
                   {alertsLoadState === "loading" ? (

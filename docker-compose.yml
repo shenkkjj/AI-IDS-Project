@@ -8,17 +8,17 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      - APP_SECRET=${APP_SECRET:-change-this-in-production}
+      - "APP_SECRET=${APP_SECRET:?APP_SECRET required -- run: openssl rand -base64 48}"
       - APP_ENV=${APP_ENV:-production}
       - BIND_HOST=0.0.0.0
       - TARGET_URL=http://127.0.0.1:8000
       - HONEYPOT_ENABLED=${HONEYPOT_ENABLED:-true}
       - THREAT_INTEL_ENABLED=${THREAT_INTEL_ENABLED:-false}
       - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
-      - REDIS_URL=redis://redis:6379/0
+      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
       - MAIL_USERNAME=${MAIL_USERNAME:-}
       - MAIL_PASSWORD=${MAIL_PASSWORD:-}
-      - MAIL_FROM=${MAIL_FROM:-noreply@ai-cybersentinel.local}
+      - MAIL_FROM=${MAIL_FROM:-noreply@cybersentinel.com}
       - MAIL_SERVER=${MAIL_SERVER:-smtp.example.com}
       - MAIL_PORT=${MAIL_PORT:-587}
     volumes:
@@ -38,7 +38,7 @@ services:
     ports:
       - "127.0.0.1:3000:3000"
     environment:
-      - AUTH_SECRET=${AUTH_SECRET:-change-me-to-a-long-random-secret}
+      - "AUTH_SECRET=${AUTH_SECRET:?AUTH_SECRET required -- run: openssl rand -base64 48}"
       - BACKEND_BASE_URL=http://backend:8000
       - NEXT_PUBLIC_AUTH_GITHUB_ENABLED=${NEXT_PUBLIC_AUTH_GITHUB_ENABLED:-false}
       - NEXT_PUBLIC_AUTH_GOOGLE_ENABLED=${NEXT_PUBLIC_AUTH_GOOGLE_ENABLED:-false}
@@ -55,9 +55,9 @@ services:
       - "127.0.0.1:6379:6379"
     volumes:
       - redis-data:/data
-    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:-change-me-in-production} --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-change-me-in-production}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5

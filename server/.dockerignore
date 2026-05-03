@@ -3,6 +3,7 @@ __pycache__
 *.pyo
 *.db
 .env
+.env.*
 .git
 .gitignore
 node_modules
@@ -10,5 +11,18 @@ node_modules
 *.pkl
 data/KDDTrain.csv
 data/new_threats.csv
+test/
+tests/
+agent/
+simulator/
+notebooks/
+scripts/
 .claude
 .omc
+.mypy_cache
+.pytest_cache
+.ruff_cache
+*.md
+.python-version
+Dockerfile
+docker-compose*.yml

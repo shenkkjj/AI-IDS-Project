@@ -35,4 +35,4 @@ def ensure_user_config_columns() -> None:
             except Exception as exc:
                 err_msg = str(exc).lower()
                 if "already exists" not in err_msg and "duplicate" not in err_msg:
-                    logger.warning("ALTER failed: {} err={}", sql.strip(), exc)
+                    logger.warning("ALTER failed: {} err={}", sql.split(" ")[0], type(exc).__name__)

@@ -23,6 +23,8 @@ router = APIRouter(tags=["WAF Gateway"])
 _ip_reputation_cache: dict[str, tuple[float, int]] = {}
 _ip_reputation_cache_ttl = 3600
 
+MAX_BODY_BYTES = 10 * 1024 * 1024
+
 HONEYPOT_HTML = """<!DOCTYPE html>
 <html><head><title>Admin Panel</title></head>
 <body style="font-family:monospace;background:#1a1a2e;color:#e0e0e0;padding:40px">
@@ -48,15 +50,18 @@ def _waf_check_request(request: Request) -> str | None:
     return None
 
 
-async def _waf_check_body(request: Request) -> str | None:
-    content_type = request.headers.get("content-type", "")
-    if "json" in content_type or "form" in content_type or "text" in content_type:
-        try:
-            body = (await request.body()).decode("utf-8", errors="replace")
-            if _payload_has_attack_signature(body):
-                return "WAF:blocked:body attack signature"
-        except Exception:
-            pass
+async def _read_body_capped(request: Request, max_bytes: int) -> tuple[bytes, str | None]:
+    body = bytearray()
+    async for chunk in request.stream():
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            return b"", f"WAF:blocked:body exceeds {max_bytes} bytes"
+    return bytes(body), None
+
+
+def _check_body_text(body_text: str) -> str | None:
+    if _payload_has_attack_signature(body_text):
+        return "WAF:blocked:body attack signature"
     return None
 
 
@@ -103,9 +108,26 @@ async def waf_gateway(request: Request, path: str) -> Response:
             return HTMLResponse(content=HONEYPOT_HTML, status_code=200)
         return JSONResponse(status_code=403, content={"detail": "Forbidden"})
 
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_BODY_BYTES:
+        logger.warning("WAF blocked oversized body: ip={} size={}", client_ip, content_length)
+        return JSONResponse(status_code=413, content={"detail": "Payload Too Large"})
+
     waf_result = _waf_check_request(request)
-    if not waf_result:
-        waf_result = await _waf_check_body(request)
+
+    body_bytes = b""
+    if request.method in ("POST", "PUT", "PATCH"):
+        body_bytes, size_err = await _read_body_capped(request, MAX_BODY_BYTES)
+        if size_err:
+            waf_result = size_err
+        elif not waf_result and body_bytes:
+            content_type = request.headers.get("content-type", "")
+            if "json" in content_type or "form" in content_type or "text" in content_type:
+                try:
+                    text = body_bytes.decode("utf-8", errors="replace")
+                    waf_result = _check_body_text(text)
+                except Exception:
+                    pass
 
     if waf_result:
         logger.warning("WAF blocked: ip={} reason={}", client_ip, waf_result)
@@ -122,8 +144,6 @@ async def waf_gateway(request: Request, path: str) -> Response:
         headers["X-Forwarded-For"] = client_ip
         headers["X-Real-IP"] = client_ip
         headers["X-WAF-Pass"] = "true"
-
-        body_bytes = await request.body()
 
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.request(
