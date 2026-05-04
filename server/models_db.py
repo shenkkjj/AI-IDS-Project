@@ -25,6 +25,7 @@ class User(Base, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     password_changed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     token_version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    role: Mapped[str] = mapped_column(String(16), default="analyst", nullable=False, index=True)
 
 
 class UserConfig(Base, TimestampMixin):
@@ -39,6 +40,8 @@ class UserConfig(Base, TimestampMixin):
     timeout_seconds: Mapped[int] = mapped_column(Integer, default=20, nullable=False)
     alert_email_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     alert_voice_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    webhook_url: Mapped[str] = mapped_column(String(500), default="", nullable=False)
+    webhook_type: Mapped[str] = mapped_column(String(16), default="generic", nullable=False)
     ui_theme: Mapped[str] = mapped_column(String(32), default="dark", nullable=False)
     ui_density: Mapped[str] = mapped_column(String(16), default="comfortable", nullable=False)
 

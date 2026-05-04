@@ -1,4 +1,5 @@
 from server.routers import (
+    admin_router,
     alerts_router,
     auth_router,
     copilot_router,
@@ -7,11 +8,13 @@ from server.routers import (
     logs_router,
     notify_router,
     site_router,
+    threat_intel_router,
     user_router,
     waf_router,
 )
 
 __all__ = [
+    "admin_router",
     "alerts_router",
     "auth_router",
     "copilot_router",
@@ -20,6 +23,7 @@ __all__ = [
     "logs_router",
     "notify_router",
     "site_router",
+    "threat_intel_router",
     "user_router",
     "waf_router",
 ]

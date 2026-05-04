@@ -12,6 +12,7 @@ import AttackTrendChart from "@/components/dashboard/AttackTrendChart";
 import SourcePieChart from "@/components/dashboard/SourcePieChart";
 import { Button } from "@/components/ui/button";
 import { useWebSocket } from "@/hooks/useWebSocket";
+import { useDesktopNotify } from "@/hooks/useDesktopNotify";
 import { useTheme } from "@/contexts/ThemeContext";
 
 type RouteKey = "overview" | "monitor" | "waf" | "ai" | "report";
@@ -428,6 +429,9 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
 
   const { theme, toggleTheme } = useTheme();
   const { wsAlerts, wsConnected } = useWebSocket(null);
+  const { notifyAlert, requestPermission } = useDesktopNotify();
+
+  const prevAlertCount = useRef(0);
 
   const mergedAlerts = useMemo(() => {
     const wsMapped = (wsAlerts || []).map(mapBackendAlert);
@@ -443,6 +447,19 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   }, [mergedAlerts, alertsPage]);
 
   const totalPages = Math.max(1, Math.ceil(mergedAlerts.length / PAGE_SIZE));
+
+  useEffect(() => {
+    const currentCount = mergedAlerts.length;
+    if (prevAlertCount.current > 0 && currentCount > prevAlertCount.current) {
+      const newAlerts = mergedAlerts.slice(prevAlertCount.current);
+      for (const alert of newAlerts) {
+        if (alert.risk === "critical" || alert.risk === "high") {
+          notifyAlert({ alertId: alert.id, risk: alert.risk, summary: alert.summary, source: alert.source });
+        }
+      }
+    }
+    prevAlertCount.current = currentCount;
+  }, [mergedAlerts.length]);
 
   const [config, setConfig] = useState<PersistedUserConfig | null>(null);
   const [configDraft, setConfigDraft] = useState<ConfigDraft>({
@@ -1100,6 +1117,15 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
 
         <section className="flex-1 flex flex-col gap-4 min-h-[calc(100vh-2rem)]">
           <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={requestPermission}
+              className="border-cyber-cyan/30 text-cyber-text/60 text-xs px-2 h-7"
+              title="启用桌面通知"
+            >
+              🔔
+            </Button>
             <div className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded ${wsConnected ? "bg-green-500/10 text-green-300" : "bg-red-500/10 text-red-400"}`}>
               <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
               {wsConnected ? "WS在线" : "WS离线"}

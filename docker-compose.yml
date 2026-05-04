@@ -15,7 +15,8 @@ services:
       - HONEYPOT_ENABLED=${HONEYPOT_ENABLED:-true}
       - THREAT_INTEL_ENABLED=${THREAT_INTEL_ENABLED:-false}
       - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
-      - REDIS_URL=${REDIS_URL:-redis://redis:6379/0}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://cybersentinel:cybersentinel@postgres:5432/cybersentinel}
+      - REDIS_URL=${REDIS_URL:-redis://:${REDIS_PASSWORD:-change-me-in-production}@redis:6379/0}
       - MAIL_USERNAME=${MAIL_USERNAME:-}
       - MAIL_PASSWORD=${MAIL_PASSWORD:-}
       - MAIL_FROM=${MAIL_FROM:-noreply@cybersentinel.com}
@@ -24,6 +25,8 @@ services:
     volumes:
       - backend-data:/app/data
     depends_on:
+      postgres:
+        condition: service_healthy
       redis:
         condition: service_healthy
     networks:
@@ -47,6 +50,39 @@ services:
     networks:
       - internal
 
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ai-cybersentinel-nginx
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - internal
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: ai-cybersentinel-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: cybersentinel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cybersentinel}
+      POSTGRES_DB: cybersentinel
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cybersentinel"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - internal
+
   redis:
     image: redis:7-alpine
     container_name: ai-cybersentinel-redis
@@ -66,6 +102,7 @@ services:
 
 volumes:
   backend-data:
+  postgres-data:
   redis-data:
 
 networks:

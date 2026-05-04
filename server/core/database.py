@@ -27,6 +27,9 @@ def ensure_user_config_columns() -> None:
     statements = [
         "ALTER TABLE user_configs ADD COLUMN ai_provider VARCHAR(24) NOT NULL DEFAULT 'openai'",
         "ALTER TABLE users ADD COLUMN password_changed_at DATETIME NULL",
+        "ALTER TABLE users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'analyst'",
+        "ALTER TABLE user_configs ADD COLUMN webhook_url VARCHAR(500) NOT NULL DEFAULT ''",
+        "ALTER TABLE user_configs ADD COLUMN webhook_type VARCHAR(16) NOT NULL DEFAULT 'generic'",
     ]
     with engine.begin() as conn:
         for sql in statements:
