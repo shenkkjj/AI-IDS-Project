@@ -27,7 +27,7 @@ from server.core.config import (
 from server.core.database import init_db, ensure_user_config_columns
 from server.core.state import app_state
 from server.routers import (
-    auth_router, user_router, logs_router, site_router, copilot_router, alerts_router, llm_router, waf_router, export_router,
+    auth_router, user_router, logs_router, site_router, copilot_router, alerts_router, llm_router, waf_router, notify_router, export_router,
 )
 from server.services.alert_service import alert_worker
 from server.services.site_monitor_service import _ssl_monitor_loop
@@ -84,6 +84,7 @@ app.include_router(copilot_router.router)
 app.include_router(alerts_router.router)
 app.include_router(llm_router.router)
 app.include_router(waf_router.router)
+app.include_router(notify_router.router)
 app.include_router(export_router.router)
 
 

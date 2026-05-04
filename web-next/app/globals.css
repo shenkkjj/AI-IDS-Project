@@ -42,3 +42,100 @@ body {
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+
+/* 亮色主题 */
+html.light,
+html.light body {
+  background-color: #f0f4f8;
+  color: #1a2332;
+}
+
+html.light ::-webkit-scrollbar-track {
+  background: rgba(200, 210, 220, 0.3);
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: #3b5998;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #2d4373;
+}
+
+html.light ::selection {
+  background: rgba(59, 89, 152, 0.25);
+}
+
+html.light .bg-cyber-bg {
+  background-color: #f0f4f8;
+}
+
+html.light .text-cyber-text {
+  color: #1a2332;
+}
+
+html.light .text-cyber-text\/70 {
+  color: rgba(26, 35, 50, 0.7);
+}
+
+html.light .text-cyber-text\/80 {
+  color: rgba(26, 35, 50, 0.8);
+}
+
+html.light .text-cyber-text\/85 {
+  color: rgba(26, 35, 50, 0.85);
+}
+
+html.light .text-cyber-text\/60 {
+  color: rgba(26, 35, 50, 0.6);
+}
+
+html.light .text-cyber-text\/50 {
+  color: rgba(26, 35, 50, 0.5);
+}
+
+html.light .bg-black\/40 {
+  background-color: rgba(255, 255, 255, 0.7);
+}
+
+html.light .bg-black\/50 {
+  background-color: rgba(255, 255, 255, 0.8);
+}
+
+html.light .border-cyber-cyan\/30 {
+  border-color: rgba(59, 89, 152, 0.25);
+}
+
+html.light .border-cyber-cyan\/20 {
+  border-color: rgba(59, 89, 152, 0.15);
+}
+
+html.light .border-cyber-cyan\/40 {
+  border-color: rgba(59, 89, 152, 0.35);
+}
+
+html.light .text-cyber-cyan {
+  color: #3b5998;
+}
+
+html.light .bg-cyber-cyan\/10 {
+  background-color: rgba(59, 89, 152, 0.1);
+}
+
+html.light .border-cyber-cyan\/60 {
+  border-color: rgba(59, 89, 152, 0.5);
+}
+
+html.light input,
+html.light select {
+  color: #1a2332;
+  background-color: rgba(255, 255, 255, 0.9);
+}
+
+html.light .bg-red-500\/10 {
+  background-color: rgba(220, 50, 50, 0.1);
+}
+
+html.light .bg-green-500\/10 {
+  background-color: rgba(34, 170, 85, 0.1);
+}

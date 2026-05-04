@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw, LogOut } from "lucide-react";
+import { RefreshCw, LogOut, Sun, Moon } from "lucide-react";
 import { signOut } from "next-auth/react";
 import CyberSidebar from "@/components/dashboard/CyberSidebar";
 import StatsCards from "@/components/dashboard/StatsCards";
 import AttackLogTable from "@/components/dashboard/AttackLogTable";
 import HackerTerminal from "@/components/dashboard/HackerTerminal";
 import CopilotPanel from "@/components/dashboard/CopilotPanel";
+import AttackTrendChart from "@/components/dashboard/AttackTrendChart";
+import SourcePieChart from "@/components/dashboard/SourcePieChart";
 import { Button } from "@/components/ui/button";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { useTheme } from "@/contexts/ThemeContext";
 
 type RouteKey = "overview" | "monitor" | "waf" | "ai" | "report";
 
@@ -419,6 +423,26 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [selected, setSelected] = useState<AlertItem | null>(null);
   const [alertsLoadState, setAlertsLoadState] = useState<"loading" | "ready" | "empty" | "error">("loading");
+  const [alertsPage, setAlertsPage] = useState(0);
+  const PAGE_SIZE = 15;
+
+  const { theme, toggleTheme } = useTheme();
+  const { wsAlerts, wsConnected } = useWebSocket(null);
+
+  const mergedAlerts = useMemo(() => {
+    const wsMapped = (wsAlerts || []).map(mapBackendAlert);
+    const existingIds = new Set(alerts.map((a) => a.id));
+    const newWsAlerts = wsMapped.filter((a) => !existingIds.has(a.id));
+    const combined = [...alerts, ...newWsAlerts];
+    return combined.slice(-300);
+  }, [alerts, wsAlerts]);
+
+  const paginatedAlerts = useMemo(() => {
+    const start = alertsPage * PAGE_SIZE;
+    return mergedAlerts.slice(start, start + PAGE_SIZE);
+  }, [mergedAlerts, alertsPage]);
+
+  const totalPages = Math.max(1, Math.ceil(mergedAlerts.length / PAGE_SIZE));
 
   const [config, setConfig] = useState<PersistedUserConfig | null>(null);
   const [configDraft, setConfigDraft] = useState<ConfigDraft>({
@@ -439,7 +463,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   const activeCopilotRequestId = useRef(0);
 
   const [terminalLogs, setTerminalLogs] = useState<string[]>(buildTerminalBootstrapLines());
-  const [reportMarkdown, setReportMarkdown] = useState<string>(() => buildReportMarkdown(alerts));
+  const [reportMarkdown, setReportMarkdown] = useState<string>(() => buildReportMarkdown(mergedAlerts));
   const [reportTyping, setReportTyping] = useState(false);
   const reportTypingToken = useRef(0);
 
@@ -456,12 +480,12 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   const siteHealthTimer = useRef<number | null>(null);
 
   const counters = useMemo(() => {
-    const alertsTotal = alerts.length;
-    const highRiskTotal = alerts.filter((a) => a.risk === "high" || a.risk === "critical").length;
-    const blockedTotal = alerts.filter((a) => a.blocked).length;
+    const alertsTotal = mergedAlerts.length;
+    const highRiskTotal = mergedAlerts.filter((a) => a.risk === "high" || a.risk === "critical").length;
+    const blockedTotal = mergedAlerts.filter((a) => a.blocked).length;
     const siteHealthText = siteHealthUi.text;
     return { alertsTotal, highRiskTotal, blockedTotal, siteHealthText };
-  }, [alerts, siteHealthUi.text]);
+  }, [mergedAlerts, siteHealthUi.text]);
 
 
 
@@ -500,12 +524,12 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   }
 
   async function refreshReportWithTypewriter() {
-    const next = buildReportMarkdown(alerts);
+    const next = buildReportMarkdown(mergedAlerts);
     await typewriteReport(next);
   }
 
   function handleTerminalCommand(command: string) {
-    const outputLines = runTerminalCommand(command, alerts);
+    const outputLines = runTerminalCommand(command, mergedAlerts);
     if (outputLines.length === 0) {
       return;
     }
@@ -843,8 +867,8 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   }, []);
 
   useEffect(() => {
-    setReportMarkdown(buildReportMarkdown(alerts));
-  }, [alerts]);
+    setReportMarkdown(buildReportMarkdown(mergedAlerts));
+  }, [mergedAlerts]);
 
   function updateLastAssistantMessage(nextContent: string) {
     setCopilotMessages((prev) => {
@@ -1064,7 +1088,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   const isReportRoute = route === "report";
 
   function handleSelectLog(id: string) {
-    const found = alerts.find((item) => item.id === id) || null;
+    const found = mergedAlerts.find((item) => item.id === id) || null;
     setSelected(found);
   }
 
@@ -1076,6 +1100,18 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
 
         <section className="flex-1 flex flex-col gap-4 min-h-[calc(100vh-2rem)]">
           <div className="flex items-center justify-end gap-2">
+            <div className={`flex items-center gap-1 px-2 py-1 text-[10px] rounded ${wsConnected ? "bg-green-500/10 text-green-300" : "bg-red-500/10 text-red-400"}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-green-400 animate-pulse" : "bg-red-400"}`} />
+              {wsConnected ? "WS在线" : "WS离线"}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleTheme}
+              className="border-cyber-cyan/30 text-cyber-text/70 hover:text-cyber-cyan hover:bg-cyber-cyan/10 hover:border-cyber-cyan/60"
+            >
+              {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -1087,6 +1123,19 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
             </Button>
           </div>
           <StatsCards stats={counters} />
+
+          {(isOverviewRoute || isMonitorRoute) ? (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+              <div className="bg-black/40 border border-cyber-cyan/30 backdrop-blur p-3 h-[280px]">
+                <h3 className="text-[10px] uppercase tracking-widest text-cyber-text/60 mb-2">攻击趋势 (近24时段)</h3>
+                <AttackTrendChart alerts={mergedAlerts} />
+              </div>
+              <div className="bg-black/40 border border-cyber-cyan/30 backdrop-blur p-3 h-[280px]">
+                <h3 className="text-[10px] uppercase tracking-widest text-cyber-text/60 mb-2">攻击分布</h3>
+                <SourcePieChart alerts={mergedAlerts} />
+              </div>
+            </div>
+          ) : null}
 
           <div className="bg-black/40 border border-cyber-cyan/30 p-3 text-sm text-cyber-text/70">{configStatus}</div>
 
@@ -1146,12 +1195,41 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                       暂无告警
                     </div>
                   ) : (
-                    <AttackLogTable
-                      logs={alerts}
-                      highlightId={selectedLogId}
-                      selectedId={selectedLogId}
-                      onSelect={handleSelectLog}
-                    />
+                    <div className="flex flex-col h-full min-h-0">
+                      <div className="flex-1 min-h-0">
+                        <AttackLogTable
+                          logs={paginatedAlerts}
+                          highlightId={selectedLogId}
+                          selectedId={selectedLogId}
+                          onSelect={handleSelectLog}
+                        />
+                      </div>
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-center gap-2 py-2 border-t border-cyber-cyan/20">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setAlertsPage(Math.max(0, alertsPage - 1))}
+                            disabled={alertsPage === 0}
+                            className="border-cyber-cyan/30 text-cyber-text/60 text-xs px-2 h-7"
+                          >
+                            上一页
+                          </Button>
+                          <span className="text-xs text-cyber-text/50">
+                            {alertsPage + 1} / {totalPages}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setAlertsPage(Math.min(totalPages - 1, alertsPage + 1))}
+                            disabled={alertsPage >= totalPages - 1}
+                            className="border-cyber-cyan/30 text-cyber-text/60 text-xs px-2 h-7"
+                          >
+                            下一页
+                          </Button>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
