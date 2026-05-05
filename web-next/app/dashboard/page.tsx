@@ -3,6 +3,7 @@
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { Shield, Loader2 } from "lucide-react";
 import DashboardClient from "./dashboard-client";
 
 export default function DashboardPage() {
@@ -12,7 +13,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (status === "unauthenticated") {
-      // Give a moment to show the unauthorized message before redirect
       setShowUnauthorized(true);
       const timer = setTimeout(() => {
         router.push("/");
@@ -23,10 +23,10 @@ export default function DashboardPage() {
 
   if (status === "loading") {
     return (
-      <div className="min-h-screen bg-[#050a14] text-[#00f0ff] flex items-center justify-center font-mono">
+      <div className="min-h-screen bg-background text-text flex items-center justify-center">
         <div className="text-center">
-          <div className="text-lg mb-2">SYSTEM INITIALIZING...</div>
-          <div className="text-sm text-[#00f0ff]/60">正在加载会话...</div>
+          <Loader2 className="w-8 h-8 text-primary animate-spin mx-auto mb-3" />
+          <div className="text-sm text-text-secondary">正在加载会话...</div>
         </div>
       </div>
     );
@@ -34,14 +34,17 @@ export default function DashboardPage() {
 
   if (!session?.user || showUnauthorized) {
     return (
-      <div className="min-h-screen bg-[#050a14] text-[#00f0ff] flex items-center justify-center font-mono">
+      <div className="min-h-screen bg-background text-text flex items-center justify-center">
         <div className="text-center">
-          <div className="text-lg mb-2">ACCESS DENIED</div>
-          <div className="text-sm text-[#00f0ff]/60 mb-4">未登录或会话已过期</div>
-          <div className="text-xs text-[#00f0ff]/40 mb-4">2秒后自动跳转...</div>
+          <div className="w-12 h-12 bg-danger-subtle rounded-full flex items-center justify-center mx-auto mb-3">
+            <Shield className="w-6 h-6 text-danger" />
+          </div>
+          <div className="text-lg font-semibold mb-1">访问受限</div>
+          <div className="text-sm text-text-secondary mb-4">未登录或会话已过期</div>
+          <div className="text-xs text-text-tertiary mb-4">2秒后自动跳转...</div>
           <button
             onClick={() => router.push("/")}
-            className="px-4 py-2 border border-[#00f0ff]/40 text-[#00f0ff] hover:bg-[#00f0ff]/10 transition-colors"
+            className="px-4 py-2 bg-primary text-white text-sm rounded-apple hover:bg-primary-hover transition-colors"
           >
             立即返回登录
           </button>
@@ -50,5 +53,12 @@ export default function DashboardPage() {
     );
   }
 
-  return <DashboardClient userEmail={String(session.user.email || "")} />;
+  const user = session.user as { email?: string; name?: string; role?: string };
+
+  return (
+    <DashboardClient
+      userEmail={String(user.email || "")}
+      userRole={String(user.role || "analyst")}
+    />
+  );
 }

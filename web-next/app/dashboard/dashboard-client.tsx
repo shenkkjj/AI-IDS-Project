@@ -103,6 +103,7 @@ type CopilotMessage = {
 
 type DashboardClientProps = {
   userEmail: string;
+  userRole: string;
 };
 
 const ALERTS_POLL_MS = 8000;
@@ -418,7 +419,7 @@ function routeDescription(route: RouteKey): string {
   return "安全日报生成与归档";
 }
 
-export default function DashboardClient({ userEmail }: DashboardClientProps) {
+export default function DashboardClient({ userEmail, userRole }: DashboardClientProps) {
   const [route, setRoute] = useState<RouteKey>("overview");
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [selected, setSelected] = useState<AlertItem | null>(null);
@@ -1155,7 +1156,20 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
               {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
             <div className="w-px h-6 bg-border-subtle mx-1" />
-            <span className="text-sm text-text-secondary hidden sm:block">{userEmail}</span>
+            <div className="hidden sm:flex items-center gap-2">
+              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
+                userRole === "admin"
+                  ? "bg-primary/10 text-primary"
+                  : userRole === "analyst"
+                    ? "bg-warning/10 text-warning"
+                    : userRole === "viewer"
+                      ? "bg-success/10 text-success"
+                      : "bg-danger/10 text-danger"
+              }`}>
+                {userRole === "admin" ? "管理员" : userRole === "analyst" ? "分析师" : userRole === "viewer" ? "观察员" : userRole === "operator" ? "运维" : userRole}
+              </span>
+              <span className="text-sm text-text-secondary">{userEmail}</span>
+            </div>
             <button
               onClick={() => signOut({ callbackUrl: "/" })}
               className="p-2 rounded-apple text-text-secondary hover:text-danger hover:bg-danger-subtle transition-colors"
