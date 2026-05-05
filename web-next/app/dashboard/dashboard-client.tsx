@@ -1109,26 +1109,26 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F5F7] text-[#1D1D1F]">
+    <div className="min-h-screen bg-background text-text">
       {/* Top Navigation */}
-      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-xl border-b border-[#E8E8ED]">
+      <header className="sticky top-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-border-subtle">
         <div className="max-w-[1400px] mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-8">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 bg-[#0071E3] rounded-[10px] flex items-center justify-center">
+              <div className="w-8 h-8 bg-primary rounded-apple flex items-center justify-center">
                 <Shield className="w-4 h-4 text-white" />
               </div>
-              <span className="font-semibold text-[#1D1D1F] tracking-tight">AI-CyberSentinel</span>
+              <span className="font-semibold text-text tracking-tight">AI-CyberSentinel</span>
             </div>
             <nav className="hidden md:flex items-center gap-1">
               {NAV_ITEMS.map((item) => (
                 <button
                   key={item.key}
                   onClick={() => setRoute(item.key)}
-                  className={`px-4 py-2 rounded-[10px] text-sm font-medium transition-all ${
+                  className={`px-4 py-2 rounded-apple text-sm font-medium transition-all ${
                     route === item.key
-                      ? "bg-[#0071E3]/10 text-[#0071E3]"
-                      : "text-[#86868B] hover:text-[#1D1D1F] hover:bg-[#F5F5F7]"
+                      ? "bg-primary/10 text-primary"
+                      : "text-text-secondary hover:text-text hover:bg-background"
                   }`}
                 >
                   {item.label}
@@ -1137,28 +1137,28 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
             </nav>
           </div>
           <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${wsConnected ? "bg-[#E5F8EA] text-[#34C759]" : "bg-[#FFE5E3] text-[#FF3B30]"}`}>
-              <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-[#34C759]" : "bg-[#FF3B30]"}`} />
+            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${wsConnected ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger"}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-success" : "bg-danger"}`} />
               {wsConnected ? "在线" : "离线"}
             </div>
             <button
               onClick={requestPermission}
-              className="p-2 rounded-[10px] text-[#86868B] hover:text-[#1D1D1F] hover:bg-[#F5F5F7] transition-colors"
+              className="p-2 rounded-apple text-text-secondary hover:text-text hover:bg-background transition-colors"
               title="启用桌面通知"
             >
               <Bell className="w-4 h-4" />
             </button>
             <button
               onClick={toggleTheme}
-              className="p-2 rounded-[10px] text-[#86868B] hover:text-[#1D1D1F] hover:bg-[#F5F5F7] transition-colors"
+              className="p-2 rounded-apple text-text-secondary hover:text-text hover:bg-background transition-colors"
             >
               {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
             </button>
-            <div className="w-px h-6 bg-[#E8E8ED] mx-1" />
-            <span className="text-sm text-[#86868B] hidden sm:block">{userEmail}</span>
+            <div className="w-px h-6 bg-border-subtle mx-1" />
+            <span className="text-sm text-text-secondary hidden sm:block">{userEmail}</span>
             <button
               onClick={() => signOut({ callbackUrl: "/" })}
-              className="p-2 rounded-[10px] text-[#86868B] hover:text-[#FF3B30] hover:bg-[#FFE5E3] transition-colors"
+              className="p-2 rounded-apple text-text-secondary hover:text-danger hover:bg-danger-subtle transition-colors"
             >
               <LogOut className="w-4 h-4" />
             </button>
@@ -1167,16 +1167,16 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
       </header>
 
       {/* Mobile Nav */}
-      <div className="md:hidden bg-white border-b border-[#E8E8ED] px-4 py-2 overflow-x-auto">
+      <div className="md:hidden bg-surface border-b border-border-subtle px-4 py-2 overflow-x-auto">
         <div className="flex gap-1 min-w-max">
           {NAV_ITEMS.map((item) => (
             <button
               key={item.key}
               onClick={() => setRoute(item.key)}
-              className={`px-4 py-2 rounded-[10px] text-sm font-medium transition-all whitespace-nowrap ${
+              className={`px-4 py-2 rounded-apple text-sm font-medium transition-all whitespace-nowrap ${
                 route === item.key
-                  ? "bg-[#0071E3]/10 text-[#0071E3]"
-                  : "text-[#86868B]"
+                  ? "bg-primary/10 text-primary"
+                  : "text-text-secondary"
               }`}
             >
               {item.label}
@@ -1185,35 +1185,35 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
         </div>
       </div>
 
-      <main className="max-w-[1400px] mx-auto px-6 py-8">
+      <main className="max-w-[1400px] mx-auto px-6 py-8 space-y-6">
         <StatsCards stats={counters} />
 
-          {(isOverviewRoute || isMonitorRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              <div className="bg-white rounded-[18px] shadow-card p-5 h-[300px]">
-                <h3 className="text-xs font-semibold text-[#86868B] uppercase tracking-wider mb-3">攻击趋势 (近24时段)</h3>
-                <AttackTrendChart alerts={mergedAlerts} />
-              </div>
-              <div className="bg-white rounded-[18px] shadow-card p-5 h-[300px]">
-                <h3 className="text-xs font-semibold text-[#86868B] uppercase tracking-wider mb-3">攻击分布</h3>
-                <SourcePieChart alerts={mergedAlerts} />
-              </div>
+        {(isOverviewRoute || isMonitorRoute) ? (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="bg-surface rounded-apple-lg shadow-card p-5 h-[300px]">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">攻击趋势 (近24时段)</h3>
+              <AttackTrendChart alerts={mergedAlerts} />
             </div>
-          ) : null}
-
-          <div className="bg-white rounded-[12px] shadow-card p-3 text-sm text-[#86868B]">{configStatus}</div>
-
-          {!isOverviewRoute ? (
-            <div className="bg-white rounded-[12px] shadow-card p-4 text-sm text-[#1D1D1F]">
-              当前标签页：{NAV_ITEMS.find((item) => item.key === route)?.label || route} · {routeDescription(route)}
+            <div className="bg-surface rounded-apple-lg shadow-card p-5 h-[300px]">
+              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">攻击分布</h3>
+              <SourcePieChart alerts={mergedAlerts} />
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
-          {(isOverviewRoute || isMonitorRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 min-h-0 flex-1">
-              <div className="xl:col-span-2 min-h-0 flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <h2 className="text-sm font-semibold text-[#1D1D1F]">实时告警流</h2>
+        <div className="bg-surface rounded-apple shadow-card p-3 text-sm text-text-secondary">{configStatus}</div>
+
+        {!isOverviewRoute ? (
+          <div className="bg-surface rounded-apple shadow-card p-4 text-sm text-text">
+            当前标签页：{NAV_ITEMS.find((item) => item.key === route)?.label || route} · {routeDescription(route)}
+          </div>
+        ) : null}
+
+        {(isOverviewRoute || isMonitorRoute) ? (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 min-h-0 flex-1">
+            <div className="xl:col-span-2 min-h-0 flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-text">实时告警流</h2>
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
@@ -1239,249 +1239,249 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                     刷新
                   </Button>
                 </div>
-                </div>
-                <div className="min-h-0 flex-1">
-                  {alertsLoadState === "loading" ? (
-                    <div className="h-full min-h-[220px] bg-white rounded-[18px] shadow-card flex items-center justify-center text-[#86868B] text-sm">
-                      正在加载告警...
+              </div>
+              <div className="min-h-0 flex-1">
+                {alertsLoadState === "loading" ? (
+                  <div className="h-full min-h-[220px] bg-surface rounded-apple-lg shadow-card flex items-center justify-center text-text-secondary text-sm">
+                    正在加载告警...
+                  </div>
+                ) : alertsLoadState === "error" ? (
+                  <div className="h-full min-h-[220px] bg-surface rounded-apple-lg shadow-card flex flex-col items-center justify-center gap-2 text-sm text-danger">
+                    告警加载失败，请稍后重试
+                    <Button variant="outline" size="sm" onClick={() => void loadAlerts()}>
+                      重试
+                    </Button>
+                  </div>
+                ) : alertsLoadState === "empty" ? (
+                  <div className="h-full min-h-[220px] bg-surface rounded-apple-lg shadow-card flex items-center justify-center text-text-secondary text-sm">
+                    暂无告警
+                  </div>
+                ) : (
+                  <div className="flex flex-col h-full min-h-0">
+                    <div className="flex-1 min-h-0">
+                      <AttackLogTable
+                        logs={paginatedAlerts}
+                        highlightId={selectedLogId}
+                        selectedId={selectedLogId}
+                        onSelect={handleSelectLog}
+                      />
                     </div>
-                  ) : alertsLoadState === "error" ? (
-                    <div className="h-full min-h-[220px] bg-white rounded-[18px] shadow-card flex flex-col items-center justify-center gap-2 text-sm text-[#FF3B30]">
-                      告警加载失败，请稍后重试
-                      <Button variant="outline" size="sm" onClick={() => void loadAlerts()}>
-                        重试
-                      </Button>
-                    </div>
-                  ) : alertsLoadState === "empty" ? (
-                    <div className="h-full min-h-[220px] bg-white rounded-[18px] shadow-card flex items-center justify-center text-[#86868B] text-sm">
-                      暂无告警
-                    </div>
-                  ) : (
-                    <div className="flex flex-col h-full min-h-0">
-                      <div className="flex-1 min-h-0">
-                        <AttackLogTable
-                          logs={paginatedAlerts}
-                          highlightId={selectedLogId}
-                          selectedId={selectedLogId}
-                          onSelect={handleSelectLog}
-                        />
+                    {totalPages > 1 && (
+                      <div className="flex items-center justify-center gap-2 py-3">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAlertsPage(Math.max(0, alertsPage - 1))}
+                          disabled={alertsPage === 0}
+                        >
+                          上一页
+                        </Button>
+                        <span className="text-xs text-text-secondary">
+                          {alertsPage + 1} / {totalPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setAlertsPage(Math.min(totalPages - 1, alertsPage + 1))}
+                          disabled={alertsPage >= totalPages - 1}
+                        >
+                          下一页
+                        </Button>
                       </div>
-                      {totalPages > 1 && (
-                        <div className="flex items-center justify-center gap-2 py-3">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setAlertsPage(Math.max(0, alertsPage - 1))}
-                            disabled={alertsPage === 0}
-                          >
-                            上一页
-                          </Button>
-                          <span className="text-xs text-[#86868B]">
-                            {alertsPage + 1} / {totalPages}
-                          </span>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setAlertsPage(Math.min(totalPages - 1, alertsPage + 1))}
-                            disabled={alertsPage >= totalPages - 1}
-                          >
-                            下一页
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="min-h-0 flex flex-col gap-4">
-                <CopilotPanel
-                  messages={copilotMessages}
-                  draft={copilotInput}
-                  loading={copilotSending}
-                  onDraftChange={setCopilotInput}
-                  onSend={() => void sendCopilotMessage(copilotInput)}
-                />
+                    )}
+                  </div>
+                )}
               </div>
             </div>
-          ) : null}
 
-          {(isOverviewRoute || isMonitorRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              <div className="h-[320px]">
-                <HackerTerminal lines={terminalLogs} onCommand={handleTerminalCommand} />
-              </div>
-
-              <div className="bg-white rounded-[18px] shadow-card p-5 h-[320px] overflow-y-auto">
-                <div className="mb-3 flex items-center justify-between text-sm text-[#1D1D1F]">
-                  <span className="font-semibold">安全日报</span>
-                  <Button variant="outline" size="sm" onClick={() => void refreshReportWithTypewriter()}>
-                    <RefreshCw className={`mr-1 h-3.5 w-3.5 ${reportTyping ? "animate-spin" : ""}`} />
-                    刷新
-                  </Button>
-                </div>
-                <pre className="whitespace-pre-wrap text-xs leading-5 text-[#86868B]">{reportMarkdown}</pre>
-              </div>
+            <div className="min-h-0 flex flex-col gap-4">
+              <CopilotPanel
+                messages={copilotMessages}
+                draft={copilotInput}
+                loading={copilotSending}
+                onDraftChange={setCopilotInput}
+                onSend={() => void sendCopilotMessage(copilotInput)}
+              />
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
-          {(isOverviewRoute || isWafRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-              <div className="bg-white rounded-[18px] shadow-card p-5 space-y-3">
-                <h3 className="text-sm font-semibold text-[#1D1D1F]">站点监测</h3>
-                <div className="text-xs text-[#86868B]">状态: {siteHealthUi.text}</div>
-                <input
-                  value={siteTargetInput}
-                  onChange={(event) => setSiteTargetInput(event.target.value)}
-                  placeholder="https://example.com"
-                  className="w-full bg-[#F5F5F7] border border-[#E8E8ED] rounded-[10px] text-[#1D1D1F] text-sm py-2.5 px-3 focus:outline-none focus:border-[#0071E3] focus:ring-2 focus:ring-[#0071E3]/20 transition-all"
-                />
+        {(isOverviewRoute || isMonitorRoute) ? (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="h-[320px]">
+              <HackerTerminal lines={terminalLogs} onCommand={handleTerminalCommand} />
+            </div>
+
+            <div className="bg-surface rounded-apple-lg shadow-card p-5 h-[320px] overflow-y-auto">
+              <div className="mb-3 flex items-center justify-between text-sm text-text">
+                <span className="font-semibold">安全日报</span>
+                <Button variant="outline" size="sm" onClick={() => void refreshReportWithTypewriter()}>
+                  <RefreshCw className={`mr-1 h-3.5 w-3.5 ${reportTyping ? "animate-spin" : ""}`} />
+                  刷新
+                </Button>
+              </div>
+              <pre className="whitespace-pre-wrap text-xs leading-5 text-text-secondary">{reportMarkdown}</pre>
+            </div>
+          </div>
+        ) : null}
+
+        {(isOverviewRoute || isWafRoute) ? (
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-3">
+              <h3 className="text-sm font-semibold text-text">站点监测</h3>
+              <div className="text-xs text-text-secondary">状态: {siteHealthUi.text}</div>
+              <input
+                value={siteTargetInput}
+                onChange={(event) => setSiteTargetInput(event.target.value)}
+                placeholder="https://example.com"
+                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => void handleSaveSiteTarget()}
+                disabled={siteTargetSaving || !siteTargetInput.trim()}
+              >
+                保存目标
+              </Button>
+              <div className="text-[11px] text-text-tertiary">{siteHealth?.url ? `当前目标: ${siteHealth.url}` : "当前目标: 未设置"}</div>
+            </div>
+
+            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-3">
+              <h3 className="text-sm font-semibold text-text">代理与 WAF</h3>
+              <input
+                value={proxyPathInput}
+                onChange={(event) => setProxyPathInput(event.target.value)}
+                placeholder="/"
+                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => void handleTestSiteProxy()}
+                disabled={proxyTesting}
+              >
+                {proxyTesting ? "测试中..." : "测试代理链路"}
+              </Button>
+              <div className="text-[11px] text-text-tertiary">路径支持 URL 或相对路径，命中策略会返回 403。</div>
+            </div>
+
+            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-3">
+              <h3 className="text-sm font-semibold text-text">告警确认与语音</h3>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => void handleConfirmThreat()}
+                disabled={confirmingThreat || !selected?.alertId}
+              >
+                {confirmingThreat ? "确认中..." : "确认威胁入库"}
+              </Button>
+              <div
+                className={`text-[11px] px-3 py-2 rounded-apple ${
+                  threatStatusTone === "ok"
+                    ? "bg-success-subtle text-success"
+                    : threatStatusTone === "error"
+                      ? "bg-danger-subtle text-danger"
+                      : "bg-background text-text-secondary"
+                }`}
+              >
+                {threatStatus}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => void handleToggleVoiceAlert()}
+              >
+                {config?.alert_voice_enabled ? "关闭语音预警" : "开启语音预警"}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {(isOverviewRoute || isAiRoute) ? (
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-2">
+              <h3 className="text-sm font-semibold text-text">AI 路由配置</h3>
+              <select
+                value={configDraft.ai_provider}
+                onChange={(event) => setConfigDraft((prev) => ({ ...prev, ai_provider: event.target.value }))}
+                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
+              >
+                {PROVIDERS.map((provider) => (
+                  <option key={provider} value={provider}>
+                    {provider}
+                  </option>
+                ))}
+              </select>
+              <input
+                autoComplete="off"
+                value={configDraft.model}
+                onChange={(event) => setConfigDraft((prev) => ({ ...prev, model: event.target.value }))}
+                placeholder="Model"
+                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
+              />
+              <input
+                autoComplete="off"
+                value={configDraft.base_url}
+                onChange={(event) => setConfigDraft((prev) => ({ ...prev, base_url: event.target.value }))}
+                placeholder="Base URL"
+                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
+              />
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={configDraft.api_key}
+                onChange={(event) => setConfigDraft((prev) => ({ ...prev, api_key: event.target.value }))}
+                placeholder={config?.has_api_key ? "已配置，留空表示不修改" : "输入新的 API Key"}
+                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
+              />
+              <div className="text-xs text-text-tertiary">当前密钥状态：{config?.has_api_key ? config.api_key_masked : "未配置"}</div>
+              <div className="flex gap-2 flex-wrap">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full"
-                  onClick={() => void handleSaveSiteTarget()}
-                  disabled={siteTargetSaving || !siteTargetInput.trim()}
+                  onClick={() => void handleSaveConfig()}
+                  disabled={savingConfig || testingConfig || refreshingConfig}
                 >
-                  保存目标
+                  {savingConfig ? "保存中..." : "保存配置"}
                 </Button>
-                <div className="text-[11px] text-[#A1A1A6]">{siteHealth?.url ? `当前目标: ${siteHealth.url}` : "当前目标: 未设置"}</div>
-              </div>
-
-              <div className="bg-white rounded-[18px] shadow-card p-5 space-y-3">
-                <h3 className="text-sm font-semibold text-[#1D1D1F]">代理与 WAF</h3>
-                <input
-                  value={proxyPathInput}
-                  onChange={(event) => setProxyPathInput(event.target.value)}
-                  placeholder="/"
-                  className="w-full bg-[#F5F5F7] border border-[#E8E8ED] rounded-[10px] text-[#1D1D1F] text-sm py-2.5 px-3 focus:outline-none focus:border-[#0071E3] focus:ring-2 focus:ring-[#0071E3]/20 transition-all"
-                />
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full"
-                  onClick={() => void handleTestSiteProxy()}
-                  disabled={proxyTesting}
+                  onClick={() => void handleTestConfig()}
+                  disabled={savingConfig || testingConfig || refreshingConfig}
                 >
-                  {proxyTesting ? "测试中..." : "测试代理链路"}
+                  {testingConfig ? "测试中..." : "测试路由"}
                 </Button>
-                <div className="text-[11px] text-[#A1A1A6]">路径支持 URL 或相对路径，命中策略会返回 403。</div>
-              </div>
-
-              <div className="bg-white rounded-[18px] shadow-card p-5 space-y-3">
-                <h3 className="text-sm font-semibold text-[#1D1D1F]">告警确认与语音</h3>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="w-full"
-                  onClick={() => void handleConfirmThreat()}
-                  disabled={confirmingThreat || !selected?.alertId}
+                  onClick={() => void handleRefreshConfig()}
+                  disabled={savingConfig || testingConfig || refreshingConfig}
                 >
-                  {confirmingThreat ? "确认中..." : "确认威胁入库"}
-                </Button>
-                <div
-                  className={`text-[11px] px-3 py-2 rounded-[10px] ${
-                    threatStatusTone === "ok"
-                      ? "bg-[#E5F8EA] text-[#34C759]"
-                      : threatStatusTone === "error"
-                        ? "bg-[#FFE5E3] text-[#FF3B30]"
-                        : "bg-[#F5F5F7] text-[#86868B]"
-                  }`}
-                >
-                  {threatStatus}
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  onClick={() => void handleToggleVoiceAlert()}
-                >
-                  {config?.alert_voice_enabled ? "关闭语音预警" : "开启语音预警"}
+                  {refreshingConfig ? "同步中..." : "重新同步"}
                 </Button>
               </div>
             </div>
-          ) : null}
 
-          {(isOverviewRoute || isAiRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-              <div className="bg-white rounded-[18px] shadow-card p-5 space-y-2">
-                <h3 className="text-sm font-semibold text-[#1D1D1F]">AI 路由配置</h3>
-                <select
-                  value={configDraft.ai_provider}
-                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, ai_provider: event.target.value }))}
-                  className="w-full bg-[#F5F5F7] border border-[#E8E8ED] rounded-[10px] text-[#1D1D1F] text-sm py-2.5 px-3"
-                >
-                  {PROVIDERS.map((provider) => (
-                    <option key={provider} value={provider}>
-                      {provider}
-                    </option>
-                  ))}
-                </select>
-                <input
-                  autoComplete="off"
-                  value={configDraft.model}
-                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, model: event.target.value }))}
-                  placeholder="Model"
-                  className="w-full bg-[#F5F5F7] border border-[#E8E8ED] rounded-[10px] text-[#1D1D1F] text-sm py-2.5 px-3"
-                />
-                <input
-                  autoComplete="off"
-                  value={configDraft.base_url}
-                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, base_url: event.target.value }))}
-                  placeholder="Base URL"
-                  className="w-full bg-[#F5F5F7] border border-[#E8E8ED] rounded-[10px] text-[#1D1D1F] text-sm py-2.5 px-3"
-                />
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={configDraft.api_key}
-                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, api_key: event.target.value }))}
-                  placeholder={config?.has_api_key ? "已配置，留空表示不修改" : "输入新的 API Key"}
-                  className="w-full bg-[#F5F5F7] border border-[#E8E8ED] rounded-[10px] text-[#1D1D1F] text-sm py-2.5 px-3"
-                />
-                <div className="text-xs text-[#A1A1A6]">当前密钥状态：{config?.has_api_key ? config.api_key_masked : "未配置"}</div>
-                <div className="flex gap-2 flex-wrap">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleSaveConfig()}
-                    disabled={savingConfig || testingConfig || refreshingConfig}
-                  >
-                    {savingConfig ? "保存中..." : "保存配置"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleTestConfig()}
-                    disabled={savingConfig || testingConfig || refreshingConfig}
-                  >
-                    {testingConfig ? "测试中..." : "测试路由"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => void handleRefreshConfig()}
-                    disabled={savingConfig || testingConfig || refreshingConfig}
-                  >
-                    {refreshingConfig ? "同步中..." : "重新同步"}
-                  </Button>
-                </div>
-              </div>
-
-              <div className="bg-white rounded-[18px] shadow-card p-5 space-y-2">
-                <h3 className="text-sm font-semibold text-[#1D1D1F]">当前会话</h3>
-                <div className="text-sm text-[#1D1D1F]">用户: {userEmail || "unknown"}</div>
-                <div className="text-xs text-[#86868B]">上下文: {copilotHint}</div>
-              </div>
+            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-2">
+              <h3 className="text-sm font-semibold text-text">当前会话</h3>
+              <div className="text-sm text-text">用户: {userEmail || "unknown"}</div>
+              <div className="text-xs text-text-secondary">上下文: {copilotHint}</div>
             </div>
-          ) : null}
+          </div>
+        ) : null}
 
-          {(isOverviewRoute || isReportRoute) ? (
-            <div className="bg-white rounded-[18px] shadow-card p-5">
-              <h3 className="text-sm font-semibold text-[#1D1D1F] mb-2">日报摘要</h3>
-              <pre className="whitespace-pre-wrap text-xs leading-5 text-[#86868B]">{reportMarkdown}</pre>
-            </div>
-          ) : null}
+        {(isOverviewRoute || isReportRoute) ? (
+          <div className="bg-surface rounded-apple-lg shadow-card p-5">
+            <h3 className="text-sm font-semibold text-text mb-2">日报摘要</h3>
+            <pre className="whitespace-pre-wrap text-xs leading-5 text-text-secondary">{reportMarkdown}</pre>
+          </div>
+        ) : null}
       </main>
     </div>
   );

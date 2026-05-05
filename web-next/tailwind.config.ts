@@ -53,9 +53,12 @@ const config: Config = {
         ],
       },
       boxShadow: {
-        card: "0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02)",
-        "card-hover": "0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04)",
+        card: "0 0.5px 2px rgba(0,0,0,0.06), 0 2px 6px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.02)",
+        "card-hover": "0 2px 8px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.06), 0 16px 48px rgba(0,0,0,0.03)",
         dropdown: "0 4px 16px rgba(0,0,0,0.12)",
+        "apple-sm": "0 1px 2px rgba(0,0,0,0.04)",
+        "apple-md": "0 2px 8px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.04)",
+        "apple-lg": "0 4px 12px rgba(0,0,0,0.08), 0 16px 48px rgba(0,0,0,0.04)",
       },
       borderRadius: {
         "apple-sm": "8px",

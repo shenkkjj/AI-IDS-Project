@@ -398,8 +398,9 @@ export default function HomePage() {
         </div>
 
         {/* Decorative circles */}
-        <div className="absolute top-1/4 right-0 w-96 h-96 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
-        <div className="absolute bottom-0 left-1/4 w-64 h-64 bg-white/5 rounded-full translate-y-1/2" />
+        <div className="absolute top-1/4 right-0 w-[28rem] h-[28rem] bg-white/[0.08] rounded-full -translate-y-1/2 translate-x-1/3 blur-sm" />
+        <div className="absolute bottom-0 left-1/4 w-72 h-72 bg-white/[0.06] rounded-full translate-y-1/3 blur-sm" />
+        <div className="absolute top-1/2 left-1/2 w-48 h-48 bg-white/[0.04] rounded-full -translate-x-1/2 -translate-y-1/2" />
       </div>
 
       {/* Right Panel - Form */}
