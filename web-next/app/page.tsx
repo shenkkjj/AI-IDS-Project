@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { signIn } from "next-auth/react";
 import {
   Shield,
@@ -14,6 +14,7 @@ import {
   UserPlus,
   ChevronLeft,
 } from "lucide-react";
+import AnimatedCharacters from "./components/animated-characters/AnimatedCharacters";
 
 type RoleKey = "admin" | "analyst" | "viewer" | "operator";
 
@@ -84,6 +85,8 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [activeCharacter, setActiveCharacter] = useState<string | null>(null);
 
   function selectRole(role: RoleInfo) {
     setSelectedRole(role);
@@ -115,61 +118,48 @@ export default function LoginPage() {
     window.location.href = result?.url || "/dashboard";
   }
 
+  const handleCharacterClick = useCallback((character: string) => {
+    setActiveCharacter(character);
+    setTimeout(() => setActiveCharacter(null), 500);
+  }, []);
+
   return (
     <div className="min-h-screen bg-background flex">
-      {/* Left Panel - Branding */}
-      <div className="hidden lg:flex lg:w-1/2 bg-primary relative overflow-hidden flex-col justify-between p-12 text-white">
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 bg-white/20 rounded-apple flex items-center justify-center backdrop-blur-sm">
-              <Shield className="w-5 h-5" />
-            </div>
-            <span className="text-xl font-semibold tracking-tight">AI-CyberSentinel</span>
+      {/* Left Panel - Characters + Branding */}
+      <div className="hidden lg:flex lg:w-1/2 bg-[#0a0a0f] relative overflow-hidden flex-col items-center justify-between py-12">
+        {/* Top branding */}
+        <div className="relative z-10 flex items-center gap-3">
+          <div className="w-10 h-10 bg-primary/20 rounded-apple flex items-center justify-center backdrop-blur-sm border border-primary/30">
+            <Shield className="w-5 h-5 text-primary" />
           </div>
-          <h1 className="text-4xl font-bold leading-tight mb-4">
-            智能网络安全
-            <br />
-            态势感知平台
-          </h1>
-          <p className="text-white/70 text-base max-w-sm leading-relaxed">
-            基于 AI 的实时入侵检测与防御系统，为您的数字资产提供全天候智能守护。
-          </p>
+          <span className="text-xl font-semibold tracking-tight text-white">AI-CyberSentinel</span>
         </div>
 
-        <div className="relative z-10 space-y-6">
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white/10 rounded-apple flex items-center justify-center backdrop-blur-sm">
-              <BarChart3 className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="font-semibold text-sm">实时威胁检测</div>
-              <div className="text-white/60 text-xs">毫秒级响应，AI 驱动分析</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white/10 rounded-apple flex items-center justify-center backdrop-blur-sm">
-              <Shield className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="font-semibold text-sm">自动防御拦截</div>
-              <div className="text-white/60 text-xs">WAF 规则 + 智能阻断</div>
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white/10 rounded-apple flex items-center justify-center backdrop-blur-sm">
-              <Eye className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="font-semibold text-sm">全链路可视化</div>
-              <div className="text-white/60 text-xs">攻击溯源，态势大屏</div>
-            </div>
+        {/* Animated Characters */}
+        <div className="relative z-10 flex-1 flex items-center justify-center">
+          <AnimatedCharacters
+            isTyping={isTyping}
+            showPassword={showPassword}
+            passwordLength={password.length}
+            activeCharacter={activeCharacter}
+          />
+        </div>
+
+        {/* Bottom hint */}
+        <div className="relative z-10 text-center">
+          <p className="text-white/40 text-xs font-mono">点击守护者查看状态</p>
+          <div className="flex items-center justify-center gap-6 mt-3 text-white/30 text-[10px] font-mono">
+            <span>加密: AES-256-GCM</span>
+            <span className="animate-pulse">● 系统在线</span>
+            <span>协议: HTTPS/TLS1.3</span>
           </div>
         </div>
 
-        {/* Decorative circles */}
-        <div className="absolute top-1/4 right-0 w-[28rem] h-[28rem] bg-white/[0.08] rounded-full -translate-y-1/2 translate-x-1/3 blur-sm" />
-        <div className="absolute bottom-0 left-1/4 w-72 h-72 bg-white/[0.06] rounded-full translate-y-1/3 blur-sm" />
-        <div className="absolute top-1/2 left-1/2 w-48 h-48 bg-white/[0.04] rounded-full -translate-x-1/2 -translate-y-1/2" />
+        {/* Background grid effect */}
+        <div className="absolute inset-0 opacity-[0.03]" style={{
+          backgroundImage: `linear-gradient(rgba(0,113,227,0.5) 1px, transparent 1px), linear-gradient(90deg, rgba(0,113,227,0.5) 1px, transparent 1px)`,
+          backgroundSize: '40px 40px'
+        }} />
       </div>
 
       {/* Right Panel */}
@@ -246,6 +236,8 @@ export default function LoginPage() {
                       type="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
+                      onFocus={() => setIsTyping(true)}
+                      onBlur={() => setIsTyping(false)}
                       placeholder="name@company.com"
                       className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 pl-10 pr-3 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
                       required
@@ -261,6 +253,8 @@ export default function LoginPage() {
                       type={showPassword ? "text" : "password"}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
+                      onFocus={() => setIsTyping(true)}
+                      onBlur={() => setIsTyping(false)}
                       placeholder="••••••••"
                       className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 pl-10 pr-10 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
                       required
