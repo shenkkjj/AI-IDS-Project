@@ -23,7 +23,11 @@ ROLE_HIERARCHY: dict[Role, int] = {
 
 
 def has_role(user: User, required: Role) -> bool:
-    user_level = ROLE_HIERARCHY.get(Role(user.role), 0)
+    try:
+        user_role = Role(user.role)
+    except ValueError:
+        user_role = None
+    user_level = ROLE_HIERARCHY.get(user_role, 0)
     required_level = ROLE_HIERARCHY.get(required, 999)
     return user_level >= required_level
 

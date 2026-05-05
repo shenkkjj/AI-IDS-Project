@@ -1,0 +1,48 @@
+{
+  "home": {
+    "title": "AI-CyberSentinel",
+    "subtitle": "智能入侵检测系统",
+    "login": "登录",
+    "register": "注册"
+  },
+  "dashboard": {
+    "overview": "概览",
+    "alerts": "告警",
+    "logs": "日志",
+    "settings": "设置",
+    "webSocketOnline": "WS在线",
+    "webSocketOffline": "WS离线",
+    "exportCSV": "导出CSV",
+    "prevPage": "上一页",
+    "nextPage": "下一页",
+    "darkMode": "暗色模式",
+    "lightMode": "亮色模式",
+    "signOut": "退出登录",
+    "stats": {
+      "totalAlerts": "告警总数",
+      "highRisk": "高风险",
+      "blocked": "已拦截",
+      "siteHealth": "站点健康"
+    },
+    "charts": {
+      "attackTrend": "攻击趋势",
+      "attackDistribution": "攻击分布",
+      "total": "总计",
+      "critical": "严重",
+      "high": "高危",
+      "medium": "中危",
+      "low": "低危",
+      "noData": "暂无数据"
+    }
+  },
+  "alerts": {
+    "level": {
+      "critical": "严重",
+      "high": "高危",
+      "medium": "中危",
+      "low": "低危"
+    },
+    "blocked": "已拦截",
+    "bypassed": "已放行"
+  }
+}

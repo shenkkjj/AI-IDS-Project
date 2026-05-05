@@ -34,7 +34,7 @@ CACHE_TTL = 3600  # 1小时
 _cached_blacklist: set[str] = set()
 _cache_ts: float = 0.0
 
-IP_PATTERN = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}")
+IP_PATTERN = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
 
 
 def _extract_ip(line: str) -> str | None:

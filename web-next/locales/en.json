@@ -1,0 +1,48 @@
+{
+  "home": {
+    "title": "AI-CyberSentinel",
+    "subtitle": "Intelligent Intrusion Detection System",
+    "login": "Sign In",
+    "register": "Register"
+  },
+  "dashboard": {
+    "overview": "Overview",
+    "alerts": "Alerts",
+    "logs": "Logs",
+    "settings": "Settings",
+    "webSocketOnline": "WS Online",
+    "webSocketOffline": "WS Offline",
+    "exportCSV": "Export CSV",
+    "prevPage": "Previous",
+    "nextPage": "Next",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode",
+    "signOut": "Sign Out",
+    "stats": {
+      "totalAlerts": "Total Alerts",
+      "highRisk": "High Risk",
+      "blocked": "Blocked",
+      "siteHealth": "Site Health"
+    },
+    "charts": {
+      "attackTrend": "Attack Trends",
+      "attackDistribution": "Attack Distribution",
+      "total": "Total",
+      "critical": "Critical",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low",
+      "noData": "No Data"
+    }
+  },
+  "alerts": {
+    "level": {
+      "critical": "Critical",
+      "high": "High",
+      "medium": "Medium",
+      "low": "Low"
+    },
+    "blocked": "Blocked",
+    "bypassed": "Allowed"
+  }
+}
