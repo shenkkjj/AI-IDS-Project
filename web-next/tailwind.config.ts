@@ -9,19 +9,19 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#070B16",
-        panel: "#0F172A",
+        background: "#0B0F1A",
+        panel: "#111827",
         cyber: "#22D3EE",
         danger: "#F43F5E",
-        "cyber-bg": "#050505",
-        "cyber-cyan": "#00F5FF",
-        "cyber-orange": "#FF8A00",
-        "cyber-purple": "#A855F7",
-        "cyber-text": "#E6F7FF",
+        "cyber-bg": "#0B0F1A",
+        "cyber-cyan": "#22D3EE",
+        "cyber-orange": "#F59E0B",
+        "cyber-purple": "#8B5CF6",
+        "cyber-text": "#E2E8F0",
       },
       boxShadow: {
-        neon: "0 0 24px rgba(34,211,238,.35)",
-        "neon-cyan": "0 0 10px rgba(0,245,255,0.45), 0 0 24px rgba(0,245,255,0.2)",
+        neon: "0 0 12px rgba(34,211,238,.2)",
+        "neon-cyan": "0 0 6px rgba(34,211,238,0.25), 0 0 16px rgba(34,211,238,0.1)",
       },
       fontFamily: {
         mono: [

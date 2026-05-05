@@ -1111,11 +1111,10 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
 
   return (
     <div className="min-h-screen bg-cyber-bg text-cyber-text">
-      <div className="pointer-events-none fixed inset-0 opacity-20 [background-image:radial-gradient(circle_at_1px_1px,rgba(0,245,255,.25)_1px,transparent_0)] [background-size:16px_16px]" />
-      <main className="relative mx-auto flex min-h-screen max-w-[1600px] flex-col md:flex-row gap-4 p-4">
+      <main className="relative mx-auto flex min-h-screen max-w-[1600px] flex-col md:flex-row gap-6 p-6">
         <CyberSidebar items={NAV_ITEMS} active={route} onSelect={setRoute} />
 
-        <section className="flex-1 flex flex-col gap-4 min-h-[calc(100vh-2rem)]">
+        <section className="flex-1 flex flex-col gap-6 min-h-[calc(100vh-3rem)]">
           <div className="flex items-center justify-end gap-2">
             <Button
               variant="outline"
@@ -1151,31 +1150,31 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
           <StatsCards stats={counters} />
 
           {(isOverviewRoute || isMonitorRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              <div className="bg-black/40 border border-cyber-cyan/30 backdrop-blur p-3 h-[280px]">
-                <h3 className="text-[10px] uppercase tracking-widest text-cyber-text/60 mb-2">攻击趋势 (近24时段)</h3>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg backdrop-blur p-4 h-[280px]">
+                <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">攻击趋势 (近24时段)</h3>
                 <AttackTrendChart alerts={mergedAlerts} />
               </div>
-              <div className="bg-black/40 border border-cyber-cyan/30 backdrop-blur p-3 h-[280px]">
-                <h3 className="text-[10px] uppercase tracking-widest text-cyber-text/60 mb-2">攻击分布</h3>
+              <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg backdrop-blur p-4 h-[280px]">
+                <h3 className="text-[10px] uppercase tracking-widest text-slate-500 mb-2">攻击分布</h3>
                 <SourcePieChart alerts={mergedAlerts} />
               </div>
             </div>
           ) : null}
 
-          <div className="bg-black/40 border border-cyber-cyan/30 p-3 text-sm text-cyber-text/70">{configStatus}</div>
+          <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg p-3 text-sm text-slate-400">{configStatus}</div>
 
           {!isOverviewRoute ? (
-            <div className="bg-black/40 border border-cyber-cyan/30 p-4 text-sm text-cyber-text/80">
+            <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg p-4 text-sm text-slate-300">
               当前标签页：{NAV_ITEMS.find((item) => item.key === route)?.label || route} · {routeDescription(route)}
             </div>
           ) : null}
 
           {(isOverviewRoute || isMonitorRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 min-h-0 flex-1">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 min-h-0 flex-1">
               <div className="xl:col-span-2 min-h-0 flex flex-col gap-4">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-sm uppercase tracking-widest text-cyber-text/70">实时告警流</h2>
+                  <h2 className="text-sm uppercase tracking-widest text-slate-400">实时告警流</h2>
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
@@ -1206,18 +1205,18 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                 </div>
                 <div className="min-h-0 flex-1">
                   {alertsLoadState === "loading" ? (
-                    <div className="h-full min-h-[220px] bg-black/40 border border-cyber-cyan/30 flex items-center justify-center text-cyber-text/60 text-sm">
+                    <div className="h-full min-h-[220px] bg-[#0F172A]/80 border border-slate-700/50 rounded-lg flex items-center justify-center text-slate-500 text-sm">
                       正在加载告警...
                     </div>
                   ) : alertsLoadState === "error" ? (
-                    <div className="h-full min-h-[220px] bg-black/40 border border-red-400/30 flex flex-col items-center justify-center gap-2 text-sm text-red-300">
+                    <div className="h-full min-h-[220px] bg-[#0F172A]/80 border border-rose-400/20 rounded-lg flex flex-col items-center justify-center gap-2 text-sm text-rose-300">
                       告警加载失败，请稍后重试
-                      <Button variant="outline" size="sm" onClick={() => void loadAlerts()} className="border-red-300/40 text-red-200">
+                      <Button variant="outline" size="sm" onClick={() => void loadAlerts()} className="border-rose-300/30 text-rose-200">
                         重试
                       </Button>
                     </div>
                   ) : alertsLoadState === "empty" ? (
-                    <div className="h-full min-h-[220px] bg-black/40 border border-cyber-cyan/30 flex items-center justify-center text-cyber-text/60 text-sm">
+                    <div className="h-full min-h-[220px] bg-[#0F172A]/80 border border-slate-700/50 rounded-lg flex items-center justify-center text-slate-500 text-sm">
                       暂无告警
                     </div>
                   ) : (
@@ -1231,17 +1230,17 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                         />
                       </div>
                       {totalPages > 1 && (
-                        <div className="flex items-center justify-center gap-2 py-2 border-t border-cyber-cyan/20">
+                        <div className="flex items-center justify-center gap-2 py-2 border-t border-slate-700/20">
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => setAlertsPage(Math.max(0, alertsPage - 1))}
                             disabled={alertsPage === 0}
-                            className="border-cyber-cyan/30 text-cyber-text/60 text-xs px-2 h-7"
+                            className="border-slate-700/50 text-slate-500 text-xs px-2 h-7"
                           >
                             上一页
                           </Button>
-                          <span className="text-xs text-cyber-text/50">
+                          <span className="text-xs text-slate-600">
                             {alertsPage + 1} / {totalPages}
                           </span>
                           <Button
@@ -1249,7 +1248,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                             size="sm"
                             onClick={() => setAlertsPage(Math.min(totalPages - 1, alertsPage + 1))}
                             disabled={alertsPage >= totalPages - 1}
-                            className="border-cyber-cyan/30 text-cyber-text/60 text-xs px-2 h-7"
+                            className="border-slate-700/50 text-slate-500 text-xs px-2 h-7"
                           >
                             下一页
                           </Button>
@@ -1273,34 +1272,34 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
           ) : null}
 
           {(isOverviewRoute || isMonitorRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
               <div className="h-[320px]">
                 <HackerTerminal lines={terminalLogs} onCommand={handleTerminalCommand} />
               </div>
 
-              <div className="bg-black/40 border border-cyber-cyan/30 backdrop-blur p-4 h-[320px] overflow-y-auto">
-                <div className="mb-3 flex items-center justify-between text-sm text-cyber-text/80">
+              <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg backdrop-blur p-4 h-[320px] overflow-y-auto">
+                <div className="mb-3 flex items-center justify-between text-sm text-slate-300">
                   <span>安全日报</span>
                   <Button variant="outline" size="sm" onClick={() => void refreshReportWithTypewriter()} className="border-cyber-cyan/40 text-cyber-cyan">
                     <RefreshCw className={`mr-1 h-3.5 w-3.5 ${reportTyping ? "animate-spin" : ""}`} />
                     刷新
                   </Button>
                 </div>
-                <pre className="whitespace-pre-wrap text-xs leading-5 text-cyber-text/85">{reportMarkdown}</pre>
+                <pre className="whitespace-pre-wrap text-xs leading-5 text-slate-400">{reportMarkdown}</pre>
               </div>
             </div>
           ) : null}
 
           {(isOverviewRoute || isWafRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-3">
-                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">站点监测</h3>
-                <div className="text-xs text-cyber-text/80">状态: {siteHealthUi.text}</div>
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg p-4 space-y-3">
+                <h3 className="text-sm uppercase tracking-widest text-slate-400">站点监测</h3>
+                <div className="text-xs text-slate-300">状态: {siteHealthUi.text}</div>
                 <input
                   value={siteTargetInput}
                   onChange={(event) => setSiteTargetInput(event.target.value)}
                   placeholder="https://example.com"
-                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2 focus:outline-none"
+                  className="w-full bg-[#0B0F1A] border border-slate-700/50 rounded text-slate-200 text-sm py-2 px-2 focus:outline-none focus:border-cyber-cyan/50"
                 />
                 <Button
                   variant="outline"
@@ -1311,16 +1310,16 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                 >
                   保存目标
                 </Button>
-                <div className="text-[11px] text-cyber-text/60">{siteHealth?.url ? `当前目标: ${siteHealth.url}` : "当前目标: 未设置"}</div>
+                <div className="text-[11px] text-slate-500">{siteHealth?.url ? `当前目标: ${siteHealth.url}` : "当前目标: 未设置"}</div>
               </div>
 
-              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-3">
-                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">代理与 WAF</h3>
+              <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg p-4 space-y-3">
+                <h3 className="text-sm uppercase tracking-widest text-slate-400">代理与 WAF</h3>
                 <input
                   value={proxyPathInput}
                   onChange={(event) => setProxyPathInput(event.target.value)}
                   placeholder="/"
-                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2 focus:outline-none"
+                  className="w-full bg-[#0B0F1A] border border-slate-700/50 rounded text-slate-200 text-sm py-2 px-2 focus:outline-none focus:border-cyber-cyan/50"
                 />
                 <Button
                   variant="outline"
@@ -1331,11 +1330,11 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                 >
                   {proxyTesting ? "测试中..." : "测试代理链路"}
                 </Button>
-                <div className="text-[11px] text-cyber-text/60">路径支持 URL 或相对路径，命中策略会返回 403。</div>
+                <div className="text-[11px] text-slate-500">路径支持 URL 或相对路径，命中策略会返回 403。</div>
               </div>
 
-              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-3">
-                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">告警确认与语音</h3>
+              <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg p-4 space-y-3">
+                <h3 className="text-sm uppercase tracking-widest text-slate-400">告警确认与语音</h3>
                 <Button
                   variant="outline"
                   size="sm"
@@ -1348,10 +1347,10 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                 <div
                   className={`text-[11px] px-2 py-1 rounded ${
                     threatStatusTone === "ok"
-                      ? "bg-green-500/10 text-green-300"
+                      ? "bg-emerald-500/10 text-emerald-300"
                       : threatStatusTone === "error"
-                        ? "bg-red-500/10 text-red-300"
-                        : "bg-black/40 text-cyber-text/70"
+                        ? "bg-rose-500/10 text-rose-300"
+                        : "bg-[#0B0F1A] text-slate-500"
                   }`}
                 >
                   {threatStatus}
@@ -1369,13 +1368,13 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
           ) : null}
 
           {(isOverviewRoute || isAiRoute) ? (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-2">
-                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">AI 路由配置</h3>
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg p-4 space-y-2">
+                <h3 className="text-sm uppercase tracking-widest text-slate-400">AI 路由配置</h3>
                 <select
                   value={configDraft.ai_provider}
                   onChange={(event) => setConfigDraft((prev) => ({ ...prev, ai_provider: event.target.value }))}
-                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2"
+                  className="w-full bg-[#0B0F1A] border border-slate-700/50 rounded text-slate-200 text-sm py-2 px-2"
                 >
                   {PROVIDERS.map((provider) => (
                     <option key={provider} value={provider}>
@@ -1388,14 +1387,14 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                   value={configDraft.model}
                   onChange={(event) => setConfigDraft((prev) => ({ ...prev, model: event.target.value }))}
                   placeholder="Model"
-                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2"
+                  className="w-full bg-[#0B0F1A] border border-slate-700/50 rounded text-slate-200 text-sm py-2 px-2"
                 />
                 <input
                   autoComplete="off"
                   value={configDraft.base_url}
                   onChange={(event) => setConfigDraft((prev) => ({ ...prev, base_url: event.target.value }))}
                   placeholder="Base URL"
-                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2"
+                  className="w-full bg-[#0B0F1A] border border-slate-700/50 rounded text-slate-200 text-sm py-2 px-2"
                 />
                 <input
                   type="password"
@@ -1403,9 +1402,9 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                   value={configDraft.api_key}
                   onChange={(event) => setConfigDraft((prev) => ({ ...prev, api_key: event.target.value }))}
                   placeholder={config?.has_api_key ? "已配置，留空表示不修改" : "输入新的 API Key"}
-                  className="w-full bg-black/50 border border-cyber-cyan/30 text-cyber-text text-sm py-2 px-2"
+                  className="w-full bg-[#0B0F1A] border border-slate-700/50 rounded text-slate-200 text-sm py-2 px-2"
                 />
-                <div className="text-xs text-cyber-text/60">当前密钥状态：{config?.has_api_key ? config.api_key_masked : "未配置"}</div>
+                <div className="text-xs text-slate-500">当前密钥状态：{config?.has_api_key ? config.api_key_masked : "未配置"}</div>
                 <div className="flex gap-2 flex-wrap">
                   <Button
                     variant="outline"
@@ -1437,18 +1436,18 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                 </div>
               </div>
 
-              <div className="bg-black/40 border border-cyber-cyan/30 p-4 space-y-2">
-                <h3 className="text-sm uppercase tracking-widest text-cyber-text/70">当前会话</h3>
-                <div className="text-sm text-cyber-text/80">用户: {userEmail || "unknown"}</div>
-                <div className="text-xs text-cyber-text/60">上下文: {copilotHint}</div>
+              <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg p-4 space-y-2">
+                <h3 className="text-sm uppercase tracking-widest text-slate-400">当前会话</h3>
+                <div className="text-sm text-slate-300">用户: {userEmail || "unknown"}</div>
+                <div className="text-xs text-slate-500">上下文: {copilotHint}</div>
               </div>
             </div>
           ) : null}
 
           {(isOverviewRoute || isReportRoute) ? (
-            <div className="bg-black/40 border border-cyber-cyan/30 p-4">
-              <h3 className="text-sm uppercase tracking-widest text-cyber-text/70 mb-2">日报摘要</h3>
-              <pre className="whitespace-pre-wrap text-xs leading-5 text-cyber-text/85">{reportMarkdown}</pre>
+            <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg p-4">
+              <h3 className="text-sm uppercase tracking-widest text-slate-400 mb-2">日报摘要</h3>
+              <pre className="whitespace-pre-wrap text-xs leading-5 text-slate-400">{reportMarkdown}</pre>
             </div>
           ) : null}
         </section>

@@ -56,7 +56,7 @@ function MatrixRain() {
       ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      ctx.fillStyle = "#00ff41";
+      ctx.fillStyle = "#22D3EE";
       ctx.font = `${fontSize}px monospace`;
 
       drops.forEach((drop, i) => {
@@ -94,13 +94,13 @@ function CircuitBackground() {
       <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
         <defs>
           <pattern id="circuit" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
-            <path d="M10 10 L30 10 L30 30 L50 30" fill="none" stroke="#00ff41" strokeWidth="0.5" />
-            <circle cx="10" cy="10" r="2" fill="#00ff41" />
-            <circle cx="30" cy="30" r="2" fill="#00ff41" />
-            <circle cx="50" cy="30" r="2" fill="#00ff41" />
-            <path d="M60 60 L80 60 L80 80 L100 80" fill="none" stroke="#9d4edd" strokeWidth="0.5" />
-            <circle cx="60" cy="60" r="2" fill="#9d4edd" />
-            <circle cx="80" cy="80" r="2" fill="#9d4edd" />
+            <path d="M10 10 L30 10 L30 30 L50 30" fill="none" stroke="#22D3EE" strokeWidth="0.5" />
+            <circle cx="10" cy="10" r="2" fill="#22D3EE" />
+            <circle cx="30" cy="30" r="2" fill="#22D3EE" />
+            <circle cx="50" cy="30" r="2" fill="#22D3EE" />
+            <path d="M60 60 L80 60 L80 80 L100 80" fill="none" stroke="#8B5CF6" strokeWidth="0.5" />
+            <circle cx="60" cy="60" r="2" fill="#8B5CF6" />
+            <circle cx="80" cy="80" r="2" fill="#8B5CF6" />
           </pattern>
         </defs>
         <rect width="100%" height="100%" fill="url(#circuit)" />
@@ -114,10 +114,10 @@ function GlitchText({ text, className = "" }: { text: string; className?: string
   return (
     <div className={`relative inline-block ${className}`}>
       <span className="relative z-10">{text}</span>
-      <span className="absolute top-0 left-0 text-red-500/40" style={{ clipPath: "inset(0 0 55% 0)", transform: "translateX(1px)" }}>
+      <span className="absolute top-0 left-0 text-rose-500/30" style={{ clipPath: "inset(0 0 55% 0)", transform: "translateX(1px)" }}>
         {text}
       </span>
-      <span className="absolute top-0 left-0 text-cyan-400/40" style={{ clipPath: "inset(55% 0 0 0)", transform: "translateX(-1px)" }}>
+      <span className="absolute top-0 left-0 text-cyan-400/30" style={{ clipPath: "inset(55% 0 0 0)", transform: "translateX(-1px)" }}>
         {text}
       </span>
     </div>
