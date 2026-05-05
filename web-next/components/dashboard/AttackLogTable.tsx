@@ -23,17 +23,17 @@ type AttackLogTableProps = {
 };
 
 function riskLabel(risk: AlertRisk): string {
-  if (risk === "critical") return "CRITICAL";
-  if (risk === "high") return "HIGH";
-  if (risk === "medium") return "MEDIUM";
-  return "LOW";
+  if (risk === "critical") return "严重";
+  if (risk === "high") return "高危";
+  if (risk === "medium") return "中危";
+  return "低危";
 }
 
-function riskClass(risk: AlertRisk): string {
-  if (risk === "critical") return "text-rose-400 bg-rose-400/10";
-  if (risk === "high") return "text-amber-400 bg-amber-400/10";
-  if (risk === "medium") return "text-violet-400 bg-violet-400/10";
-  return "text-cyan-400 bg-cyan-400/10";
+function riskStyle(risk: AlertRisk): { bg: string; text: string; dot: string } {
+  if (risk === "critical") return { bg: "bg-[#FFE5E3]", text: "text-[#FF3B30]", dot: "bg-[#FF3B30]" };
+  if (risk === "high") return { bg: "bg-[#FFF4E5]", text: "text-[#FF9500]", dot: "bg-[#FF9500]" };
+  if (risk === "medium") return { bg: "bg-[#FFF8E1]", text: "text-[#FFCC00]", dot: "bg-[#FFCC00]" };
+  return { bg: "bg-[#E8F4FD]", text: "text-[#0071E3]", dot: "bg-[#0071E3]" };
 }
 
 function formatTimestamp(ts: number | null): string {
@@ -45,59 +45,75 @@ function formatTimestamp(ts: number | null): string {
 
 export default function AttackLogTable({ logs, highlightId, selectedId, onSelect }: AttackLogTableProps) {
   return (
-    <div className="bg-[#0F172A]/80 border border-slate-700/50 rounded-lg p-4 h-full flex flex-col">
-      <div className="flex justify-between items-center mb-4 border-b border-slate-700/30 pb-2">
-        <h3 className="text-cyber-cyan uppercase tracking-widest text-sm font-bold flex items-center gap-2">
-          <span className="w-2 h-2 bg-cyber-cyan rounded-full animate-pulse" />
-          Intrusion Logs
+    <div className="bg-white rounded-[18px] shadow-card p-5 h-full flex flex-col">
+      <div className="flex justify-between items-center mb-4">
+        <h3 className="text-sm font-semibold text-[#1D1D1F] flex items-center gap-2">
+          <span className="w-2 h-2 bg-[#0071E3] rounded-full" />
+          入侵日志
         </h3>
-        <span className="text-xs text-slate-500">Live Capture</span>
+        <span className="text-xs text-[#86868B] font-medium">实时监控</span>
       </div>
 
-      <div className="flex-1 overflow-x-auto overflow-y-auto pr-2">
+      <div className="flex-1 overflow-x-auto overflow-y-auto">
         <table className="w-full text-left text-xs md:text-sm whitespace-nowrap">
-          <thead className="text-slate-500 sticky top-0 bg-[#0B0F1A] z-10">
-            <tr>
-              <th className="p-2 font-normal uppercase">Time</th>
-              <th className="p-2 font-normal uppercase">Source IP</th>
-              <th className="p-2 font-normal uppercase">Target</th>
-              <th className="p-2 font-normal uppercase">Payload</th>
-              <th className="p-2 font-normal uppercase">Severity</th>
-              <th className="p-2 font-normal uppercase">Blocked</th>
+          <thead className="text-[#86868B] sticky top-0 bg-white z-10">
+            <tr className="border-b border-[#E8E8ED]">
+              <th className="py-3 px-2 font-medium">时间</th>
+              <th className="py-3 px-2 font-medium">来源 IP</th>
+              <th className="py-3 px-2 font-medium">目标</th>
+              <th className="py-3 px-2 font-medium">载荷</th>
+              <th className="py-3 px-2 font-medium">等级</th>
+              <th className="py-3 px-2 font-medium">已拦截</th>
             </tr>
           </thead>
           <tbody>
             <AnimatePresence initial={false}>
-              {logs.map((log) => (
-                <motion.tr
-                  key={log.id}
-                  initial={{ backgroundColor: log.id === highlightId ? "rgba(34,211,238,0.2)" : "transparent", opacity: 0.6 }}
-                  animate={{
-                    backgroundColor:
-                      selectedId === log.id ? "rgba(34,211,238,0.06)" : "transparent",
-                    opacity: 1,
-                  }}
-                  exit={{ opacity: 0 }}
-                  transition={{ duration: 0.5, ease: "easeOut" }}
-                  className={`border-b border-white/[0.03] transition-colors ${
-                    selectedId === log.id ? "" : "hover:bg-white/[0.02]"
-                  } ${onSelect ? "cursor-pointer" : ""}`}
-                  onClick={onSelect ? () => onSelect(log.id) : undefined}
-                >
-                  <td className="p-2 text-slate-400">{formatTimestamp(log.timestamp)}</td>
-                  <td className="p-2 font-bold text-amber-400/80">{log.source}</td>
-                  <td className="p-2 text-slate-300">{log.target}</td>
-                  <td className="p-2 max-w-[360px] overflow-hidden text-ellipsis text-slate-400">{log.payload || "--"}</td>
-                  <td className="p-2">
-                    <span className={`px-2 py-1 rounded text-xs tracking-wider ${riskClass(log.risk)}`}>{riskLabel(log.risk)}</span>
-                  </td>
-                  <td className="p-2 text-slate-400">{log.blocked ? "YES" : "NO"}</td>
-                </motion.tr>
-              ))}
+              {logs.map((log) => {
+                const style = riskStyle(log.risk);
+                return (
+                  <motion.tr
+                    key={log.id}
+                    initial={{ backgroundColor: log.id === highlightId ? "rgba(0,113,227,0.1)" : "transparent", opacity: 0.6 }}
+                    animate={{
+                      backgroundColor: selectedId === log.id ? "rgba(0,113,227,0.05)" : "transparent",
+                      opacity: 1,
+                    }}
+                    exit={{ opacity: 0 }}
+                    transition={{ duration: 0.5, ease: "easeOut" }}
+                    className={`border-b border-[#F5F5F7] transition-colors ${
+                      selectedId === log.id ? "" : "hover:bg-[#F5F5F7]/50"
+                    } ${onSelect ? "cursor-pointer" : ""}`}
+                    onClick={onSelect ? () => onSelect(log.id) : undefined}
+                  >
+                    <td className="py-3 px-2 text-[#86868B]">{formatTimestamp(log.timestamp)}</td>
+                    <td className="py-3 px-2 font-medium text-[#1D1D1F]">{log.source}</td>
+                    <td className="py-3 px-2 text-[#1D1D1F]">{log.target}</td>
+                    <td className="py-3 px-2 max-w-[360px] overflow-hidden text-ellipsis text-[#86868B]">{log.payload || "--"}</td>
+                    <td className="py-3 px-2">
+                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${style.bg} ${style.text}`}>
+                        <span className={`w-1.5 h-1.5 rounded-full ${style.dot}`} />
+                        {riskLabel(log.risk)}
+                      </span>
+                    </td>
+                    <td className="py-3 px-2">
+                      <span className={`text-xs font-medium ${log.blocked ? "text-[#34C759]" : "text-[#86868B]"}`}>
+                        {log.blocked ? "是" : "否"}
+                      </span>
+                    </td>
+                  </motion.tr>
+                );
+              })}
             </AnimatePresence>
           </tbody>
         </table>
-        {logs.length === 0 ? <div className="text-center text-slate-600 mt-8 text-sm">NO ANOMALIES DETECTED</div> : null}
+        {logs.length === 0 ? (
+          <div className="text-center text-[#A1A1A6] mt-8 text-sm py-12">
+            <div className="w-12 h-12 bg-[#F5F5F7] rounded-full flex items-center justify-center mx-auto mb-3">
+              <span className="text-xl">✅</span>
+            </div>
+            未检测到异常
+          </div>
+        ) : null}
       </div>
     </div>
   );

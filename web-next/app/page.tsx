@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { getSession, signIn, signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { Eye, EyeOff, Shield, Mail, Lock, Terminal, Fingerprint, ArrowRight, UserPlus, KeyRound, ChevronLeft } from "lucide-react";
-import AnimatedCharacters from "./components/animated-characters/AnimatedCharacters";
+import { Eye, EyeOff, Shield, Mail, Lock, ArrowRight, UserPlus, KeyRound, ChevronLeft } from "lucide-react";
 
 type AuthMode = "login" | "register" | "forgot" | "reset";
 type LoginState = "idle" | "loading" | "success" | "error";
@@ -34,119 +33,7 @@ async function waitForSessionReady(maxAttempts = 8, intervalMs = 250): Promise<b
   return false;
 }
 
-// Matrix Rain Component
-function MatrixRain() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-
-    const chars = "01アイウエオカキクケコサシスセソタチツテトナニヌネノハヒフヘホマミムメモヤユヨラリルレロワヲン";
-    const fontSize = 14;
-    const columns = canvas.width / fontSize;
-    const drops: number[] = Array(Math.floor(columns)).fill(1);
-
-    const draw = () => {
-      ctx.fillStyle = "rgba(0, 0, 0, 0.05)";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      ctx.fillStyle = "#22D3EE";
-      ctx.font = `${fontSize}px monospace`;
-
-      drops.forEach((drop, i) => {
-        const char = chars[Math.floor(Math.random() * chars.length)];
-        ctx.fillText(char, i * fontSize, drop * fontSize);
-
-        if (drop * fontSize > canvas.height && Math.random() > 0.975) {
-          drops[i] = 0;
-        }
-        drops[i] += 1;
-      });
-    };
-
-    const interval = setInterval(draw, 35);
-
-    const handleResize = () => {
-      canvas.width = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener("resize", handleResize);
-    };
-  }, []);
-
-  return <canvas ref={canvasRef} className="fixed inset-0 z-0 opacity-30" />;
-}
-
-// Circuit Board Background
-function CircuitBackground() {
-  return (
-    <div className="fixed inset-0 z-0 opacity-10 pointer-events-none">
-      <svg width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <pattern id="circuit" x="0" y="0" width="100" height="100" patternUnits="userSpaceOnUse">
-            <path d="M10 10 L30 10 L30 30 L50 30" fill="none" stroke="#22D3EE" strokeWidth="0.5" />
-            <circle cx="10" cy="10" r="2" fill="#22D3EE" />
-            <circle cx="30" cy="30" r="2" fill="#22D3EE" />
-            <circle cx="50" cy="30" r="2" fill="#22D3EE" />
-            <path d="M60 60 L80 60 L80 80 L100 80" fill="none" stroke="#8B5CF6" strokeWidth="0.5" />
-            <circle cx="60" cy="60" r="2" fill="#8B5CF6" />
-            <circle cx="80" cy="80" r="2" fill="#8B5CF6" />
-          </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#circuit)" />
-      </svg>
-    </div>
-  );
-}
-
-// Glitch Text Effect
-function GlitchText({ text, className = "" }: { text: string; className?: string }) {
-  return (
-    <div className={`relative inline-block ${className}`}>
-      <span className="relative z-10">{text}</span>
-      <span className="absolute top-0 left-0 text-rose-500/30" style={{ clipPath: "inset(0 0 55% 0)", transform: "translateX(1px)" }}>
-        {text}
-      </span>
-      <span className="absolute top-0 left-0 text-cyan-400/30" style={{ clipPath: "inset(55% 0 0 0)", transform: "translateX(-1px)" }}>
-        {text}
-      </span>
-    </div>
-  );
-}
-
-// Iris Scanner Component
-function IrisScanner({ scanning }: { scanning: boolean }) {
-  return (
-    <div className="relative w-24 h-24 mx-auto mb-4">
-      <div className={`absolute inset-0 rounded-full border-2 ${scanning ? "border-cyan-400 animate-pulse" : "border-cyan-900"}`}>
-        <div className={`absolute inset-2 rounded-full border ${scanning ? "border-cyan-300" : "border-cyan-950"}`} />
-        <div className={`absolute inset-4 rounded-full border-2 ${scanning ? "border-cyan-200" : "border-cyan-950"}`} />
-        <div className="absolute inset-0 flex items-center justify-center">
-          <Fingerprint className={`w-8 h-8 ${scanning ? "text-cyan-400 animate-pulse" : "text-cyan-800"}`} />
-        </div>
-      </div>
-      {scanning && (
-        <div className="absolute inset-0 rounded-full bg-cyan-400/10 animate-ping" />
-      )}
-      <div className="absolute -bottom-6 left-1/2 -translate-x-1/2 text-xs font-mono text-cyan-600">
-        {scanning ? "扫描中..." : "待命"}
-      </div>
-    </div>
-  );
-}
-
-// Terminal Input Component
-function TerminalInput({
+function InputField({
   type,
   value,
   onChange,
@@ -155,11 +42,10 @@ function TerminalInput({
   showToggle,
   showValue,
   onToggle,
-  onFocus,
-  onBlur,
   maxLength,
   inputMode,
   autoComplete,
+  disabled,
 }: {
   type: string;
   value: string;
@@ -169,27 +55,22 @@ function TerminalInput({
   showToggle?: boolean;
   showValue?: boolean;
   onToggle?: () => void;
-  onFocus?: () => void;
-  onBlur?: () => void;
   maxLength?: number;
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   autoComplete?: string;
+  disabled?: boolean;
 }) {
   return (
-    <div className="relative group">
-      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-cyan-700 group-focus-within:text-cyan-400 transition-colors">
-        <Icon className="w-4 h-4" />
-      </div>
-      <div className="absolute left-8 top-1/2 -translate-y-1/2 text-cyan-600 font-mono text-sm pointer-events-none">
-        {">"}
+    <div className="relative">
+      <div className="absolute left-4 top-1/2 -translate-y-1/2 text-[#86868B]">
+        <Icon className="w-5 h-5" />
       </div>
       <input
         type={showToggle ? (showValue ? "text" : "password") : type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        className="w-full h-12 pl-12 pr-10 bg-black/60 border border-cyan-900/50 rounded text-cyan-400 font-mono text-sm placeholder:text-cyan-900 focus:outline-none focus:border-cyan-500 focus:shadow-[0_0_15px_rgba(0,255,255,0.2)] transition-all"
+        disabled={disabled}
+        className="w-full h-12 pl-12 pr-10 bg-white border border-[#D2D2D7] rounded-[12px] text-[#1D1D1F] text-base placeholder:text-[#A1A1A6] focus:outline-none focus:border-[#0071E3] focus:ring-2 focus:ring-[#0071E3]/20 transition-all"
         placeholder={placeholder}
         maxLength={maxLength}
         inputMode={inputMode}
@@ -199,12 +80,11 @@ function TerminalInput({
         <button
           type="button"
           onClick={onToggle}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-cyan-700 hover:text-cyan-400 transition-colors"
+          className="absolute right-4 top-1/2 -translate-y-1/2 text-[#86868B] hover:text-[#1D1D1F] transition-colors"
         >
-          {showValue ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+          {showValue ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
         </button>
       )}
-      <div className="absolute bottom-0 left-0 h-px w-0 group-focus-within:w-full bg-cyan-400 transition-all duration-500" />
     </div>
   );
 }
@@ -222,34 +102,15 @@ export default function HomePage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [loginState, setLoginState] = useState<LoginState>("idle");
-  const [isTyping, setIsTyping] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [activeCharacter, setActiveCharacter] = useState<string | null>(null);
-  const hexStreamRef = useRef<HTMLDivElement>(null);
   const [lockedResetEmail, setLockedResetEmail] = useState("");
 
   const isAuthenticated = status === "authenticated";
 
-  // Auto-redirect to dashboard when already authenticated
   useEffect(() => {
     if (isAuthenticated) {
       router.push("/dashboard");
     }
   }, [isAuthenticated, router]);
-
-  // Generate hex stream effect - using CSS animation for performance
-  useEffect(() => {
-    const el = hexStreamRef.current;
-    if (!el) return;
-    let frameId: number;
-    const updateHex = () => {
-      const hex = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16).toUpperCase()).join("");
-      if (el) el.textContent = hex;
-      frameId = window.setTimeout(updateHex, 800);
-    };
-    updateHex();
-    return () => window.clearTimeout(frameId);
-  }, []);
 
   const handleCredentialsLogin = useCallback(
     async (event: React.FormEvent) => {
@@ -257,7 +118,6 @@ export default function HomePage() {
       setLoading(true);
       setLoginState("loading");
       setMessage("");
-      setScanning(true);
 
       try {
         const result = await signIn("credentials", { email, password, redirect: false });
@@ -265,14 +125,12 @@ export default function HomePage() {
         if (result?.error) {
           setLoginState("error");
           setMessage(getLoginErrorMessage(result.error));
-          setScanning(false);
           return;
         }
 
         if (!result?.ok) {
           setLoginState("error");
           setMessage("认证流程未完成");
-          setScanning(false);
           return;
         }
 
@@ -280,20 +138,18 @@ export default function HomePage() {
         if (!ready) {
           setLoginState("error");
           setMessage("会话未建立，请刷新页面重试");
-          setScanning(false);
           return;
         }
 
         setLoginState("success");
-        setMessage("验证通过，正在进入系统...");
+        setMessage("登录成功，正在进入系统...");
         setTimeout(() => {
           router.push("/dashboard");
           router.refresh();
-        }, 1000);
+        }, 800);
       } catch {
         setLoginState("error");
         setMessage("请稍后重试");
-        setScanning(false);
       } finally {
         setLoading(false);
       }
@@ -320,13 +176,12 @@ export default function HomePage() {
         const data = await res.json();
 
         if (!res.ok) {
-          setMessage(`REGISTRATION_FAILED: ${sanitizeBackendError(data.detail || "")}`);
+          setMessage(`注册失败: ${sanitizeBackendError(data.detail || "")}`);
           return;
         }
 
-        setMessage("REGISTRATION_SUCCESS: 用户已创建，正在自动登录...");
+        setMessage("用户已创建，正在自动登录...");
 
-        // Auto-login after successful registration
         const loginResult = await signIn("credentials", {
           email,
           password,
@@ -341,10 +196,9 @@ export default function HomePage() {
           }
         }
 
-        // Fallback: switch to login mode if auto-login fails
         setTimeout(() => setMode("login"), 1500);
       } catch {
-        setMessage("NETWORK_ERROR: 注册请求失败");
+        setMessage("网络错误，注册请求失败");
       } finally {
         setLoading(false);
       }
@@ -367,19 +221,19 @@ export default function HomePage() {
         const data = await res.json();
 
         if (!res.ok) {
-          setMessage(`REQUEST_FAILED: ${sanitizeBackendError(data.detail || "")}`);
+          setMessage(`请求失败: ${sanitizeBackendError(data.detail || "")}`);
           return;
         }
 
         if (data.dev_code) {
-          setMessage(`DEV_MODE: 验证码为 ${data.dev_code}（开发模式）`);
+          setMessage(`开发模式: 验证码为 ${data.dev_code}`);
         } else {
           setMessage("验证码已发送至邮箱");
         }
         setLockedResetEmail(email);
         setMode("reset");
       } catch {
-        setMessage("NETWORK_ERROR: 请求失败");
+        setMessage("网络错误，请求失败");
       } finally {
         setLoading(false);
       }
@@ -410,13 +264,12 @@ export default function HomePage() {
         const data = await res.json();
 
         if (!res.ok) {
-          setMessage(`RESET_FAILED: ${sanitizeBackendError(data.detail || "")}`);
+          setMessage(`重置失败: ${sanitizeBackendError(data.detail || "")}`);
           return;
         }
 
-        setMessage("RESET_SUCCESS: 密码已重置，正在自动登录...");
+        setMessage("密码已重置，正在自动登录...");
 
-        // Auto-login after successful password reset
         const loginResult = await signIn("credentials", {
           email: lockedResetEmail || email,
           password,
@@ -433,17 +286,17 @@ export default function HomePage() {
 
         setTimeout(() => setMode("login"), 1500);
       } catch {
-        setMessage("NETWORK_ERROR: 重置请求失败");
+        setMessage("网络错误，重置请求失败");
       } finally {
         setLoading(false);
       }
     },
-    [email, lockedResetEmail, otpCode, password, confirmPassword]
+    [email, lockedResetEmail, otpCode, password, confirmPassword, router]
   );
 
   const handleLogout = useCallback(async () => {
     await signOut({ redirect: false });
-    setMessage("SESSION_TERMINATED: 已退出");
+    setMessage("已退出登录");
     setLoginState("idle");
     router.refresh();
   }, [router]);
@@ -452,36 +305,49 @@ export default function HomePage() {
     setMode(newMode);
     setMessage("");
     setLoginState("idle");
-    setScanning(false);
+  };
+
+  const getTitle = () => {
+    switch (mode) {
+      case "login": return "登录";
+      case "register": return "注册账号";
+      case "forgot": return "找回密码";
+      case "reset": return "重置密码";
+    }
+  };
+
+  const getSubtitle = () => {
+    switch (mode) {
+      case "login": return "欢迎回到 AI-CyberSentinel";
+      case "register": return "创建您的新账号";
+      case "forgot": return "我们将向您的邮箱发送验证码";
+      case "reset": return "请输入验证码和新密码";
+    }
   };
 
   if (isAuthenticated) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-black relative overflow-hidden">
-        <MatrixRain />
-        <CircuitBackground />
-        <div className="relative z-10 bg-black/80 border border-cyan-900/50 p-8 rounded-lg shadow-[0_0_40px_rgba(0,255,255,0.1)] max-w-md w-full mx-4 backdrop-blur-sm">
-          <div className="text-center mb-6">
-            <div className="w-16 h-16 bg-cyan-900/30 rounded-full flex items-center justify-center mx-auto mb-4 border border-cyan-500/30">
-              <Shield className="w-8 h-8 text-cyan-400" />
-            </div>
-            <h2 className="text-2xl font-bold text-cyan-400 font-mono mb-2">SESSION_ACTIVE</h2>
-            <p className="text-cyan-700 font-mono text-sm">{session?.user?.email || "unknown"}</p>
+      <div className="min-h-screen w-full flex items-center justify-center bg-[#F5F5F7]">
+        <div className="bg-white rounded-[18px] shadow-card p-8 max-w-sm w-full mx-4 text-center">
+          <div className="w-16 h-16 bg-[#E8F4FD] rounded-full flex items-center justify-center mx-auto mb-4">
+            <Shield className="w-8 h-8 text-[#0071E3]" />
           </div>
+          <h2 className="text-xl font-semibold text-[#1D1D1F] mb-1">已登录</h2>
+          <p className="text-[#86868B] text-sm mb-6">{session?.user?.email || "unknown"}</p>
           <div className="space-y-3">
             <button
               type="button"
               onClick={() => router.push("/dashboard")}
-              className="w-full bg-cyan-900/50 hover:bg-cyan-800/50 text-cyan-400 font-mono py-3 px-4 rounded border border-cyan-700/50 transition-all duration-300 hover:shadow-[0_0_15px_rgba(0,255,255,0.2)]"
+              className="w-full h-12 bg-[#0071E3] hover:bg-[#0077ED] text-white font-medium rounded-[12px] transition-colors"
             >
-              $ cd /dashboard
+              进入控制台
             </button>
             <button
               type="button"
               onClick={handleLogout}
-              className="w-full bg-red-900/20 hover:bg-red-900/30 text-red-400 font-mono py-3 px-4 rounded border border-red-800/30 transition-all duration-300"
+              className="w-full h-12 bg-transparent hover:bg-[#F5F5F7] text-[#FF3B30] font-medium rounded-[12px] transition-colors"
             >
-              $ logout
+              退出登录
             </button>
           </div>
         </div>
@@ -490,79 +356,68 @@ export default function HomePage() {
   }
 
   return (
-    <div className="min-h-screen w-full flex bg-black relative overflow-hidden">
-      <MatrixRain />
-      <CircuitBackground />
-
-      {/* Floating hex stream */}
-      <div ref={hexStreamRef} className="fixed top-4 left-4 z-20 font-mono text-xs text-cyan-900/40 break-all max-w-xs pointer-events-none" />
-
-      {/* Left Panel - Characters */}
-      <div className="hidden lg:flex lg:w-1/2 relative flex-col justify-end items-center pb-12 z-10 pointer-events-auto">
-        <div className="absolute top-12 left-12 z-20 flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-cyan-900/30 border border-cyan-500/30 flex items-center justify-center backdrop-blur-sm">
-            <Shield className="w-5 h-5 text-cyan-400" />
+    <div className="min-h-screen w-full flex bg-[#F5F5F7]">
+      {/* Left Panel - Branding */}
+      <div className="hidden lg:flex lg:w-1/2 bg-[#0071E3] relative flex-col justify-between p-12 text-white overflow-hidden">
+        <div className="relative z-10">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 bg-white/20 rounded-[12px] flex items-center justify-center backdrop-blur-sm">
+              <Shield className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-xl font-semibold tracking-tight">AI-CyberSentinel</span>
           </div>
-          <span className="text-cyan-400 text-xl font-bold tracking-wide font-mono">AI-CyberSentinel</span>
+          <h1 className="text-4xl font-bold leading-tight mb-4">
+            智能入侵检测
+            <br />
+            守护数字安全
+          </h1>
+          <p className="text-white/70 text-lg max-w-md leading-relaxed">
+            基于人工智能的实时威胁检测与防御系统，为您的网络资产提供全天候保护。
+          </p>
         </div>
 
-        <AnimatedCharacters
-          isTyping={isTyping}
-          showPassword={showPassword}
-          passwordLength={password.length}
-          activeCharacter={activeCharacter}
-        />
-
-        <div className="absolute bottom-4 left-12 z-20 flex items-center gap-6">
-          <span className="text-cyan-800 text-xs font-mono">SECURE_TERMINAL_V2.4.1</span>
-          <span className="text-cyan-800 text-xs font-mono">ENCRYPTION: AES-256</span>
+        <div className="relative z-10">
+          <div className="flex items-center gap-4 mb-4">
+            <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center">
+              <span className="text-2xl font-bold">99.9%</span>
+            </div>
+            <div>
+              <div className="font-semibold">威胁检测率</div>
+              <div className="text-white/60 text-sm">基于深度学习的实时分析</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center">
+              <span className="text-2xl font-bold">&lt;1s</span>
+            </div>
+            <div>
+              <div className="font-semibold">响应时间</div>
+              <div className="text-white/60 text-sm">毫秒级威胁拦截</div>
+            </div>
+          </div>
         </div>
+
+        {/* Decorative circles */}
+        <div className="absolute top-1/4 right-0 w-96 h-96 bg-white/5 rounded-full -translate-y-1/2 translate-x-1/2" />
+        <div className="absolute bottom-0 left-1/4 w-64 h-64 bg-white/5 rounded-full translate-y-1/2" />
       </div>
 
-      {/* Right Panel - Terminal Window */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12 relative z-20">
-        <div className="w-full max-w-lg">
+      {/* Right Panel - Form */}
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12">
+        <div className="w-full max-w-md">
           {/* Mobile Logo */}
           <div className="lg:hidden flex items-center justify-center gap-2 mb-8">
-            <div className="w-8 h-8 rounded-lg bg-cyan-900/30 border border-cyan-500/30 flex items-center justify-center">
-              <Shield className="w-4 h-4 text-cyan-400" />
+            <div className="w-8 h-8 bg-[#0071E3] rounded-[10px] flex items-center justify-center">
+              <Shield className="w-4 h-4 text-white" />
             </div>
-            <span className="text-lg font-bold text-cyan-400 font-mono">AI-CyberSentinel</span>
+            <span className="text-lg font-semibold text-[#1D1D1F]">AI-CyberSentinel</span>
           </div>
 
-          {/* Terminal Header */}
-          <div className="bg-cyan-950/80 border border-cyan-800/50 rounded-t-lg px-4 py-2 flex items-center justify-between backdrop-blur-sm">
-          <div className="flex items-center gap-2">
-            <Terminal className="w-4 h-4 text-cyan-400" />
-            <span className="text-cyan-400 font-mono text-sm">auth_terminal.exe</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className="w-3 h-3 rounded-full bg-red-500/50" />
-            <div className="w-3 h-3 rounded-full bg-yellow-500/50" />
-            <div className="w-3 h-3 rounded-full bg-green-500/50" />
-          </div>
-        </div>
-
-        {/* Terminal Body */}
-        <div className="bg-black/90 border-x border-b border-cyan-800/50 rounded-b-lg p-6 backdrop-blur-sm shadow-[0_0_60px_rgba(0,255,255,0.08)]">
-          {/* Iris Scanner */}
-          <IrisScanner scanning={scanning} />
-
-          {/* Title */}
-          <div className="text-center mb-6">
-            <GlitchText
-              text={mode === "login" ? "身份验证" : mode === "register" ? "新用户注册" : mode === "forgot" ? "密码找回" : "重置密码"}
-              className="text-xl font-bold text-cyan-400 font-mono"
-            />
-            <div className="text-cyan-700 font-mono text-xs mt-2">
-              {mode === "login" && "安全访问终端 V2.4.1"}
-              {mode === "register" && "创建新凭证"}
-              {mode === "forgot" && "身份验证已启用"}
-              {mode === "reset" && "输入新认证密钥"}
-            </div>
+          <div className="mb-8">
+            <h2 className="text-2xl font-semibold text-[#1D1D1F] mb-1">{getTitle()}</h2>
+            <p className="text-[#86868B]">{getSubtitle()}</p>
           </div>
 
-          {/* Form */}
           <form
             onSubmit={
               mode === "login"
@@ -576,36 +431,31 @@ export default function HomePage() {
             className="space-y-4"
           >
             {mode === "register" && (
-              <TerminalInput
+              <InputField
                 type="text"
                 value={displayName}
                 onChange={setDisplayName}
-                placeholder="输入昵称"
-                icon={Terminal}
-                onFocus={() => setIsTyping(true)}
-                onBlur={() => setIsTyping(false)}
+                placeholder="昵称（可选）"
+                icon={UserPlus}
               />
             )}
 
-            <TerminalInput
+            <InputField
               type="email"
               value={mode === "reset" && lockedResetEmail ? lockedResetEmail : email}
               onChange={mode === "reset" && lockedResetEmail ? () => {} : setEmail}
-              placeholder="输入邮箱地址"
+              placeholder="邮箱地址"
               icon={Mail}
-              onFocus={() => setIsTyping(true)}
-              onBlur={() => setIsTyping(false)}
+              disabled={mode === "reset" && !!lockedResetEmail}
             />
 
             {mode === "reset" && (
-              <TerminalInput
+              <InputField
                 type="text"
                 value={otpCode}
                 onChange={(v: string) => setOtpCode(v.replace(/\D/g, "").slice(0, 6))}
-                placeholder="输入验证码 (4-6位数字)"
+                placeholder="验证码（4-6位数字）"
                 icon={KeyRound}
-                onFocus={() => setIsTyping(true)}
-                onBlur={() => setIsTyping(false)}
                 maxLength={6}
                 inputMode="numeric"
                 autoComplete="one-time-code"
@@ -613,11 +463,11 @@ export default function HomePage() {
             )}
 
             {(mode === "login" || mode === "register" || mode === "reset") && (
-              <TerminalInput
+              <InputField
                 type="password"
                 value={password}
                 onChange={setPassword}
-                placeholder="输入密码"
+                placeholder="密码"
                 icon={Lock}
                 showToggle
                 showValue={showPassword}
@@ -626,7 +476,7 @@ export default function HomePage() {
             )}
 
             {(mode === "register" || mode === "reset") && (
-              <TerminalInput
+              <InputField
                 type="password"
                 value={confirmPassword}
                 onChange={setConfirmPassword}
@@ -641,15 +491,15 @@ export default function HomePage() {
             {/* Message */}
             {message && (
               <div
-                className={`text-xs font-mono px-3 py-2 rounded border ${
+                className={`text-sm px-4 py-3 rounded-[12px] ${
                   loginState === "error" || message.includes("失败") || message.includes("错误")
-                    ? "text-red-400 bg-red-950/30 border-red-800/50"
+                    ? "text-[#FF3B30] bg-[#FFE5E3]"
                     : message.includes("成功") || message.includes("通过")
-                    ? "text-green-400 bg-green-950/30 border-green-800/50"
-                    : "text-yellow-400 bg-yellow-950/30 border-yellow-800/50"
+                    ? "text-[#34C759] bg-[#E5F8EA]"
+                    : "text-[#FF9500] bg-[#FFF4E5]"
                 }`}
               >
-                <span className="opacity-50">{`>`}</span> {message}
+                {message}
               </div>
             )}
 
@@ -657,32 +507,32 @@ export default function HomePage() {
             <button
               type="submit"
               disabled={loading || loginState === "success"}
-              className="w-full h-12 bg-cyan-900/40 hover:bg-cyan-800/50 text-cyan-400 font-mono text-sm rounded border border-cyan-700/50 transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed hover:shadow-[0_0_20px_rgba(0,255,255,0.15)] flex items-center justify-center gap-2 group"
+              className="w-full h-12 bg-[#0071E3] hover:bg-[#0077ED] text-white font-medium rounded-[12px] transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm hover:shadow-md"
             >
-              <span>{loading ? "处理中..." : loginState === "success" ? "验证通过" : "执行"}</span>
-              <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+              <span>{loading ? "处理中..." : loginState === "success" ? "登录成功" : getTitle()}</span>
+              <ArrowRight className="w-4 h-4" />
             </button>
           </form>
 
           {/* Mode Switch Links */}
-          <div className="mt-6 pt-4 border-t border-cyan-900/30 space-y-2">
+          <div className="mt-6 pt-6 border-t border-[#E8E8ED] space-y-3">
             {mode === "login" && (
               <>
                 <button
                   type="button"
                   onClick={() => switchMode("register")}
-                  className="w-full text-left text-cyan-700 hover:text-cyan-400 font-mono text-xs transition-colors flex items-center gap-2"
+                  className="w-full text-center text-[#0071E3] hover:text-[#0077ED] text-sm font-medium transition-colors flex items-center justify-center gap-2"
                 >
-                  <UserPlus className="w-3 h-3" />
-                  <span>{`>`} 新用户注册</span>
+                  <UserPlus className="w-4 h-4" />
+                  <span>创建新账号</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => switchMode("forgot")}
-                  className="w-full text-left text-cyan-700 hover:text-cyan-400 font-mono text-xs transition-colors flex items-center gap-2"
+                  className="w-full text-center text-[#86868B] hover:text-[#1D1D1F] text-sm transition-colors flex items-center justify-center gap-2"
                 >
-                  <KeyRound className="w-3 h-3" />
-                  <span>{`>`} 密码找回</span>
+                  <KeyRound className="w-4 h-4" />
+                  <span>忘记密码？</span>
                 </button>
               </>
             )}
@@ -691,27 +541,12 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => switchMode("login")}
-                className="w-full text-left text-cyan-700 hover:text-cyan-400 font-mono text-xs transition-colors flex items-center gap-2"
+                className="w-full text-center text-[#0071E3] hover:text-[#0077ED] text-sm font-medium transition-colors flex items-center justify-center gap-2"
               >
-                <ChevronLeft className="w-3 h-3" />
-                <span>{`>`} 返回登录</span>
+                <ChevronLeft className="w-4 h-4" />
+                <span>返回登录</span>
               </button>
             )}
-          </div>
-
-          {/* Character selector hint */}
-          <div className="mt-4 text-center">
-            <div className="text-cyan-900 font-mono text-[10px]">
-              点击守护者查看状态
-            </div>
-          </div>
-        </div>
-
-          {/* Bottom status bar */}
-          <div className="mt-2 flex items-center justify-between text-cyan-900 font-mono text-[10px]">
-            <span>加密: AES-256-GCM</span>
-            <span className="animate-pulse">● 系统在线</span>
-            <span>协议: HTTPS/TLS1.3</span>
           </div>
         </div>
       </div>

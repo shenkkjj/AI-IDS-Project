@@ -3,155 +3,42 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html,
 body {
   margin: 0;
   padding: 0;
-  background-color: #0B0F1A;
-  color: #E2E8F0;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  overflow-x: hidden;
+  background-color: #F5F5F7;
+  color: #1D1D1F;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 ::selection {
-  background: rgba(34, 211, 238, 0.25);
+  background: rgba(0, 113, 227, 0.15);
 }
 
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.6);
-  border-radius: 9999px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
+  background: #D2D2D7;
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #86868B;
 }
 
 ::-webkit-scrollbar-corner {
   background: transparent;
-}
-
-/* 亮色主题 */
-html.light,
-html.light body {
-  background-color: #F1F5F9;
-  color: #1E293B;
-}
-
-html.light ::-webkit-scrollbar-track {
-  background: rgba(203, 213, 225, 0.4);
-}
-
-html.light ::-webkit-scrollbar-thumb {
-  background: #94A3B8;
-}
-
-html.light ::-webkit-scrollbar-thumb:hover {
-  background: #64748B;
-}
-
-html.light ::selection {
-  background: rgba(34, 211, 238, 0.2);
-}
-
-html.light .bg-cyber-bg {
-  background-color: #F1F5F9;
-}
-
-html.light .text-cyber-text {
-  color: #1E293B;
-}
-
-html.light .text-cyber-text\/70 {
-  color: rgba(30, 41, 59, 0.7);
-}
-
-html.light .text-cyber-text\/80 {
-  color: rgba(30, 41, 59, 0.8);
-}
-
-html.light .text-cyber-text\/85 {
-  color: rgba(30, 41, 59, 0.85);
-}
-
-html.light .text-cyber-text\/60 {
-  color: rgba(30, 41, 59, 0.6);
-}
-
-html.light .text-cyber-text\/50 {
-  color: rgba(30, 41, 59, 0.5);
-}
-
-html.light .bg-black\/40 {
-  background-color: rgba(255, 255, 255, 0.75);
-}
-
-html.light .bg-black\/50 {
-  background-color: rgba(255, 255, 255, 0.85);
-}
-
-html.light .bg-black\/30 {
-  background-color: rgba(255, 255, 255, 0.65);
-}
-
-html.light .bg-black\/60 {
-  background-color: rgba(255, 255, 255, 0.9);
-}
-
-html.light .border-cyber-cyan\/30 {
-  border-color: rgba(34, 211, 238, 0.2);
-}
-
-html.light .border-cyber-cyan\/20 {
-  border-color: rgba(34, 211, 238, 0.12);
-}
-
-html.light .border-cyber-cyan\/40 {
-  border-color: rgba(34, 211, 238, 0.3);
-}
-
-html.light .border-cyber-cyan\/50 {
-  border-color: rgba(34, 211, 238, 0.35);
-}
-
-html.light .border-cyber-cyan\/60 {
-  border-color: rgba(34, 211, 238, 0.45);
-}
-
-html.light .text-cyber-cyan {
-  color: #0891B2;
-}
-
-html.light .bg-cyber-cyan\/10 {
-  background-color: rgba(34, 211, 238, 0.08);
-}
-
-html.light .bg-cyber-purple\/20 {
-  background-color: rgba(139, 92, 246, 0.1);
-}
-
-html.light input,
-html.light select {
-  color: #1E293B;
-  background-color: rgba(255, 255, 255, 0.85);
-}
-
-html.light .bg-red-500\/10 {
-  background-color: rgba(220, 50, 50, 0.08);
-}
-
-html.light .bg-green-500\/10 {
-  background-color: rgba(34, 170, 85, 0.08);
 }
