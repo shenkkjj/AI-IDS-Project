@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { RefreshCw, LogOut, Sun, Moon, Bell, Shield } from "lucide-react";
 import { signOut } from "next-auth/react";
 import StatsCards from "@/components/dashboard/StatsCards";
@@ -103,7 +104,6 @@ type CopilotMessage = {
 
 type DashboardClientProps = {
   userEmail: string;
-  userRole: string;
 };
 
 const ALERTS_POLL_MS = 8000;
@@ -419,7 +419,7 @@ function routeDescription(route: RouteKey): string {
   return "安全日报生成与归档";
 }
 
-export default function DashboardClient({ userEmail, userRole }: DashboardClientProps) {
+export default function DashboardClient({ userEmail }: DashboardClientProps) {
   const [route, setRoute] = useState<RouteKey>("overview");
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [selected, setSelected] = useState<AlertItem | null>(null);
@@ -1109,23 +1109,57 @@ export default function DashboardClient({ userEmail, userRole }: DashboardClient
     setSelected(found);
   }
 
+  const pageTransitionVariants = {
+    hidden: { opacity: 0, y: 12 },
+    visible: { opacity: 1, y: 0, transition: { duration: 0.35, ease: "easeOut" as const } },
+    exit: { opacity: 0, y: -8, transition: { duration: 0.2 } },
+  };
+
+  const contentVariants = {
+    hidden: { opacity: 0 },
+    visible: {
+      opacity: 1,
+      transition: { staggerChildren: 0.06, delayChildren: 0.1 },
+    },
+  };
+
+  const contentItemVariants = {
+    hidden: { opacity: 0, y: 16 },
+    visible: {
+      opacity: 1,
+      y: 0,
+      transition: { duration: 0.4, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] },
+    },
+  };
+
   return (
     <div className="min-h-screen bg-background text-text">
       {/* Top Navigation */}
-      <header className="sticky top-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-border-subtle">
+      <motion.header
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        className="sticky top-0 z-50 bg-surface/80 backdrop-blur-xl border-b border-border-subtle"
+      >
         <div className="max-w-[1400px] mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <div className="flex items-center gap-2.5">
+            <motion.div
+              className="flex items-center gap-2.5"
+              whileHover={{ scale: 1.02 }}
+              transition={{ duration: 0.2 }}
+            >
               <div className="w-8 h-8 bg-primary rounded-apple flex items-center justify-center">
                 <Shield className="w-4 h-4 text-white" />
               </div>
               <span className="font-semibold text-text tracking-tight">AI-CyberSentinel</span>
-            </div>
+            </motion.div>
             <nav className="hidden md:flex items-center gap-1">
               {NAV_ITEMS.map((item) => (
-                <button
+                <motion.button
                   key={item.key}
                   onClick={() => setRoute(item.key)}
+                  whileHover={{ scale: 1.03 }}
+                  whileTap={{ scale: 0.97 }}
                   className={`px-4 py-2 rounded-apple text-sm font-medium transition-all ${
                     route === item.key
                       ? "bg-primary/10 text-primary"
@@ -1133,60 +1167,59 @@ export default function DashboardClient({ userEmail, userRole }: DashboardClient
                   }`}
                 >
                   {item.label}
-                </button>
+                </motion.button>
               ))}
             </nav>
           </div>
           <div className="flex items-center gap-2">
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${wsConnected ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger"}`}>
+            <motion.div
+              initial={false}
+              animate={wsConnected ? { scale: [1, 1.05, 1] } : {}}
+              transition={{ repeat: Infinity, duration: 2 }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${wsConnected ? "bg-success-subtle text-success" : "bg-danger-subtle text-danger"}`}
+            >
               <span className={`w-1.5 h-1.5 rounded-full ${wsConnected ? "bg-success" : "bg-danger"}`} />
               {wsConnected ? "在线" : "离线"}
-            </div>
-            <button
+            </motion.div>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
               onClick={requestPermission}
               className="p-2 rounded-apple text-text-secondary hover:text-text hover:bg-background transition-colors"
               title="启用桌面通知"
             >
               <Bell className="w-4 h-4" />
-            </button>
-            <button
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
               onClick={toggleTheme}
               className="p-2 rounded-apple text-text-secondary hover:text-text hover:bg-background transition-colors"
             >
               {theme === "dark" ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            </button>
+            </motion.button>
             <div className="w-px h-6 bg-border-subtle mx-1" />
-            <div className="hidden sm:flex items-center gap-2">
-              <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-                userRole === "admin"
-                  ? "bg-primary/10 text-primary"
-                  : userRole === "analyst"
-                    ? "bg-warning/10 text-warning"
-                    : userRole === "viewer"
-                      ? "bg-success/10 text-success"
-                      : "bg-danger/10 text-danger"
-              }`}>
-                {userRole === "admin" ? "管理员" : userRole === "analyst" ? "分析师" : userRole === "viewer" ? "观察员" : userRole === "operator" ? "运维" : userRole}
-              </span>
-              <span className="text-sm text-text-secondary">{userEmail}</span>
-            </div>
-            <button
+            <span className="text-sm text-text-secondary hidden sm:block">{userEmail}</span>
+            <motion.button
+              whileHover={{ scale: 1.1 }}
+              whileTap={{ scale: 0.9 }}
               onClick={() => signOut({ callbackUrl: "/" })}
               className="p-2 rounded-apple text-text-secondary hover:text-danger hover:bg-danger-subtle transition-colors"
             >
               <LogOut className="w-4 h-4" />
-            </button>
+            </motion.button>
           </div>
         </div>
-      </header>
+      </motion.header>
 
       {/* Mobile Nav */}
       <div className="md:hidden bg-surface border-b border-border-subtle px-4 py-2 overflow-x-auto">
         <div className="flex gap-1 min-w-max">
           {NAV_ITEMS.map((item) => (
-            <button
+            <motion.button
               key={item.key}
               onClick={() => setRoute(item.key)}
+              whileTap={{ scale: 0.95 }}
               className={`px-4 py-2 rounded-apple text-sm font-medium transition-all whitespace-nowrap ${
                 route === item.key
                   ? "bg-primary/10 text-primary"
@@ -1194,309 +1227,356 @@ export default function DashboardClient({ userEmail, userRole }: DashboardClient
               }`}
             >
               {item.label}
-            </button>
+            </motion.button>
           ))}
         </div>
       </div>
 
-      <main className="max-w-[1400px] mx-auto px-6 py-8 space-y-6">
-        <StatsCards stats={counters} />
+      <AnimatePresence mode="wait">
+        <motion.main
+          key={route}
+          variants={pageTransitionVariants}
+          initial="hidden"
+          animate="visible"
+          exit="exit"
+          className="max-w-[1400px] mx-auto px-6 py-8 space-y-6"
+        >
+          <motion.div variants={contentItemVariants}>
+            <StatsCards stats={counters} />
+          </motion.div>
 
-        {(isOverviewRoute || isMonitorRoute) ? (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <div className="bg-surface rounded-apple-lg shadow-card p-5 h-[300px]">
-              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">攻击趋势 (近24时段)</h3>
-              <AttackTrendChart alerts={mergedAlerts} />
-            </div>
-            <div className="bg-surface rounded-apple-lg shadow-card p-5 h-[300px]">
-              <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">攻击分布</h3>
-              <SourcePieChart alerts={mergedAlerts} />
-            </div>
-          </div>
-        ) : null}
+          {(isOverviewRoute || isMonitorRoute) ? (
+            <motion.div variants={contentItemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <motion.div
+                whileHover={{ y: -2, transition: { duration: 0.2 } }}
+                className="bg-surface rounded-apple-lg shadow-card p-5 h-[300px]"
+              >
+                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">攻击趋势 (近24时段)</h3>
+                <AttackTrendChart alerts={mergedAlerts} />
+              </motion.div>
+              <motion.div
+                whileHover={{ y: -2, transition: { duration: 0.2 } }}
+                className="bg-surface rounded-apple-lg shadow-card p-5 h-[300px]"
+              >
+                <h3 className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">攻击分布</h3>
+                <SourcePieChart alerts={mergedAlerts} />
+              </motion.div>
+            </motion.div>
+          ) : null}
 
-        <div className="bg-surface rounded-apple shadow-card p-3 text-sm text-text-secondary">{configStatus}</div>
+          <motion.div variants={contentItemVariants} className="bg-surface rounded-apple shadow-card p-3 text-sm text-text-secondary">{configStatus}</motion.div>
 
-        {!isOverviewRoute ? (
-          <div className="bg-surface rounded-apple shadow-card p-4 text-sm text-text">
-            当前标签页：{NAV_ITEMS.find((item) => item.key === route)?.label || route} · {routeDescription(route)}
-          </div>
-        ) : null}
+          {!isOverviewRoute ? (
+            <motion.div variants={contentItemVariants} className="bg-surface rounded-apple shadow-card p-4 text-sm text-text">
+              当前标签页：{NAV_ITEMS.find((item) => item.key === route)?.label || route} · {routeDescription(route)}
+            </motion.div>
+          ) : null}
 
-        {(isOverviewRoute || isMonitorRoute) ? (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 min-h-0 flex-1">
-            <div className="xl:col-span-2 min-h-0 flex flex-col gap-4">
-              <div className="flex items-center justify-between">
-                <h2 className="text-sm font-semibold text-text">实时告警流</h2>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      const link = document.createElement("a");
-                      link.href = "/api/backend/export/alerts?limit=1000";
-                      link.download = "alerts.csv";
-                      link.click();
-                    }}
-                  >
-                    导出CSV
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      loadAlerts({ showLoading: true }).catch(() => {
-                        setAlertsLoadState("error");
-                      });
-                    }}
-                  >
+          {(isOverviewRoute || isMonitorRoute) ? (
+            <motion.div variants={contentItemVariants} className="grid grid-cols-1 xl:grid-cols-3 gap-6 min-h-0 flex-1">
+              <div className="xl:col-span-2 min-h-0 flex flex-col gap-4">
+                <div className="flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-text">实时告警流</h2>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        const link = document.createElement("a");
+                        link.href = "/api/backend/export/alerts?limit=1000";
+                        link.download = "alerts.csv";
+                        link.click();
+                      }}
+                    >
+                      导出CSV
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        loadAlerts({ showLoading: true }).catch(() => {
+                          setAlertsLoadState("error");
+                        });
+                      }}
+                    >
+                      刷新
+                    </Button>
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1">
+                  {alertsLoadState === "loading" ? (
+                    <motion.div
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      className="h-full min-h-[220px] bg-surface rounded-apple-lg shadow-card flex items-center justify-center text-text-secondary text-sm"
+                    >
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                        className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full mr-2"
+                      />
+                      正在加载告警...
+                    </motion.div>
+                  ) : alertsLoadState === "error" ? (
+                    <div className="h-full min-h-[220px] bg-surface rounded-apple-lg shadow-card flex flex-col items-center justify-center gap-2 text-sm text-danger">
+                      告警加载失败，请稍后重试
+                      <Button variant="outline" size="sm" onClick={() => void loadAlerts()}>
+                        重试
+                      </Button>
+                    </div>
+                  ) : alertsLoadState === "empty" ? (
+                    <div className="h-full min-h-[220px] bg-surface rounded-apple-lg shadow-card flex items-center justify-center text-text-secondary text-sm">
+                      暂无告警
+                    </div>
+                  ) : (
+                    <div className="flex flex-col h-full min-h-0">
+                      <div className="flex-1 min-h-0">
+                        <AttackLogTable
+                          logs={paginatedAlerts}
+                          highlightId={selectedLogId}
+                          selectedId={selectedLogId}
+                          onSelect={handleSelectLog}
+                        />
+                      </div>
+                      {totalPages > 1 && (
+                        <div className="flex items-center justify-center gap-2 py-3">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setAlertsPage(Math.max(0, alertsPage - 1))}
+                            disabled={alertsPage === 0}
+                          >
+                            上一页
+                          </Button>
+                          <span className="text-xs text-text-secondary">
+                            {alertsPage + 1} / {totalPages}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setAlertsPage(Math.min(totalPages - 1, alertsPage + 1))}
+                            disabled={alertsPage >= totalPages - 1}
+                          >
+                            下一页
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="min-h-0 flex flex-col gap-4">
+                <CopilotPanel
+                  messages={copilotMessages}
+                  draft={copilotInput}
+                  loading={copilotSending}
+                  onDraftChange={setCopilotInput}
+                  onSend={() => void sendCopilotMessage(copilotInput)}
+                />
+              </div>
+            </motion.div>
+          ) : null}
+
+          {(isOverviewRoute || isMonitorRoute) ? (
+            <motion.div variants={contentItemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <motion.div
+                whileHover={{ y: -2, transition: { duration: 0.2 } }}
+                className="h-[320px]"
+              >
+                <HackerTerminal lines={terminalLogs} onCommand={handleTerminalCommand} />
+              </motion.div>
+
+              <motion.div
+                whileHover={{ y: -2, transition: { duration: 0.2 } }}
+                className="bg-surface rounded-apple-lg shadow-card p-5 h-[320px] overflow-y-auto"
+              >
+                <div className="mb-3 flex items-center justify-between text-sm text-text">
+                  <span className="font-semibold">安全日报</span>
+                  <Button variant="outline" size="sm" onClick={() => void refreshReportWithTypewriter()}>
+                    <RefreshCw className={`mr-1 h-3.5 w-3.5 ${reportTyping ? "animate-spin" : ""}`} />
                     刷新
                   </Button>
                 </div>
-              </div>
-              <div className="min-h-0 flex-1">
-                {alertsLoadState === "loading" ? (
-                  <div className="h-full min-h-[220px] bg-surface rounded-apple-lg shadow-card flex items-center justify-center text-text-secondary text-sm">
-                    正在加载告警...
-                  </div>
-                ) : alertsLoadState === "error" ? (
-                  <div className="h-full min-h-[220px] bg-surface rounded-apple-lg shadow-card flex flex-col items-center justify-center gap-2 text-sm text-danger">
-                    告警加载失败，请稍后重试
-                    <Button variant="outline" size="sm" onClick={() => void loadAlerts()}>
-                      重试
-                    </Button>
-                  </div>
-                ) : alertsLoadState === "empty" ? (
-                  <div className="h-full min-h-[220px] bg-surface rounded-apple-lg shadow-card flex items-center justify-center text-text-secondary text-sm">
-                    暂无告警
-                  </div>
-                ) : (
-                  <div className="flex flex-col h-full min-h-0">
-                    <div className="flex-1 min-h-0">
-                      <AttackLogTable
-                        logs={paginatedAlerts}
-                        highlightId={selectedLogId}
-                        selectedId={selectedLogId}
-                        onSelect={handleSelectLog}
-                      />
-                    </div>
-                    {totalPages > 1 && (
-                      <div className="flex items-center justify-center gap-2 py-3">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setAlertsPage(Math.max(0, alertsPage - 1))}
-                          disabled={alertsPage === 0}
-                        >
-                          上一页
-                        </Button>
-                        <span className="text-xs text-text-secondary">
-                          {alertsPage + 1} / {totalPages}
-                        </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setAlertsPage(Math.min(totalPages - 1, alertsPage + 1))}
-                          disabled={alertsPage >= totalPages - 1}
-                        >
-                          下一页
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
+                <pre className="whitespace-pre-wrap text-xs leading-5 text-text-secondary">{reportMarkdown}</pre>
+              </motion.div>
+            </motion.div>
+          ) : null}
 
-            <div className="min-h-0 flex flex-col gap-4">
-              <CopilotPanel
-                messages={copilotMessages}
-                draft={copilotInput}
-                loading={copilotSending}
-                onDraftChange={setCopilotInput}
-                onSend={() => void sendCopilotMessage(copilotInput)}
-              />
-            </div>
-          </div>
-        ) : null}
-
-        {(isOverviewRoute || isMonitorRoute) ? (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <div className="h-[320px]">
-              <HackerTerminal lines={terminalLogs} onCommand={handleTerminalCommand} />
-            </div>
-
-            <div className="bg-surface rounded-apple-lg shadow-card p-5 h-[320px] overflow-y-auto">
-              <div className="mb-3 flex items-center justify-between text-sm text-text">
-                <span className="font-semibold">安全日报</span>
-                <Button variant="outline" size="sm" onClick={() => void refreshReportWithTypewriter()}>
-                  <RefreshCw className={`mr-1 h-3.5 w-3.5 ${reportTyping ? "animate-spin" : ""}`} />
-                  刷新
+          {(isOverviewRoute || isWafRoute) ? (
+            <motion.div variants={contentItemVariants} className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+              <motion.div
+                whileHover={{ y: -3, transition: { duration: 0.2 } }}
+                className="bg-surface rounded-apple-lg shadow-card p-5 space-y-3"
+              >
+                <h3 className="text-sm font-semibold text-text">站点监测</h3>
+                <div className="text-xs text-text-secondary">状态: {siteHealthUi.text}</div>
+                <input
+                  value={siteTargetInput}
+                  onChange={(event) => setSiteTargetInput(event.target.value)}
+                  placeholder="https://example.com"
+                  className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => void handleSaveSiteTarget()}
+                  disabled={siteTargetSaving || !siteTargetInput.trim()}
+                >
+                  保存目标
                 </Button>
-              </div>
+                <div className="text-[11px] text-text-tertiary">{siteHealth?.url ? `当前目标: ${siteHealth.url}` : "当前目标: 未设置"}</div>
+              </motion.div>
+
+              <motion.div
+                whileHover={{ y: -3, transition: { duration: 0.2 } }}
+                className="bg-surface rounded-apple-lg shadow-card p-5 space-y-3"
+              >
+                <h3 className="text-sm font-semibold text-text">代理与 WAF</h3>
+                <input
+                  value={proxyPathInput}
+                  onChange={(event) => setProxyPathInput(event.target.value)}
+                  placeholder="/"
+                  className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => void handleTestSiteProxy()}
+                  disabled={proxyTesting}
+                >
+                  {proxyTesting ? "测试中..." : "测试代理链路"}
+                </Button>
+                <div className="text-[11px] text-text-tertiary">路径支持 URL 或相对路径，命中策略会返回 403。</div>
+              </motion.div>
+
+              <motion.div
+                whileHover={{ y: -3, transition: { duration: 0.2 } }}
+                className="bg-surface rounded-apple-lg shadow-card p-5 space-y-3"
+              >
+                <h3 className="text-sm font-semibold text-text">告警确认与语音</h3>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => void handleConfirmThreat()}
+                  disabled={confirmingThreat || !selected?.alertId}
+                >
+                  {confirmingThreat ? "确认中..." : "确认威胁入库"}
+                </Button>
+                <div
+                  className={`text-[11px] px-3 py-2 rounded-apple ${
+                    threatStatusTone === "ok"
+                      ? "bg-success-subtle text-success"
+                      : threatStatusTone === "error"
+                        ? "bg-danger-subtle text-danger"
+                        : "bg-background text-text-secondary"
+                  }`}
+                >
+                  {threatStatus}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => void handleToggleVoiceAlert()}
+                >
+                  {config?.alert_voice_enabled ? "关闭语音预警" : "开启语音预警"}
+                </Button>
+              </motion.div>
+            </motion.div>
+          ) : null}
+
+          {(isOverviewRoute || isAiRoute) ? (
+            <motion.div variants={contentItemVariants} className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+              <motion.div
+                whileHover={{ y: -3, transition: { duration: 0.2 } }}
+                className="bg-surface rounded-apple-lg shadow-card p-5 space-y-2"
+              >
+                <h3 className="text-sm font-semibold text-text">AI 路由配置</h3>
+                <select
+                  value={configDraft.ai_provider}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, ai_provider: event.target.value }))}
+                  className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
+                >
+                  {PROVIDERS.map((provider) => (
+                    <option key={provider} value={provider}>
+                      {provider}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  autoComplete="off"
+                  value={configDraft.model}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, model: event.target.value }))}
+                  placeholder="Model"
+                  className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
+                />
+                <input
+                  autoComplete="off"
+                  value={configDraft.base_url}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, base_url: event.target.value }))}
+                  placeholder="Base URL"
+                  className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
+                />
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={configDraft.api_key}
+                  onChange={(event) => setConfigDraft((prev) => ({ ...prev, api_key: event.target.value }))}
+                  placeholder={config?.has_api_key ? "已配置，留空表示不修改" : "输入新的 API Key"}
+                  className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
+                />
+                <div className="text-xs text-text-tertiary">当前密钥状态：{config?.has_api_key ? config.api_key_masked : "未配置"}</div>
+                <div className="flex gap-2 flex-wrap">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleSaveConfig()}
+                    disabled={savingConfig || testingConfig || refreshingConfig}
+                  >
+                    {savingConfig ? "保存中..." : "保存配置"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleTestConfig()}
+                    disabled={savingConfig || testingConfig || refreshingConfig}
+                  >
+                    {testingConfig ? "测试中..." : "测试路由"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void handleRefreshConfig()}
+                    disabled={savingConfig || testingConfig || refreshingConfig}
+                  >
+                    {refreshingConfig ? "同步中..." : "重新同步"}
+                  </Button>
+                </div>
+              </motion.div>
+
+              <motion.div
+                whileHover={{ y: -3, transition: { duration: 0.2 } }}
+                className="bg-surface rounded-apple-lg shadow-card p-5 space-y-2"
+              >
+                <h3 className="text-sm font-semibold text-text">当前会话</h3>
+                <div className="text-sm text-text">用户: {userEmail || "unknown"}</div>
+                <div className="text-xs text-text-secondary">上下文: {copilotHint}</div>
+              </motion.div>
+            </motion.div>
+          ) : null}
+
+          {(isOverviewRoute || isReportRoute) ? (
+            <motion.div variants={contentItemVariants} className="bg-surface rounded-apple-lg shadow-card p-5">
+              <h3 className="text-sm font-semibold text-text mb-2">日报摘要</h3>
               <pre className="whitespace-pre-wrap text-xs leading-5 text-text-secondary">{reportMarkdown}</pre>
-            </div>
-          </div>
-        ) : null}
-
-        {(isOverviewRoute || isWafRoute) ? (
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-3">
-              <h3 className="text-sm font-semibold text-text">站点监测</h3>
-              <div className="text-xs text-text-secondary">状态: {siteHealthUi.text}</div>
-              <input
-                value={siteTargetInput}
-                onChange={(event) => setSiteTargetInput(event.target.value)}
-                placeholder="https://example.com"
-                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => void handleSaveSiteTarget()}
-                disabled={siteTargetSaving || !siteTargetInput.trim()}
-              >
-                保存目标
-              </Button>
-              <div className="text-[11px] text-text-tertiary">{siteHealth?.url ? `当前目标: ${siteHealth.url}` : "当前目标: 未设置"}</div>
-            </div>
-
-            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-3">
-              <h3 className="text-sm font-semibold text-text">代理与 WAF</h3>
-              <input
-                value={proxyPathInput}
-                onChange={(event) => setProxyPathInput(event.target.value)}
-                placeholder="/"
-                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => void handleTestSiteProxy()}
-                disabled={proxyTesting}
-              >
-                {proxyTesting ? "测试中..." : "测试代理链路"}
-              </Button>
-              <div className="text-[11px] text-text-tertiary">路径支持 URL 或相对路径，命中策略会返回 403。</div>
-            </div>
-
-            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-3">
-              <h3 className="text-sm font-semibold text-text">告警确认与语音</h3>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => void handleConfirmThreat()}
-                disabled={confirmingThreat || !selected?.alertId}
-              >
-                {confirmingThreat ? "确认中..." : "确认威胁入库"}
-              </Button>
-              <div
-                className={`text-[11px] px-3 py-2 rounded-apple ${
-                  threatStatusTone === "ok"
-                    ? "bg-success-subtle text-success"
-                    : threatStatusTone === "error"
-                      ? "bg-danger-subtle text-danger"
-                      : "bg-background text-text-secondary"
-                }`}
-              >
-                {threatStatus}
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => void handleToggleVoiceAlert()}
-              >
-                {config?.alert_voice_enabled ? "关闭语音预警" : "开启语音预警"}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {(isOverviewRoute || isAiRoute) ? (
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-2">
-              <h3 className="text-sm font-semibold text-text">AI 路由配置</h3>
-              <select
-                value={configDraft.ai_provider}
-                onChange={(event) => setConfigDraft((prev) => ({ ...prev, ai_provider: event.target.value }))}
-                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
-              >
-                {PROVIDERS.map((provider) => (
-                  <option key={provider} value={provider}>
-                    {provider}
-                  </option>
-                ))}
-              </select>
-              <input
-                autoComplete="off"
-                value={configDraft.model}
-                onChange={(event) => setConfigDraft((prev) => ({ ...prev, model: event.target.value }))}
-                placeholder="Model"
-                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
-              />
-              <input
-                autoComplete="off"
-                value={configDraft.base_url}
-                onChange={(event) => setConfigDraft((prev) => ({ ...prev, base_url: event.target.value }))}
-                placeholder="Base URL"
-                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
-              />
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={configDraft.api_key}
-                onChange={(event) => setConfigDraft((prev) => ({ ...prev, api_key: event.target.value }))}
-                placeholder={config?.has_api_key ? "已配置，留空表示不修改" : "输入新的 API Key"}
-                className="w-full bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3"
-              />
-              <div className="text-xs text-text-tertiary">当前密钥状态：{config?.has_api_key ? config.api_key_masked : "未配置"}</div>
-              <div className="flex gap-2 flex-wrap">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleSaveConfig()}
-                  disabled={savingConfig || testingConfig || refreshingConfig}
-                >
-                  {savingConfig ? "保存中..." : "保存配置"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleTestConfig()}
-                  disabled={savingConfig || testingConfig || refreshingConfig}
-                >
-                  {testingConfig ? "测试中..." : "测试路由"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void handleRefreshConfig()}
-                  disabled={savingConfig || testingConfig || refreshingConfig}
-                >
-                  {refreshingConfig ? "同步中..." : "重新同步"}
-                </Button>
-              </div>
-            </div>
-
-            <div className="bg-surface rounded-apple-lg shadow-card p-5 space-y-2">
-              <h3 className="text-sm font-semibold text-text">当前会话</h3>
-              <div className="text-sm text-text">用户: {userEmail || "unknown"}</div>
-              <div className="text-xs text-text-secondary">上下文: {copilotHint}</div>
-            </div>
-          </div>
-        ) : null}
-
-        {(isOverviewRoute || isReportRoute) ? (
-          <div className="bg-surface rounded-apple-lg shadow-card p-5">
-            <h3 className="text-sm font-semibold text-text mb-2">日报摘要</h3>
-            <pre className="whitespace-pre-wrap text-xs leading-5 text-text-secondary">{reportMarkdown}</pre>
-          </div>
-        ) : null}
-      </main>
+            </motion.div>
+          ) : null}
+        </motion.main>
+      </AnimatePresence>
     </div>
   );
 }

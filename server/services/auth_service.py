@@ -29,7 +29,6 @@ def _build_auth_payload(user: User, config: Any, token: str | None = None) -> di
             "email": user.email,
             "display_name": user.display_name,
             "auth_provider": user.auth_provider,
-            "role": user.role,
         },
         "config": {
             "ai_provider": provider,
