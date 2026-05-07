@@ -1,4 +1,5 @@
 import argparse
+import os
 import random
 import time
 from dataclasses import dataclass
@@ -32,7 +33,7 @@ DEFAULT_SCAN_PORTS = [
     8080,
 ]
 
-AWVS_USER_AGENT = "AWVS/14.7 Acunetix"
+AWVS_USER_AGENT = os.getenv("ATTACKER_USER_AGENT", "AWVS/14.7 Acunetix").strip()
 
 
 @dataclass(frozen=True)

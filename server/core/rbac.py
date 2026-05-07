@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Callable
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Cookie, Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 
 from server.core.database import get_db
@@ -34,10 +34,11 @@ def has_role(user: User, required: Role) -> bool:
 
 def require_role(*roles: Role) -> Callable:
     async def _check(
-        token: str | None = None,
+        authorization: str | None = Header(default=None, alias="Authorization"),
+        access_token_cookie: str | None = Cookie(default=None, alias="access_token"),
         db: Session = Depends(get_db),
     ) -> User:
-        user = get_current_user(db, token, None)
+        user = get_current_user(db, access_token_cookie, authorization)
         if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未认证")
         allowed = any(has_role(user, r) for r in roles) if roles else True

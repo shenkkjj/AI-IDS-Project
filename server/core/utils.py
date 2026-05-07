@@ -1,9 +1,7 @@
 import ipaddress
 import os
-import re
 import socket
 from datetime import datetime, timezone
-from typing import Any
 from urllib.parse import urlparse
 
 from fastapi import Request
@@ -136,7 +134,8 @@ def _build_proxy_headers(request: Request) -> dict[str, str]:
 def _sanitize_for_log(text: str) -> str:
     if not text:
         return ""
-    return (
+    import re
+    sanitized = (
         text.replace("&", "&amp;")
         .replace("<", "&lt;")
         .replace(">", "&gt;")
@@ -145,6 +144,17 @@ def _sanitize_for_log(text: str) -> str:
         .replace("\n", " ")
         .replace("\r", "")
     )
+    # 脱敏敏感信息
+    patterns = [
+        (r'\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b', '[CREDIT_CARD]'),  # 信用卡
+        (r'\b1[3-9]\d{9}\b', '[PHONE]'),  # 手机号
+        (r'(?i)(password|passwd|pwd)\s*[:=]\s*\S+', '[PASSWORD]'),  # 密码
+        (r'sk-[a-zA-Z0-9]{20,}', '[API_KEY]'),  # API Key
+        (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '[EMAIL]'),  # 邮箱
+    ]
+    for pattern, replacement in patterns:
+        sanitized = re.sub(pattern, replacement, sanitized)
+    return sanitized
 
 
 def _now() -> datetime:

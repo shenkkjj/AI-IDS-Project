@@ -1,11 +1,7 @@
 "use client";
 
 import { Send } from "lucide-react";
-
-type CopilotMessage = {
-  role: "user" | "assistant";
-  content: string;
-};
+import type { CopilotMessage } from "@/types/copilot";
 
 type CopilotPanelProps = {
   messages: CopilotMessage[];

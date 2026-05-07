@@ -1,9 +1,7 @@
-import json
-import os
 from typing import Any
 
 from server.analyzer import AnalyzerConfig, build_chat_completions_url
-from server.core.config import ALLOWED_AI_PROVIDERS, PROVIDER_MODEL_DEFAULTS, PROVIDER_BASE_URL_DEFAULTS, load_timeout_seconds
+from server.core.config import ALLOWED_AI_PROVIDERS, PROVIDER_MODEL_DEFAULTS, PROVIDER_BASE_URL_DEFAULTS
 from server.security_utils import DecryptionError, decrypt_api_key
 
 
@@ -50,8 +48,7 @@ def choose_provider(preferred: str | None, model_name: str, base_url: str) -> st
     # If user explicitly set a provider (not empty and not "custom"), respect it
     if preferred and str(preferred).strip().lower() not in {"", "custom"}:
         return normalized
-    
-    # If preferred is "custom", respect that choice too
+
     if normalized == "custom":
         return "custom"
 

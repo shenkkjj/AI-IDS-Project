@@ -7,14 +7,12 @@ from typing import Any
 
 from fastapi.concurrency import run_in_threadpool
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from server.analyzer import LLMAnalyzer
-from server.core.config import ALERT_BACKLOG_SIZE, ALERT_EMAIL_COOLDOWN_SECONDS, ALERT_QUEUE_MAX_SIZE, ALERT_WORKER_COUNT
+from server.core.config import ALERT_BACKLOG_SIZE, ALERT_EMAIL_COOLDOWN_SECONDS
 from server.core.database import SessionLocal
 from server.services.llm_service import get_runtime_llm_config
 from server.core.state import app_state
-from server.core.utils import _sanitize_for_log
 from server.mailer import send_alert_email
 from server.models.schemas import AlertIn
 from server.models_db import User, UserConfig
@@ -62,7 +60,11 @@ async def append_new_threat_csv(payload: dict[str, Any], label: str) -> None:
     for feature_name in FEATURE_COLUMNS:
         row[feature_name] = _feature_value(raw, feature_name)
 
-    async with app_state.rate_limit._new_threats_lock if hasattr(app_state.rate_limit, '_new_threats_lock') else asyncio.Lock():
+    async with (
+        app_state.rate_limit._new_threats_lock
+        if hasattr(app_state.rate_limit, '_new_threats_lock')
+        else asyncio.Lock()
+    ):
         exists = path.exists()
         with path.open("a", encoding="utf-8", newline="") as fp:
             writer = csv.DictWriter(fp, fieldnames=header)
@@ -71,15 +73,16 @@ async def append_new_threat_csv(payload: dict[str, Any], label: str) -> None:
             writer.writerow(row)
 
 
-def find_alert_by_id(alert_id: str, *, user_id: int | None = None) -> dict[str, Any] | None:
-    for item in app_state.alert.backlog:
-        if str(item.get("alert_id", "")) != alert_id:
-            continue
-        if user_id is None:
-            return item
-        raw_alert = item.get("raw_alert") or {}
-        if raw_alert.get("alert_user_id") == user_id:
-            return item
+async def find_alert_by_id(alert_id: str, *, user_id: int | None = None) -> dict[str, Any] | None:
+    async with app_state.alert.backlog_lock:
+        for item in app_state.alert.backlog:
+            if str(item.get("alert_id", "")) != alert_id:
+                continue
+            if user_id is None:
+                return item
+            raw_alert = item.get("raw_alert") or {}
+            if raw_alert.get("alert_user_id") == user_id:
+                return item
     return None
 
 

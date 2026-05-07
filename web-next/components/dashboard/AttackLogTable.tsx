@@ -2,19 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { CheckCircle2 } from "lucide-react";
-
-type AlertRisk = "critical" | "high" | "medium" | "low";
-
-type AlertItem = {
-  id: string;
-  source: string;
-  target: string;
-  risk: AlertRisk;
-  payload: string;
-  summary: string;
-  timestamp: number | null;
-  blocked: boolean;
-};
+import type { AlertRisk, AlertItem } from "@/types/alert";
 
 type AttackLogTableProps = {
   logs: AlertItem[];

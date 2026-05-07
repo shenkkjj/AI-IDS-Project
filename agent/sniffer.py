@@ -72,7 +72,7 @@ FLOW_TTL_SECONDS = 300.0
 MAX_FLOW_STATES = 50000
 MAX_SHORT_EVENTS = max(2000, int(os.getenv("MAX_SHORT_EVENTS", "40000")))
 MAX_LONG_EVENTS = max(5000, int(os.getenv("MAX_LONG_EVENTS", "200000")))
-ALERT_URL = "http://127.0.0.1:8000/alerts"
+ALERT_URL = os.getenv("ALERT_ENDPOINT", "http://127.0.0.1:8000/alerts").strip()
 BLOCK_THRESHOLD = float(os.getenv("BLOCK_THRESHOLD", "0.95"))
 BLOCK_DURATION_SECONDS = int(os.getenv("BLOCK_DURATION_SECONDS", "600"))
 

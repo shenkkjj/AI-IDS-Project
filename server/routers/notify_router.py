@@ -1,10 +1,10 @@
 from typing import Any
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, Request
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Request
 
-from server.core.database import get_db
-from server.core.security import get_current_user, require_auth_user
+from server.core.utils import _is_url_pointing_to_internal
+from server.core.security import require_auth_user
 from server.models_db import User
 from server.services import notification_service
 
@@ -20,6 +20,12 @@ async def test_webhook(
 ) -> dict[str, Any]:
     if not webhook_url.strip():
         return {"status": "skipped", "detail": "no webhook url provided"}
+
+    parsed = urlparse(webhook_url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise HTTPException(status_code=422, detail="webhook URL 必须以 http 或 https 开头")
+    if _is_url_pointing_to_internal(webhook_url.strip()):
+        raise HTTPException(status_code=422, detail="webhook URL 不允许指向内网地址")
 
     test_payload = {
         "title": "CyberSentinel 通知测试",

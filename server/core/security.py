@@ -1,13 +1,16 @@
 import hmac
 import os
-from datetime import datetime, timezone
-from typing import Any
+from datetime import timezone
 
-from fastapi import Cookie, Depends, Header, HTTPException, Request, Response
+from fastapi import Cookie, Depends, Header, HTTPException, Response
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from server.core.config import cookie_secure, cookie_samesite, LLM_ADMIN_TOKEN_ENV, LLM_ADMIN_TOKEN_HEADER, INTERNAL_ALERT_TOKEN_ENV, INTERNAL_ALERT_TOKEN_HEADER
+from server.core.config import (
+    cookie_secure, cookie_samesite,
+    LLM_ADMIN_TOKEN_ENV, LLM_ADMIN_TOKEN_HEADER,
+    INTERNAL_ALERT_TOKEN_ENV, INTERNAL_ALERT_TOKEN_HEADER,
+)
 from server.security_utils import decode_access_token, issue_access_token, DecryptionError, decrypt_api_key
 from server.models_db import User
 from server.core.database import get_db
@@ -30,6 +33,7 @@ def set_access_cookie(response: Response, token: str) -> None:
         httponly=True,
         samesite=cookie_samesite(),
         secure=cookie_secure(),
+        max_age=60 * 60 * 24 * 7,  # 7 days
     )
 
 

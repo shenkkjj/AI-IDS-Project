@@ -79,6 +79,8 @@ function validateOrigin(request: NextRequest): boolean {
 }
 
 function _allowedHosts(): string[] {
+  const envHosts = (process.env.ALLOWED_HOSTS || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (envHosts.length > 0) return envHosts;
   return [
     process.env.NEXT_PUBLIC_APP_HOST,
     "localhost:3000", "127.0.0.1:3000",

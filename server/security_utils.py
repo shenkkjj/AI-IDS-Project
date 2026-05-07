@@ -28,6 +28,7 @@ def _get_jwt_algorithm() -> str:
     _CACHED_JWT_ALGORITHM = algorithm
     return algorithm
 
+
 WEAK_APP_SECRETS = {
     "dev-secret-change-me",
     "change-me-to-a-long-random-secret",
@@ -53,8 +54,10 @@ def _required_app_secret() -> str:
 
 
 def _derive_fernet_key(secret: str) -> str:
-    digest = hashlib.sha256(secret.encode("utf-8")).digest()
-    return base64.urlsafe_b64encode(digest).decode("utf-8")
+    import hashlib
+    fixed_salt = b"AI-CyberSentinel-Fernet-v1"
+    key = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), fixed_salt, 100000, dklen=32)
+    return base64.urlsafe_b64encode(key).decode("utf-8")
 
 
 def get_fernet_key() -> str:
@@ -108,7 +111,12 @@ def verify_otp_code(code: str, code_hash: str) -> bool:
     return _hmac.compare_digest(hash_otp_code(code), code_hash)
 
 
-def issue_access_token(subject: str, expires_minutes: int = 60 * 24 * 7, password_changed_at: float | None = None, token_version: int = 0) -> str:
+def issue_access_token(
+    subject: str,
+    expires_minutes: int = 60 * 24 * 7,
+    password_changed_at: float | None = None,
+    token_version: int = 0,
+) -> str:
     secret = _required_app_secret()
     algorithm = _get_jwt_algorithm()
     now = datetime.now(timezone.utc)

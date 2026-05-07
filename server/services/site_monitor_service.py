@@ -133,7 +133,10 @@ async def set_site_target(user_id: int, url: str, db: Session) -> dict[str, Any]
     await asyncio.sleep(0.05)
     post_resolve = _resolve_url_host(normalized)
     if pre_resolve != post_resolve:
-        logger.warning("DNS rebinding detected on site target: {} resolved to {} then {}", normalized, pre_resolve, post_resolve)
+        logger.warning(
+            "DNS rebinding detected on site target: {} resolved to {} then {}",
+            normalized, pre_resolve, post_resolve,
+        )  # noqa: E501
         raise Exception("DNS解析不稳定，请稍后重试")
     if post_resolve and _is_private_or_loopback_ip(post_resolve):
         raise Exception("不允许监控内网地址")

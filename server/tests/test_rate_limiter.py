@@ -1,5 +1,4 @@
 import time
-import pytest
 from server.core.state import RateLimitState
 
 

@@ -2,6 +2,17 @@ from typing import Any
 from pydantic import BaseModel, EmailStr, Field
 
 
+def _validate_password_strength(password: str) -> str:
+    if len(password) < 8:
+        raise ValueError("密码长度至少8位")
+    has_upper = any(c.isupper() for c in password)
+    has_lower = any(c.islower() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    if not (has_upper and has_lower and has_digit):
+        raise ValueError("密码必须包含大写字母、小写字母和数字")
+    return password
+
+
 class AlertIn(BaseModel):
     event: str = Field(default="anomaly", pattern="^(anomaly|waf_block|site_down|ssl_warning|ssl_critical)$")
     source_ip: str
@@ -16,10 +27,10 @@ class AlertIn(BaseModel):
 
 
 class LLMConfigIn(BaseModel):
-    ai_provider: str | None = None
-    api_key: str | None = None
-    base_url: str | None = None
-    model: str | None = None
+    ai_provider: str | None = Field(default=None, max_length=24)
+    api_key: str | None = Field(default=None, max_length=512)
+    base_url: str | None = Field(default=None, max_length=500)
+    model: str | None = Field(default=None, max_length=50)
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
 
 
@@ -33,19 +44,8 @@ class UserRegisterIn(BaseModel):
     password: str = Field(min_length=8, max_length=128)
     display_name: str | None = None
 
-    @staticmethod
-    def validate_password_strength(password: str) -> str:
-        if len(password) < 8:
-            raise ValueError("密码长度至少8位")
-        has_upper = any(c.isupper() for c in password)
-        has_lower = any(c.islower() for c in password)
-        has_digit = any(c.isdigit() for c in password)
-        if not (has_upper and has_lower and has_digit):
-            raise ValueError("密码必须包含大写字母、小写字母和数字")
-        return password
-
     def model_post_init(self, __context: object) -> None:
-        UserRegisterIn.validate_password_strength(self.password)
+        _validate_password_strength(self.password)
 
 
 class LoginPasswordIn(BaseModel):
@@ -72,7 +72,7 @@ class PasswordResetConfirmIn(BaseModel):
     new_password: str = Field(min_length=8, max_length=128)
 
     def model_post_init(self, __context: object) -> None:
-        UserRegisterIn.validate_password_strength(self.new_password)
+        _validate_password_strength(self.new_password)
 
 
 class OAuthLoginIn(BaseModel):
@@ -84,15 +84,15 @@ class OAuthLoginIn(BaseModel):
 
 
 class UserConfigIn(BaseModel):
-    ai_provider: str | None = Field(default=None, pattern="^(openai|claude|gemini|grok|custom)$")
-    model: str | None = None
-    base_url: str | None = None
+    ai_provider: str | None = Field(default=None, pattern="^(openai|claude|gemini|grok|custom)$", max_length=24)
+    model: str | None = Field(default=None, max_length=50)
+    base_url: str | None = Field(default=None, max_length=500)
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     alert_email_enabled: bool | None = None
     alert_voice_enabled: bool | None = None
-    ui_theme: str | None = Field(default=None, pattern="^(dark|light|auto)$")
-    ui_density: str | None = Field(default=None, pattern="^(comfortable|compact|spacious)$")
-    api_key: str | None = None
+    ui_theme: str | None = Field(default=None, pattern="^(dark|light|auto)$", max_length=20)
+    ui_density: str | None = Field(default=None, pattern="^(comfortable|compact|spacious)$", max_length=20)
+    api_key: str | None = Field(default=None, max_length=512)
 
 
 class SiteTargetIn(BaseModel):

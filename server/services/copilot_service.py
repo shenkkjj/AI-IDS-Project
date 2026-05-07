@@ -10,7 +10,6 @@ from server.analyzer import AnalyzerConfig
 from server.core.config import COPILOT_RATE_LIMIT_WINDOW, COPILOT_RATE_LIMIT_MAX
 from server.core.database import create_log
 from server.core.llm_utils import (
-    choose_provider,
     COPILOT_SYSTEM_PROMPT,
     _provider_headers,
     user_config_to_llm_runtime,
@@ -20,27 +19,52 @@ from server.models.schemas import CopilotMessageIn, CopilotStreamIn
 from server.models_db import User
 
 
-def _build_openai_messages(user_message: str, context_block: str, history: list[CopilotMessageIn]) -> list[dict[str, str]]:
+def _sanitize_user_input(text: str) -> str:
+    """清理用户输入，移除可能的提示注入标记。"""
+    if not text:
+        return text
+    # 移除常见的提示注入尝试模式
+    injection_patterns = [
+        r"(?i)ignore\s+previous\s+instructions",
+        r"(?i)disregard\s+.*system\s+prompt",
+        r"(?i)forget\s+.*instructions",
+        r"(?i)system\s*:\s*",
+        r"(?i)you\s+are\s+now\s+",
+        r"<\s*script\b",
+        r"javascript\s*:",
+    ]
+    import re
+    sanitized = text
+    for pattern in injection_patterns:
+        sanitized = re.sub(pattern, "[FILTERED]", sanitized)
+    return sanitized
+
+
+def _build_openai_messages(
+    user_message: str, context_block: str, history: list[CopilotMessageIn],
+) -> list[dict[str, str]]:
     messages: list[dict[str, str]] = [{"role": "system", "content": COPILOT_SYSTEM_PROMPT}]
     for item in history:
-        messages.append({"role": item.role, "content": item.content})
+        messages.append({"role": item.role, "content": _sanitize_user_input(item.content)})
 
-    user_content = user_message
+    user_content = _sanitize_user_input(user_message)
     if context_block:
-        user_content = f"{user_message}\n\n{context_block}"
+        user_content = f"{user_content}\n\n{context_block}"
     messages.append({"role": "user", "content": user_content})
     return messages
 
 
-def _build_gemini_contents(user_message: str, context_block: str, history: list[CopilotMessageIn]) -> list[dict[str, Any]]:
+def _build_gemini_contents(
+    user_message: str, context_block: str, history: list[CopilotMessageIn],
+) -> list[dict[str, Any]]:
     contents: list[dict[str, Any]] = []
     for item in history:
         role = "model" if item.role == "assistant" else "user"
-        contents.append({"role": role, "parts": [{"text": item.content}]})
+        contents.append({"role": role, "parts": [{"text": _sanitize_user_input(item.content)}]})
 
-    user_content = user_message
+    user_content = _sanitize_user_input(user_message)
     if context_block:
-        user_content = f"{user_message}\n\n{context_block}"
+        user_content = f"{user_content}\n\n{context_block}"
     contents.append({"role": "user", "parts": [{"text": user_content}]})
     return contents
 
@@ -130,7 +154,11 @@ async def stream_user_chat_completion(
                 "stream": True,
             }
             async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", endpoint, headers=_provider_headers(provider, runtime.api_key), json=request_body) as response:
+                async with client.stream(
+                    "POST", endpoint,
+                    headers=_provider_headers(provider, runtime.api_key),
+                    json=request_body,
+                ) as response:  # noqa: E501
                     response.raise_for_status()
                     async for raw_line in response.aiter_lines():
                         line = str(raw_line or "").strip()
@@ -158,7 +186,7 @@ async def stream_user_chat_completion(
                 "generationConfig": {"temperature": 0.2},
             }
             async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", endpoint, headers=_provider_headers(provider, runtime.api_key), json=request_body) as response:
+                async with client.stream("POST", endpoint, headers=_provider_headers(provider, runtime.api_key), json=request_body) as response:  # noqa: E501
                     response.raise_for_status()
                     async for raw_line in response.aiter_lines():
                         line = str(raw_line or "").strip()
@@ -185,7 +213,7 @@ async def stream_user_chat_completion(
                 "stream": True,
             }
             async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", endpoint, headers=_provider_headers(provider, runtime.api_key), json=request_body) as response:
+                async with client.stream("POST", endpoint, headers=_provider_headers(provider, runtime.api_key), json=request_body) as response:  # noqa: E501
                     response.raise_for_status()
                     async for raw_line in response.aiter_lines():
                         line = str(raw_line or "").strip()
@@ -204,13 +232,13 @@ async def stream_user_chat_completion(
 
         yield _sse_done(provider, runtime.model)
     except Exception as exc:
-        logger.exception("copilot stream failed provider={} model={} err_type={}", provider, runtime.model, type(exc).__name__)
+        logger.exception("copilot stream failed provider={} model={} err_type={}", provider, runtime.model, type(exc).__name__)  # noqa: E501
         yield _sse_error("AI 服务暂时不可用，请稍后重试")
 
 
 async def copilot_stream(user: User, data: CopilotStreamIn, client_ip: str, db: Session) -> AsyncIterator[str]:
     async with app_state.rate_limit.copilot_lock:
-        if not app_state.rate_limit._check_rate_limit(app_state.rate_limit.copilot_attempts, client_ip, COPILOT_RATE_LIMIT_WINDOW, COPILOT_RATE_LIMIT_MAX):
+        if not app_state.rate_limit._check_rate_limit(app_state.rate_limit.copilot_attempts, client_ip, COPILOT_RATE_LIMIT_WINDOW, COPILOT_RATE_LIMIT_MAX):  # noqa: E501
             raise HTTPException(status_code=429, detail="Copilot请求过于频繁，请1分钟后再试")
 
     from server.services.user_service import get_or_create_user_config
@@ -220,7 +248,7 @@ async def copilot_stream(user: User, data: CopilotStreamIn, client_ip: str, db: 
     alert: dict[str, Any] | None = None
     if data.alert_id:
         from server.services.alert_service import find_alert_by_id
-        alert = find_alert_by_id(str(data.alert_id).strip(), user_id=user.id)
+        alert = await find_alert_by_id(str(data.alert_id).strip(), user_id=user.id)
 
     context_block = _build_context_from_alert(alert)
 

@@ -4,9 +4,8 @@ from fastapi import APIRouter, Cookie, Depends, Header
 from sqlalchemy.orm import Session
 
 from server.core.database import get_db
-from server.core.security import get_current_user, require_auth_user
+from server.core.security import get_current_user
 from server.models.schemas import UserConfigIn
-from server.models_db import User
 from server.services import user_service
 
 router = APIRouter(prefix="/user", tags=["用户配置"])

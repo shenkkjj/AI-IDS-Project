@@ -57,5 +57,29 @@ class ConnectionManager:
                     if not user_connections:
                         self.active_connections.pop(user_id, None)
 
+    async def _heartbeat_loop(self) -> None:
+        HEARTBEAT_INTERVAL = 30
+        while True:
+            await asyncio.sleep(HEARTBEAT_INTERVAL)
+            async with self._lock:
+                all_stale: list[tuple[int, WebSocket]] = []
+                for uid, connections in list(self.active_connections.items()):
+                    for ws in list(connections):
+                        try:
+                            await ws.send_json({"type": "ping"})
+                        except Exception:
+                            all_stale.append((uid, ws))
+                for uid, ws in all_stale:
+                    user_connections = self.active_connections.get(uid)
+                    if user_connections is not None:
+                        user_connections.discard(ws)
+                        if not user_connections:
+                            self.active_connections.pop(uid, None)
+                if all_stale:
+                    logger.info("Heartbeat cleaned {} stale connections", len(all_stale))
+
+    def start_heartbeat(self) -> None:
+        asyncio.ensure_future(self._heartbeat_loop())
+
 
 manager = ConnectionManager()

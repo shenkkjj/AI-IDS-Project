@@ -1,4 +1,3 @@
-import os
 import time
 from typing import Any
 
@@ -12,12 +11,10 @@ from server.core.config import LLM_RATE_LIMIT_WINDOW, LLM_RATE_LIMIT_MAX
 from server.core.database import create_log
 from server.core.llm_utils import (
     choose_provider,
-    config_to_payload,
     _provider_headers,
     _provider_test_endpoint,
     _test_request_body,
     _extract_test_reply,
-    user_config_to_llm_runtime,
 )
 from server.core.security import _safe_decrypt
 from server.core.state import app_state
@@ -129,7 +126,7 @@ async def test_llm_config(data: LLMConfigIn, user: User, request, db: Session) -
     from server.core.utils import _get_client_ip
     client_ip = _get_client_ip(request)
     async with app_state.rate_limit.llm_lock:
-        if not app_state.rate_limit._check_rate_limit(app_state.rate_limit.llm_attempts, client_ip, LLM_RATE_LIMIT_WINDOW, LLM_RATE_LIMIT_MAX):
+        if not app_state.rate_limit._check_rate_limit(app_state.rate_limit.llm_attempts, client_ip, LLM_RATE_LIMIT_WINDOW, LLM_RATE_LIMIT_MAX):  # noqa: E501
             raise HTTPException(status_code=429, detail="LLM测试请求过于频繁，请1分钟后再试")
 
     update = data.model_dump(exclude_none=True)
@@ -176,6 +173,10 @@ async def test_llm_config(data: LLMConfigIn, user: User, request, db: Session) -
     if parsed_base.scheme not in {"http", "https"} or not parsed_base.netloc:
         raise HTTPException(status_code=422, detail="Base URL 格式无效")
 
+    from server.core.utils import _is_url_pointing_to_internal
+    if _is_url_pointing_to_internal(test_config.base_url):
+        raise HTTPException(status_code=422, detail="base_url 不允许指向内网地址")
+
     try:
         result = await test_llm_connection_by_provider(test_config, provider)
         logger.info("[LLM_TEST] success user_id={} result={}", user.id, result)
@@ -194,7 +195,7 @@ async def test_llm_config(data: LLMConfigIn, user: User, request, db: Session) -
         logger.warning("[LLM_TEST] connect_error user_id={} base_url={} exc={}", user.id, test_config.base_url, exc)
         raise HTTPException(status_code=400, detail="无法连接到服务器，请检查 Base URL") from exc
     except httpx.HTTPStatusError as exc:
-        logger.warning("[LLM_TEST] http_error user_id={} status={} body={}", user.id, exc.response.status_code, exc.response.text[:200])
+        logger.warning("[LLM_TEST] http_error user_id={} status={} body={}", user.id, exc.response.status_code, exc.response.text[:200])  # noqa: E501
         raise HTTPException(status_code=400, detail=f"服务器返回错误 ({exc.response.status_code})，请检查 API Key 和模型名称") from exc
     except Exception as exc:
         logger.warning("[LLM_TEST] failure user_id={} exc_type={} exc={}", user.id, type(exc).__name__, exc)

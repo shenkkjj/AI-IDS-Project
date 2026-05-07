@@ -45,7 +45,6 @@ export function useDesktopNotify() {
           requireInteraction: risk === "critical",
         });
       } catch {
-        // 忽略通知失败
       }
     },
     []

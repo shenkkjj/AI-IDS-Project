@@ -1,0 +1,67 @@
+{
+  "name": "ai-cybersentinel-backend",
+  "version": "1.0.0",
+  "description": "Security-hardened container for AI-CyberSentinel backend",
+  "securityDefenses": {
+    "no-new-privileges": true,
+    "read-only-root-filesystem": true,
+    "user": "app",
+    "groups": ["app"],
+    "security-opt": [
+      "no-new-privileges:true",
+      "seccomp=builtin/tunables"
+    ],
+    "cap-drop": [
+      "ALL"
+    ],
+    "cap-add": [
+      "NET_BIND_SERVICE"
+    ],
+    "ulimits": [
+      {
+        "name": "nofile",
+        "soft": 1024,
+        "hard": 4096
+      },
+      {
+        "name": "nproc",
+        "soft": 64,
+        "hard": 128
+      }
+    ],
+    "healthcheck": {
+      "test": ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/health"],
+      "interval": "15s",
+      "timeout": "5s",
+      "retries": 3,
+      "start_period": "30s"
+    },
+    "runtimes": {
+      "runsc": {
+        "path": "/usr/bin/runsc",
+        "runtimeArgs": [
+          "--profile=security",
+          "--no-sys32",
+          "--never-sandbox"
+        ]
+      }
+    }
+  },
+  "network": {
+    "mode": "internal"
+  },
+  "storage": {
+    "readonly": true,
+    "tmpfs": [
+      "/tmp",
+      "/var/cache"
+    ]
+  },
+  "logging": {
+    "driver": "json-file",
+    "options": {
+      "max-size": "10m",
+      "max-file": "3"
+    }
+  }
+}

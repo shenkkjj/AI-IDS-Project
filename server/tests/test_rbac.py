@@ -1,6 +1,4 @@
-from unittest.mock import MagicMock, patch
-
-from server.core.rbac import Role, has_role, require_role
+from server.core.rbac import Role, has_role
 
 
 class FakeUser:

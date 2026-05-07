@@ -4,7 +4,7 @@ import tempfile
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
+import pytest_asyncio  # noqa: F401
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _ENV_FILE = _PROJECT_ROOT / ".env"

@@ -1,7 +1,6 @@
 import json
 from typing import Any
 
-from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from server.core.database import create_log
@@ -93,7 +92,7 @@ def update_user_config(user: User, data: UserConfigIn, db: Session) -> dict[str,
     db.commit()
     db.refresh(config)
 
-    create_log(db, user_id=user.id, level="info", action="user_config_update", detail=json.dumps(log_payload, ensure_ascii=False))
+    create_log(db, user_id=user.id, level="info", action="user_config_update", detail=json.dumps(log_payload, ensure_ascii=False))  # noqa: E501
     return {
         "status": "updated",
         "config": {

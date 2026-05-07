@@ -182,6 +182,7 @@ class LLMAnalyzer:
                 "long_term_hardening": ["Enforce structured output with schema validation."],
             }
 
+
 def test_llm_connection(config: AnalyzerConfig) -> dict[str, Any]:
     if not config.api_key or not config.base_url:
         raise ValueError("Missing API Key or Base URL.")
@@ -220,4 +221,3 @@ def test_llm_connection(config: AnalyzerConfig) -> dict[str, Any]:
         "model": config.model,
         "base_url": config.base_url,
     }
-

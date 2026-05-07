@@ -31,7 +31,7 @@ LLM_ADMIN_TOKEN_ENV = "LLM_ADMIN_TOKEN"
 BIND_HOST = os.getenv("BIND_HOST", "127.0.0.1").strip()
 TARGET_URL = os.getenv("TARGET_URL", "http://127.0.0.1:8000").strip().rstrip("/")
 
-HONEYPOT_ENABLED = os.getenv("HONEYPOT_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+HONEYPOT_ENABLED = os.getenv("HONEYPOT_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
 HONEYPOT_PORT = int(os.getenv("HONEYPOT_PORT", "8888").strip())
 
 GATEWAY_RATE_LIMIT_WINDOW = int(os.getenv("GATEWAY_RATE_LIMIT_WINDOW", "60").strip())

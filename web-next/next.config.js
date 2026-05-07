@@ -1,4 +1,4 @@
-import type { NextConfig } from "next";
+/** @type {import('next').NextConfig} */
 
 const isDev = process.env.NODE_ENV === "development";
 
@@ -13,14 +13,14 @@ const securityHeaders = [
     value: [
       "default-src 'self'",
       isDev
-    ? "script-src 'self' 'unsafe-eval' 'unsafe-inline'"
-    : "script-src 'self'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
-  "font-src 'self'",
-  isDev
-    ? "connect-src 'self' ws://localhost:3000 wss://localhost:3000 http://127.0.0.1:8000 http://localhost:8000"
-    : "connect-src 'self'",
+        ? "script-src 'self' 'unsafe-eval' 'unsafe-inline'"
+        : "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob:",
+      "font-src 'self'",
+      isDev
+        ? "connect-src 'self' ws://localhost:3000 wss://localhost:3000 http://127.0.0.1:8000 http://localhost:8000"
+        : "connect-src 'self'",
       "frame-ancestors 'none'",
       "base-uri 'self'",
       "form-action 'self'",
@@ -29,7 +29,7 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
 ];
 
-const nextConfig: NextConfig = {
+const nextConfig = {
   reactStrictMode: false,
   output: "standalone",
   async headers() {
@@ -42,4 +42,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+module.exports = nextConfig;

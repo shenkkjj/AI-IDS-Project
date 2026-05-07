@@ -1,7 +1,7 @@
 # Local runtime artifacts
 .gstack/
 web-next/.gstack/
-.omc/state/hud-stdin-cache.json
+.omc/state/
 .claude/worktrees/
 
 # Secrets and local env
@@ -26,3 +26,12 @@ node_modules/
 .turbo/
 dist/
 build/
+
+# Debug/development files
+debug_*.py
+test_*.py
+_*.py
+check_*.py
+
+# Package lock files (track these for apps, ignore for libraries)
+# package-lock.json is tracked for this app project

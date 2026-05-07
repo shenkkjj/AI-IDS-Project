@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import time
 from datetime import timedelta
 from typing import Any
 
@@ -15,7 +14,10 @@ from server.core.security import set_access_cookie, _issue_token_for_user, _safe
 from server.core.state import app_state
 from server.core.utils import _sanitize_for_log
 from server.mailer import send_otp_email, send_reset_email
-from server.models.schemas import LoginPasswordIn, OAuthLoginIn, OTPRequestIn, OTPVerifyIn, PasswordResetConfirmIn, PasswordResetRequestIn, UserRegisterIn
+from server.models.schemas import (
+    LoginPasswordIn, OAuthLoginIn, OTPRequestIn, OTPVerifyIn,
+    PasswordResetConfirmIn, PasswordResetRequestIn, UserRegisterIn,
+)
 from server.models_db import AuthChallenge, User
 from server.security_utils import hash_password, verify_password, random_otp
 
@@ -138,7 +140,11 @@ async def _verify_github_token(access_token: str) -> dict[str, Any] | None:
                 for e in emails_resp.json():
                     if e.get("primary") and e.get("verified"):
                         email = e.get("email", email)
-            return {"email": email.lower(), "sub": str(data.get("id", "")), "name": data.get("name") or data.get("login")}
+            return {
+                "email": email.lower(),
+                "sub": str(data.get("id", "")),
+                "name": data.get("name") or data.get("login"),
+            }
     except Exception:
         return None
 
@@ -170,6 +176,26 @@ async def login_oauth(data: OAuthLoginIn, response: Response, request: Request, 
 
     user = db.query(User).filter(User.email == data.email.lower()).first()
     if user is None:
+        import os
+        oauth_auto_register = os.getenv("OAUTH_AUTO_REGISTER", "false").strip().lower() in {"1", "true", "yes", "on"}
+        oauth_allowed_domains = os.getenv("OAUTH_ALLOWED_DOMAINS", "").strip().lower()
+        if not oauth_auto_register:
+            logger.warning(
+                "OAuth login rejected (auto-register disabled): provider={} email={} ip={}",
+                data.provider, _sanitize_for_log(data.email), client_ip,
+            )
+            raise HTTPException(status_code=403, detail="该邮箱未注册，请联系管理员开通账号")
+
+        if oauth_allowed_domains:
+            allowed_list = [d.strip() for d in oauth_allowed_domains.split(",") if d.strip()]
+            email_domain = data.email.lower().split("@")[-1] if "@" in data.email.lower() else ""
+            if email_domain not in allowed_list:
+                logger.warning(
+                    "OAuth login rejected (domain not allowed): provider={} email={} domain={} ip={}",
+                    data.provider, _sanitize_for_log(data.email), email_domain, client_ip,
+                )
+                raise HTTPException(status_code=403, detail="该邮箱域名未在允许列表中，请联系管理员")
+
         logger.warning(
             "OAuth auto-register: provider={} email={} ip={} — "
             "ensure OAuth callback verification is enabled on the frontend",
@@ -203,7 +229,10 @@ async def login_oauth(data: OAuthLoginIn, response: Response, request: Request, 
 
     from server.services.user_service import get_or_create_user_config
     config = get_or_create_user_config(db, user.id)
-    create_log(db, user_id=user.id, level="info", action="login_oauth", detail=f"oauth login {data.provider}")
+    create_log(
+        db, user_id=user.id, level="info", action="login_oauth",
+        detail=f"oauth login {data.provider} from {client_ip}",
+    )
 
     return _build_auth_payload(user, config, token)
 
@@ -233,13 +262,7 @@ async def otp_request(data: OTPRequestIn, db: Session) -> dict[str, Any]:
         create_log(db, user_id=user.id if user else None, level="info", action="otp_request", detail="otp requested")
         return {"status": "ok", "message": "验证码已发送至邮箱"}
     else:
-        is_dev = os.getenv("APP_ENV", "development").strip().lower() in ("development", "dev")
-        if is_dev:
-            logger.debug("[dev] OTP code for {}: {}", data.email.lower(), code)
-            create_log(db, user_id=user.id if user else None, level="info", action="otp_request", detail="otp requested (dev mode)")
-            return {"status": "ok", "message": "验证码已发送", "dev_code": code}
-        else:
-            raise HTTPException(status_code=500, detail="邮件服务未配置")
+        raise HTTPException(status_code=500, detail="邮件服务未配置")
 
 
 async def otp_verify(data: OTPVerifyIn, response: Response, db: Session) -> dict[str, Any]:
@@ -257,7 +280,9 @@ async def otp_verify(data: OTPVerifyIn, response: Response, db: Session) -> dict
         _consume_valid_challenge(db, email_key, "otp", data.code)
     except HTTPException:
         async with app_state.rate_limit.otp_verify_lock:
-            app_state.rate_limit.otp_verify_failures[email_key] = app_state.rate_limit.otp_verify_failures.get(email_key, 0) + 1
+            app_state.rate_limit.otp_verify_failures[email_key] = (
+                app_state.rate_limit.otp_verify_failures.get(email_key, 0) + 1
+            )
         raise
 
     async with app_state.rate_limit.otp_verify_lock:
@@ -281,10 +306,8 @@ async def password_reset_request(data: PasswordResetRequestIn, db: Session) -> d
         app_state.rate_limit.otp_verify_failures.pop(data.email.lower(), None)
 
     user = db.query(User).filter(User.email == data.email.lower(), User.is_active.is_(True)).first()
-    if not user:
-        return {"status": "ok", "message": "如果邮箱存在，验证码已发送"}
 
-    code = _issue_challenge(db, data.email.lower(), "reset", user.id)
+    code = _issue_challenge(db, data.email.lower(), "reset", user.id if user else None)
 
     import os
     mail_user = os.getenv("MAIL_USERNAME", "").strip()
@@ -301,13 +324,7 @@ async def password_reset_request(data: PasswordResetRequestIn, db: Session) -> d
         create_log(db, user_id=user.id, level="info", action="password_reset_request", detail="reset requested")
         return {"status": "ok", "message": "验证码已发送至邮箱"}
     else:
-        is_dev = os.getenv("APP_ENV", "development").strip().lower() in ("development", "dev")
-        if is_dev:
-            logger.debug("[dev] reset code for {}: {}", data.email.lower(), code)
-            create_log(db, user_id=user.id, level="info", action="password_reset_request", detail="reset requested (dev mode)")
-            return {"status": "ok", "message": "验证码已发送", "dev_code": code}
-        else:
-            raise HTTPException(status_code=500, detail="邮件服务未配置")
+        raise HTTPException(status_code=500, detail="邮件服务未配置")
 
 
 async def password_reset_confirm(data: PasswordResetConfirmIn, db: Session) -> dict[str, Any]:
@@ -328,7 +345,9 @@ async def password_reset_confirm(data: PasswordResetConfirmIn, db: Session) -> d
         _consume_valid_challenge(db, email_key, "reset", data.code)
     except HTTPException:
         async with app_state.rate_limit.otp_verify_lock:
-            app_state.rate_limit.otp_verify_failures[email_key] = app_state.rate_limit.otp_verify_failures.get(email_key, 0) + 1
+            app_state.rate_limit.otp_verify_failures[email_key] = (
+                app_state.rate_limit.otp_verify_failures.get(email_key, 0) + 1
+            )
         raise
 
     async with app_state.rate_limit.otp_verify_lock:
@@ -350,6 +369,7 @@ def logout(response: Response, db: Session, user: User) -> dict[str, Any]:
     db.add(user)
     db.commit()
     clear_access_cookie(response)
+    create_log(db, user_id=user.id, level="info", action="logout", detail="user logged out")
     return {"status": "ok"}
 
 
@@ -367,7 +387,9 @@ def _issue_challenge(db: Session, email: str, challenge_type: str, user_id: int 
     code = random_otp(6)
     code_hash = _challenge_hash_material(email, challenge_type, code)
     from server.core.utils import _now
-    expires_at = _now() + timedelta(minutes=OTP_EXPIRES_MINUTES if challenge_type == "otp" else PASSWORD_RESET_EXPIRES_MINUTES)
+    expires_at = _now() + timedelta(  # noqa: E501
+        minutes=OTP_EXPIRES_MINUTES if challenge_type == "otp" else PASSWORD_RESET_EXPIRES_MINUTES
+    )
     challenge = AuthChallenge(
         user_id=user_id,
         email=email.lower(),

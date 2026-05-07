@@ -4,18 +4,27 @@ import type { NextRequest } from "next/server";
 const SECURITY_HEADERS: Record<string, string> = {
   "X-Content-Type-Options": "nosniff",
   "X-Frame-Options": "DENY",
+  "X-XSS-Protection": "1; mode=block",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ws: wss:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
 };
 
-const ALLOWED_ORIGINS = new Set([
-  "http://127.0.0.1:3000",
-  "http://localhost:3000",
-]);
+const ALLOWED_ORIGINS = new Set(
+  (process.env.ALLOWED_ORIGINS || "http://127.0.0.1:3000,http://localhost:3000")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
 
 function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
-  if (pathname.includes("..") || pathname.includes("\\") || pathname.includes("\0")) {
+  const decodedPathname = decodeURIComponent(pathname);
+  if (
+    decodedPathname.includes("..") ||
+    decodedPathname.includes("\\") ||
+    decodedPathname.includes("\0")
+  ) {
     return new NextResponse(null, { status: 400 });
   }
 

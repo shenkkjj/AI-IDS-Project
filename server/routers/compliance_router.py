@@ -2,14 +2,13 @@ import csv
 import io
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from server.core.database import get_db
 from server.core.rbac import require_admin
-from server.core.security import get_current_user
 from server.models_db import User
 
 router = APIRouter(prefix="/compliance", tags=["合规审计"])

@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from server.core.database import get_db
-from server.core.rbac import Role, has_role, require_admin
-from server.core.security import get_current_user, require_auth_user
+from server.core.rbac import Role, has_role
+from server.core.security import get_current_user
 from server.models_db import User
 
 router = APIRouter(prefix="/admin/roles", tags=["角色管理"])

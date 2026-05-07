@@ -1,11 +1,8 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends
 
-from server.core.database import get_db
-from server.core.rbac import require_admin, Role, has_role
-from server.core.security import get_current_user
+from server.core.rbac import require_admin
 from server.models_db import User
 
 router = APIRouter(prefix="/threat-intel", tags=["威胁情报"])

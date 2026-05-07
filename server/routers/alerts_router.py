@@ -1,10 +1,9 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 
-from server.core.database import get_db, SessionLocal
 from server.core.security import get_current_user, require_alert_ingest_token, require_auth_user
+from server.core.database import SessionLocal
 from server.core.state import app_state
 from server.core.websocket import manager
 from server.models.schemas import AlertIn
@@ -36,9 +35,14 @@ async def get_alerts(
 
 @router.websocket("/ws/alerts")
 async def ws_alerts(websocket: WebSocket) -> None:
+    # 支持多种认证方式：header、cookie、URL query param
     token = websocket.headers.get("authorization")
     cookie_text = websocket.headers.get("cookie", "")
     access_token_cookie: str | None = None
+
+    query_token = websocket.query_params.get("token")
+    if query_token:
+        token = f"Bearer {query_token}"
 
     try:
         from http.cookies import SimpleCookie

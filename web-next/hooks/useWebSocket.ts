@@ -28,7 +28,7 @@ export function useWebSocket(token: string | null) {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const wsUrl = `${protocol}//${window.location.host}/api/backend/alerts/ws/alerts`;
+    const wsUrl = `${protocol}//${window.location.host}/api/backend/alerts/ws/alerts?token=${encodeURIComponent(token)}`;
 
     try {
       const ws = new WebSocket(wsUrl);
@@ -46,7 +46,6 @@ export function useWebSocket(token: string | null) {
             return next.slice(-200);
           });
         } catch {
-          // 忽略解析失败
         }
       };
 

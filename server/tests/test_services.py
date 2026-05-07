@@ -1,6 +1,3 @@
-from unittest.mock import AsyncMock, patch
-
-
 class TestThreatIntelService:
     def test_extract_ip_valid(self):
         from server.services.threat_intel_service import _extract_ip

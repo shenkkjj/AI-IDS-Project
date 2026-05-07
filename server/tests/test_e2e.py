@@ -13,7 +13,9 @@ async def run():
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            executable_path=r"C:\Users\27629\AppData\Local\ms-playwright\chromium_headless_shell-1208\chrome-headless-shell-win64\chrome-headless-shell.exe"
+            executable_path=r"C:\Users\27629\AppData\Local\ms-playwright"
+                            r"\chromium_headless_shell-1208\chrome-headless-shell-win64"
+                            r"\chrome-headless-shell.exe"
         )
         page = await browser.new_page()
 
@@ -35,9 +37,14 @@ async def run():
 
         print("\n=== E2E 测试：登录流程 ===")
         try:
-            email_input = page.locator('input[type="email"], input[name="email"], input[placeholder*="mail"], input[placeholder*="Email"]')
+            email_input = page.locator(
+                'input[type="email"], input[name="email"], '
+                'input[placeholder*="mail"], input[placeholder*="Email"]')
             pass_input = page.locator('input[type="password"], input[name="password"]')
-            submit_btn = page.locator('button[type="submit"], button:has-text("登录"), button:has-text("Sign In"), button:has-text("Login")')
+            submit_btn = page.locator(
+                'button[type="submit"], button:has-text("登录"), '
+                'button:has-text("Sign In"), button:has-text("Login")',
+            )  # noqa: E501
 
             if await email_input.count() > 0:
                 await email_input.first.fill(ADMIN_EMAIL)
@@ -104,7 +111,7 @@ async def run():
         if len(errors) == 0 and len(warnings) <= 5:
             ok(f"JS错误={len(errors)}", f"warnings={len(warnings)}")
         elif len(errors) == 0:
-            ok(f"JS错误=0", f"warnings={len(warnings)} (可接受)")
+            ok("JS错误=0", f"warnings={len(warnings)} (可接受)")
         else:
             for e in errors[:3]:
                 print(f"     JS Error: {e[:100]}")
@@ -131,13 +138,13 @@ async def run():
 
         passed = sum(1 for _, ok_val, _ in results if ok_val)
         total = len(results)
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f" Playwright E2E 测试: {passed}/{total} 通过")
         if passed < total:
             for n, ok_val, m in results:
                 if not ok_val:
                     print(f"  失败: {n} — {m}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
 if __name__ == "__main__":
     asyncio.run(run())

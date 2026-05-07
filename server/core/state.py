@@ -85,12 +85,16 @@ class RateLimitState:
     async def check_login_limit(self, email: str) -> bool:
         from server.core.config import LOGIN_RATE_LIMIT_WINDOW, LOGIN_RATE_LIMIT_MAX
         async with self.login_lock:
-            return self._check_rate_limit(self.login_attempts, email.lower(), LOGIN_RATE_LIMIT_WINDOW, LOGIN_RATE_LIMIT_MAX)
+            return self._check_rate_limit(
+                self.login_attempts, email.lower(),
+                LOGIN_RATE_LIMIT_WINDOW, LOGIN_RATE_LIMIT_MAX)
 
     async def check_register_limit(self, ip: str) -> bool:
         from server.core.config import REGISTER_RATE_LIMIT_WINDOW, REGISTER_RATE_LIMIT_MAX
         async with self.register_lock:
-            return self._check_rate_limit(self.register_attempts, ip, REGISTER_RATE_LIMIT_WINDOW, REGISTER_RATE_LIMIT_MAX)
+            return self._check_rate_limit(
+                self.register_attempts, ip,
+                REGISTER_RATE_LIMIT_WINDOW, REGISTER_RATE_LIMIT_MAX)
 
     async def check_otp_limit(self, email: str) -> bool:
         from server.core.config import OTP_RATE_LIMIT_WINDOW, OTP_RATE_LIMIT_MAX
@@ -106,6 +110,28 @@ class RateLimitState:
         from server.core.config import LLM_RATE_LIMIT_WINDOW, LLM_RATE_LIMIT_MAX
         async with self.llm_lock:
             return self._check_rate_limit(self.llm_attempts, ip, LLM_RATE_LIMIT_WINDOW, LLM_RATE_LIMIT_MAX)
+
+    async def _cleanup_loop(self) -> None:
+        CLEANUP_INTERVAL = 600
+        MAX_IDLE = 3600
+        while True:
+            await asyncio.sleep(CLEANUP_INTERVAL)
+            now = time.time()
+            locks_and_data = [
+                (self.login_lock, self.login_attempts),
+                (self.register_lock, self.register_attempts),
+                (self.otp_lock, self.otp_attempts),
+                (self.copilot_lock, self.copilot_attempts),
+                (self.llm_lock, self.llm_attempts),
+            ]
+            for lock, data in locks_and_data:
+                async with lock:
+                    stale = [k for k, v in list(data.items()) if not v or now - max(v) > MAX_IDLE]
+                    for k in stale:
+                        data.pop(k, None)
+
+    def start_cleanup(self) -> None:
+        asyncio.ensure_future(self._cleanup_loop())
 
 
 @dataclass

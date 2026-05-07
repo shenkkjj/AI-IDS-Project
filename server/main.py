@@ -1,50 +1,93 @@
 import asyncio
 import os
-import re
 import sys
 from pathlib import Path
 
+from server.core.config import load_dotenv_file
+
 _ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
-if _ENV_PATH.exists():
-    with open(_ENV_PATH, "r", encoding="utf-8") as _f:
-        for _line in _f:
-            _line = _line.strip()
-            if not _line or _line.startswith("#") or "=" not in _line:
-                continue
-            _key, _value = _line.split("=", 1)
-            if _key.strip() and _key.strip() not in os.environ:
-                os.environ[_key.strip()] = _value.strip().strip('"').strip("'")
+load_dotenv_file(_ENV_PATH)
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from loguru import logger
+from fastapi import FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+from fastapi.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
+from loguru import logger  # noqa: E402
 
-from server.analyzer import AnalyzerConfig
-from server.core.config import (
+from server.analyzer import AnalyzerConfig  # noqa: E402
+from server.core.config import (  # noqa: E402
     load_timeout_seconds,
     validate_cookie_config,
 )
-from server.core.database import init_db, ensure_user_config_columns
-from server.core.state import app_state
-from server.routers import (
-    admin_router, auth_router, user_router, logs_router, site_router, copilot_router, alerts_router, llm_router, waf_router, notify_router, export_router, threat_intel_router, compliance_router,
+from server.core.database import init_db, ensure_user_config_columns  # noqa: E402
+from server.core.state import app_state  # noqa: E402
+from server.core.websocket import manager  # noqa: E402
+from server.routers import (  # noqa: E402
+    admin_router,
+    auth_router,
+    alerts_router,
+    compliance_router,
+    copilot_router,
+    export_router,
+    llm_router,
+    logs_router,
+    notify_router,
+    site_router,
+    threat_intel_router,
+    user_router,
+    waf_router,
 )
-from server.services.alert_service import alert_worker
-from server.services.site_monitor_service import _ssl_monitor_loop
+from server.services.alert_service import alert_worker  # noqa: E402
+from server.services.site_monitor_service import _ssl_monitor_loop  # noqa: E402
 
+project_root = str(Path(__file__).resolve().parents[1])
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
 try:
     from models.train import FEATURE_COLUMNS
 except ModuleNotFoundError:
-    project_root = str(Path(__file__).resolve().parents[1])
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
-    from models.train import FEATURE_COLUMNS
+    FEATURE_COLUMNS = []
+
+_DEFAULT_SECRETS = {
+    "dev-local-secret-not-for-production-use-12345678901234567890",
+    "dev-insecure-secret-do-not-use-in-production",
+    "change-me",
+    "secret",
+    "",
+}
+
+_app_secret = os.getenv("APP_SECRET", "").strip()
+if _app_secret in _DEFAULT_SECRETS:
+    logger.error("APP_SECRET is not set or uses a default/weak value. Refusing to start.")
+    logger.error("Generate a secure secret with: python -c \"import secrets; print(secrets.token_urlsafe(32))\"")
+    sys.exit(1)
+
+_auth_secret = os.getenv("AUTH_SECRET", "").strip()
+if _auth_secret in _DEFAULT_SECRETS:
+    logger.error("AUTH_SECRET is not set or uses a default/weak value. Refusing to start.")
+    logger.error("Generate a secure secret with: openssl rand -base64 32")
+    sys.exit(1)
 
 validate_cookie_config()
 init_db()
 ensure_user_config_columns()
 
 app = FastAPI(title="AI-IDS Alert Backend", version="0.2.0")
+
+
+@app.middleware("http")
+async def add_security_headers(request, call_next):
+    response = await call_next(request)
+    # Prevent MIME type sniffing
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    # Prevent clickjacking
+    response.headers["X-Frame-Options"] = "DENY"
+    # Enable XSS filter (legacy browsers)
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    # Referrer policy
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    # Permissions policy
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 _cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
 _cors_origins = (
@@ -58,7 +101,8 @@ _cors_origins = (
 if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"} and any(
     "localhost" in o or "127.0.0.1" in o for o in _cors_origins
 ):
-    logger.warning("CORS allows localhost in production — set CORS_ORIGINS explicitly")
+    logger.error("CORS allows localhost in production — set CORS_ORIGINS explicitly")
+    sys.exit(1)
 
 app.add_middleware(
     CORSMiddleware,
@@ -68,6 +112,15 @@ app.add_middleware(
     allow_headers=["Authorization", "Content-Type", "X-Alerts-Token", "X-LLM-Admin-Token"],
     max_age=600,
 )
+
+# Trusted host middleware (production only)
+if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}:
+    allowed_hosts = os.getenv("ALLOWED_HOSTS", "").strip()
+    if allowed_hosts:
+        app.add_middleware(
+            TrustedHostMiddleware,
+            allowed_hosts=[h.strip() for h in allowed_hosts.split(",") if h.strip()],
+        )
 
 _llm_config = AnalyzerConfig(
     api_key=os.getenv("LLM_API_KEY", "").strip(),
@@ -93,6 +146,8 @@ app.include_router(compliance_router.router)
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    manager.start_heartbeat()
+    app_state.rate_limit.start_cleanup()
     for worker_id in range(4):
         app_state.worker_tasks.append(asyncio.create_task(alert_worker(worker_id)))
     app_state.ssl_monitor_task = asyncio.create_task(_ssl_monitor_loop())

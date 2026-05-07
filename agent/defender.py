@@ -6,19 +6,15 @@ import time
 
 from loguru import logger
 
-
-import re
-
-_IPV4_PATTERN = re.compile(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
-_IPV6_PATTERN = re.compile(r"^[0-9a-fA-F:]+$")
+import ipaddress
 
 
 def _is_valid_ip(ip: str) -> bool:
-    if _IPV4_PATTERN.match(ip):
-        return all(0 <= int(o) <= 255 for o in ip.split("."))
-    if _IPV6_PATTERN.match(ip):
-        return 2 <= len(ip) <= 45
-    return False
+    try:
+        ipaddress.ip_address(ip)
+        return True
+    except ValueError:
+        return False
 
 
 class IPBlocker:

@@ -1,4 +1,3 @@
-import pytest
 from server.core.config import WAF_BLOCK_PATTERNS
 
 

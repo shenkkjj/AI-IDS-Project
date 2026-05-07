@@ -6,7 +6,27 @@ from fastapi import APIRouter, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger
 
-from server.core.config import (
+
+def _sanitize_url_for_log(url: str) -> str:
+    """从 URL 中移除敏感查询参数，避免日志泄露。"""
+    from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
+    try:
+        parsed = urlparse(url)
+        if not parsed.query:
+            return url
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        sensitive_keys = {"token", "password", "api_key", "secret", "auth", "session", "jwt"}
+        sanitized = {
+            k: ["***"] if k.lower() in sensitive_keys else v
+            for k, v in params.items()
+        }
+        new_query = urlencode(sanitized, doseq=True)
+        return urlunparse(parsed._replace(query=new_query))
+    except Exception:
+        return url
+
+
+from server.core.config import (  # noqa: E402
     HONEYPOT_ENABLED,
     TARGET_URL,
     THREAT_INTEL_ENABLED,
@@ -15,8 +35,8 @@ from server.core.config import (
     HOP_BY_HOP_HEADERS,
     PROXY_STRIP_HEADERS,
 )
-from server.core.rate_limiter import check_rate_limit, get_rate_limit_status
-from server.core.utils import _get_client_ip, _payload_has_attack_signature, _build_proxy_headers
+from server.core.rate_limiter import check_rate_limit, get_rate_limit_status  # noqa: E402
+from server.core.utils import _get_client_ip, _payload_has_attack_signature, _build_proxy_headers  # noqa: E402
 
 router = APIRouter(tags=["WAF Gateway"])
 
@@ -35,7 +55,7 @@ HONEYPOT_HTML = """<!DOCTYPE html>
 <button type="submit">Login</button>
 </form>
 <p style="color:#555;font-size:10px">v2.1.0 - Internal Use Only</p>
-<!-- DEBUG: db_host=192.168.1.100 db_port=3306 db_user=admin db_pass=P@ssw0rd123 -->
+<!-- HONEYPOT: This is a decoy page for security monitoring -->
 </body></html>"""
 
 
@@ -109,9 +129,18 @@ async def waf_gateway(request: Request, path: str) -> Response:
         return JSONResponse(status_code=403, content={"detail": "Forbidden"})
 
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > MAX_BODY_BYTES:
-        logger.warning("WAF blocked oversized body: ip={} size={}", client_ip, content_length)
-        return JSONResponse(status_code=413, content={"detail": "Payload Too Large"})
+    if content_length:
+        try:
+            content_length_int = int(content_length)
+            if content_length_int < 0:
+                logger.warning("WAF blocked invalid negative content-length: ip={} size={}", client_ip, content_length)
+                return JSONResponse(status_code=400, content={"detail": "Bad Request"})
+            if content_length_int > MAX_BODY_BYTES:
+                logger.warning("WAF blocked oversized body: ip={} size={}", client_ip, content_length)
+                return JSONResponse(status_code=413, content={"detail": "Payload Too Large"})
+        except (ValueError, TypeError):
+            logger.warning("WAF blocked invalid content-length header: ip={} value={}", client_ip, content_length)
+            return JSONResponse(status_code=400, content={"detail": "Bad Request"})
 
     waf_result = _waf_check_request(request)
 
@@ -167,10 +196,10 @@ async def waf_gateway(request: Request, path: str) -> Response:
             headers=response_headers,
         )
     except httpx.TimeoutException:
-        logger.error("WAF gateway timeout: target={}", target_url)
+        logger.error("WAF gateway timeout: target={}", _sanitize_url_for_log(target_url))
         return JSONResponse(status_code=504, content={"detail": "Gateway Timeout"})
     except httpx.ConnectError:
-        logger.error("WAF gateway connect error: target={}", target_url)
+        logger.error("WAF gateway connect error: target={}", _sanitize_url_for_log(target_url))
         return JSONResponse(status_code=502, content={"detail": "Bad Gateway"})
     except Exception as exc:
         logger.error("WAF gateway error: {}", exc)

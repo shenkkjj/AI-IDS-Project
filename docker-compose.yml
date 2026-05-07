@@ -7,6 +7,14 @@ services:
     restart: always
     ports:
       - "127.0.0.1:8000:8000"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 256M
     environment:
       - "APP_SECRET=${APP_SECRET:?APP_SECRET required -- run: openssl rand -base64 48}"
       - APP_ENV=${APP_ENV:-production}
@@ -87,8 +95,7 @@ services:
     image: redis:7-alpine
     container_name: ai-cybersentinel-redis
     restart: always
-    ports:
-      - "127.0.0.1:6379:6379"
+    # Redis 仅在内部网络暴露，不映射到主机
     volumes:
       - redis-data:/data
     command: redis-server --requirepass ${REDIS_PASSWORD:-change-me-in-production} --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
