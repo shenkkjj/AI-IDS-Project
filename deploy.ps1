@@ -49,6 +49,28 @@ if ($envContent -notmatch "AUTH_SECRET=" -or $envContent -match 'AUTH_SECRET=\s*
     $envContent | Set-Content ".env" -NoNewline
 }
 
+if ($envContent -notmatch "POSTGRES_PASSWORD=" -or $envContent -match 'POSTGRES_PASSWORD=\s*$') {
+    Write-Host "[!] POSTGRES_PASSWORD 未设置，自动生成..." -ForegroundColor Yellow
+    $password = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Max 256 }))
+    if ($envContent -match "POSTGRES_PASSWORD=") {
+        $envContent = $envContent -replace "POSTGRES_PASSWORD=.*", "POSTGRES_PASSWORD=$password"
+    } else {
+        $envContent += "`nPOSTGRES_PASSWORD=$password"
+    }
+    $envContent | Set-Content ".env" -NoNewline
+}
+
+if ($envContent -notmatch "REDIS_PASSWORD=" -or $envContent -match 'REDIS_PASSWORD=\s*$') {
+    Write-Host "[!] REDIS_PASSWORD 未设置，自动生成..." -ForegroundColor Yellow
+    $password = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Max 256 }))
+    if ($envContent -match "REDIS_PASSWORD=") {
+        $envContent = $envContent -replace "REDIS_PASSWORD=.*", "REDIS_PASSWORD=$password"
+    } else {
+        $envContent += "`nREDIS_PASSWORD=$password"
+    }
+    $envContent | Set-Content ".env" -NoNewline
+}
+
 if ($BuildOnly) {
     Write-Host "[+] 仅构建镜像..." -ForegroundColor Green
     docker compose build --no-cache
@@ -62,11 +84,7 @@ if (-not $SkipBuild) {
 }
 
 Write-Host "[+] 启动服务..." -ForegroundColor Green
-if ($Env -eq "development") {
-    docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-} else {
-    docker compose up -d
-}
+docker compose up -d
 
 Write-Host "[+] 等待服务就绪..." -ForegroundColor Green
 Start-Sleep -Seconds 5

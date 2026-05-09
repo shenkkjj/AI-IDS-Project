@@ -83,7 +83,7 @@ def check_leaked_keys() -> bool:
         for placeholder in DEFAULT_PLACEHOLDERS:
             if placeholder in line_lower and "=" in line:
                 key = line.split("=")[0].strip()
-                print(f"[TODO] 第{line_no}行 {key} 使用占位值，需替换为真实密钥")
+                print(f"[INFO] 第{line_no}行 {key} 使用占位值，生产环境请替换为真实密钥")
 
     return True
 

@@ -131,6 +131,36 @@ def _build_proxy_headers(request: Request) -> dict[str, str]:
     return out
 
 
+_LOG_SANITIZE_PATTERNS: list[tuple[str, str]] = [
+    (r'\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b', '[CREDIT_CARD]'),
+    (r'\b1[3-9]\d{9}\b', '[PHONE]'),
+    (r'(?i)(password|passwd|pwd)\s*[:=]\s*\S+', '[PASSWORD]'),
+    (r'sk-[a-zA-Z0-9]{20,}', '[API_KEY]'),
+    (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '[EMAIL]'),
+]
+
+_SANITIZE_PATTERNS_INITIALIZED = False
+
+
+def _get_sanitize_patterns() -> list[tuple[str, str]]:
+    global _SANITIZE_PATTERNS_INITIALIZED
+    if not _SANITIZE_PATTERNS_INITIALIZED:
+        env_patterns = os.getenv("LOG_SANITIZE_PATTERNS", "").strip()
+        if env_patterns:
+            try:
+                import json
+                loaded = json.loads(env_patterns)
+                if isinstance(loaded, list):
+                    _LOG_SANITIZE_PATTERNS.clear()
+                    for item in loaded:
+                        if isinstance(item, list) and len(item) == 2:
+                            _LOG_SANITIZE_PATTERNS.append((item[0], item[1]))
+            except Exception:
+                pass
+        _SANITIZE_PATTERNS_INITIALIZED = True
+    return _LOG_SANITIZE_PATTERNS
+
+
 def _sanitize_for_log(text: str) -> str:
     if not text:
         return ""
@@ -144,14 +174,7 @@ def _sanitize_for_log(text: str) -> str:
         .replace("\n", " ")
         .replace("\r", "")
     )
-    # 脱敏敏感信息
-    patterns = [
-        (r'\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b', '[CREDIT_CARD]'),  # 信用卡
-        (r'\b1[3-9]\d{9}\b', '[PHONE]'),  # 手机号
-        (r'(?i)(password|passwd|pwd)\s*[:=]\s*\S+', '[PASSWORD]'),  # 密码
-        (r'sk-[a-zA-Z0-9]{20,}', '[API_KEY]'),  # API Key
-        (r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', '[EMAIL]'),  # 邮箱
-    ]
+    patterns = _get_sanitize_patterns()
     for pattern, replacement in patterns:
         sanitized = re.sub(pattern, replacement, sanitized)
     return sanitized

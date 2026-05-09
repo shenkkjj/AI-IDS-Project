@@ -8,6 +8,7 @@ joblib==1.5.3
 loguru==0.7.3
 requests==2.33.1
 sqlalchemy==2.0.44
+aiosqlite==0.20.0
 passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 python-jose[cryptography]==3.5.0

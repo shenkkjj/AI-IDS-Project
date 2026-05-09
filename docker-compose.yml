@@ -79,7 +79,7 @@ services:
     restart: always
     environment:
       POSTGRES_USER: cybersentinel
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cybersentinel}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
       POSTGRES_DB: cybersentinel
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -98,9 +98,9 @@ services:
     # Redis 仅在内部网络暴露，不映射到主机
     volumes:
       - redis-data:/data
-    command: redis-server --requirepass ${REDIS_PASSWORD:-change-me-in-production} --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD is required} --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-change-me-in-production}", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:?REDIS_PASSWORD is required}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5

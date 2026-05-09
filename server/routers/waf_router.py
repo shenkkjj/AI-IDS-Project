@@ -36,7 +36,12 @@ from server.core.config import (  # noqa: E402
     PROXY_STRIP_HEADERS,
 )
 from server.core.rate_limiter import check_rate_limit, get_rate_limit_status  # noqa: E402
-from server.core.utils import _get_client_ip, _payload_has_attack_signature, _build_proxy_headers  # noqa: E402
+from server.core.utils import (  # noqa: E402
+    _get_client_ip,
+    _payload_has_attack_signature,
+    _build_proxy_headers,
+    _is_url_pointing_to_internal,
+)
 
 router = APIRouter(tags=["WAF Gateway"])
 
@@ -167,6 +172,10 @@ async def waf_gateway(request: Request, path: str) -> Response:
     target_url = f"{TARGET_URL}/{path}"
     if request.url.query:
         target_url = f"{target_url}?{request.url.query}"
+
+    if _is_url_pointing_to_internal(target_url):
+        logger.warning("WAF blocked internal URL access: ip={} url={}", client_ip, _sanitize_url_for_log(target_url))
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
 
     try:
         headers = _build_proxy_headers(request)
