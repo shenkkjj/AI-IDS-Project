@@ -51,6 +51,9 @@ class UserRegisterIn(BaseModel):
 class LoginPasswordIn(BaseModel):
     email: EmailStr
     password: str = Field(max_length=128)
+    # TOTP 验证码（仅当用户已启用 2FA 时必填）。
+    # 服务端在用户启用 TOTP 后，会要求登录时附带 6 位动态码。
+    totp_code: str | None = Field(default=None, min_length=6, max_length=10)
 
 
 class OTPRequestIn(BaseModel):
@@ -60,6 +63,8 @@ class OTPRequestIn(BaseModel):
 class OTPVerifyIn(BaseModel):
     email: EmailStr
     code: str = Field(min_length=4, max_length=12)
+    # 用户在已启用 2FA 时，OTP 登录后仍需再校验 TOTP。
+    totp_code: str | None = Field(default=None, min_length=6, max_length=10)
 
 
 class PasswordResetRequestIn(BaseModel):
@@ -81,6 +86,8 @@ class OAuthLoginIn(BaseModel):
     provider_user_id: str = Field(max_length=255)
     email: EmailStr
     display_name: str | None = None
+    # OAuth 用户若已启用 TOTP，登录时也必须提供动态码。
+    totp_code: str | None = Field(default=None, min_length=6, max_length=10)
 
 
 class UserConfigIn(BaseModel):
@@ -90,6 +97,8 @@ class UserConfigIn(BaseModel):
     timeout_seconds: int | None = Field(default=None, ge=1, le=300)
     alert_email_enabled: bool | None = None
     alert_voice_enabled: bool | None = None
+    webhook_url: str | None = Field(default=None, max_length=500)
+    webhook_type: str | None = Field(default=None, pattern="^(generic|dingtalk|feishu)$", max_length=16)
     ui_theme: str | None = Field(default=None, pattern="^(dark|light|auto)$", max_length=20)
     ui_density: str | None = Field(default=None, pattern="^(comfortable|compact|spacious)$", max_length=20)
     api_key: str | None = Field(default=None, max_length=512)

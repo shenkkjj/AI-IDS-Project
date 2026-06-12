@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from server.db import Base, TimestampMixin
 
@@ -33,6 +33,15 @@ class User(Base, TimestampMixin):
     login_notify_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_login_ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    # Eager-loadable relationship to the per-user config. Used to avoid the
+    # previous N+1 in the alert pipeline.
+    config: Mapped["UserConfig | None"] = relationship(
+        "UserConfig",
+        primaryjoin="User.id == foreign(UserConfig.user_id)",
+        uselist=False,
+        viewonly=True,
+    )
 
 
 class UserConfig(Base, TimestampMixin):
@@ -98,4 +107,35 @@ class AuditLog(Base):
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
     status: Mapped[str] = mapped_column(String(16), default="success", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class RefreshToken(Base):
+    """Long-lived refresh token paired with a short-lived access token.
+
+    The opaque token value (256-bit random, base64url) is stored as a SHA-256
+    hash — never in cleartext — so a database leak does not directly expose
+    live refresh tokens. Revocation works by setting `revoked_at`.
+
+    Each `session_id` is embedded in the access-token JWT, allowing a single
+    session to be terminated without rotating the global `token_version`.
+    """
+
+    __tablename__ = "refresh_tokens"
+    __table_args__ = (
+        Index("ix_refresh_tokens_user_revoked", "user_id", "revoked_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # 32-byte random session id, base64url. Embedded in the access-token JWT
+    # so we can map an access token back to its refresh token.
+    session_id: Mapped[str] = mapped_column(String(48), unique=True, nullable=False, index=True)
+    # SHA-256 hash of the opaque refresh token value.
+    token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    replaced_by_id: Mapped[int | None] = mapped_column(ForeignKey("refresh_tokens.id"), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)

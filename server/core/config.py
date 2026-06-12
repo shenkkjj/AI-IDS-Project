@@ -23,6 +23,12 @@ COPILOT_RATE_LIMIT_WINDOW = 60
 COPILOT_RATE_LIMIT_MAX = 20
 OTP_VERIFY_MAX_ATTEMPTS = 5
 
+# ---- JWT / Refresh-Token 时长 ----
+# 短期访问令牌：默认 30 分钟。泄露窗口远小于原来的 7 天。
+ACCESS_TOKEN_EXPIRES_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRES_MINUTES", "30").strip())
+# 刷新令牌：默认 7 天。每次使用后轮换（rotation），单次使用后即作废。
+REFRESH_TOKEN_EXPIRES_DAYS = int(os.getenv("REFRESH_TOKEN_EXPIRES_DAYS", "7").strip())
+
 INTERNAL_ALERT_TOKEN_HEADER = "x-alerts-token"
 INTERNAL_ALERT_TOKEN_ENV = "ALERTS_INGEST_TOKEN"
 LLM_ADMIN_TOKEN_HEADER = "x-llm-admin-token"

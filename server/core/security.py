@@ -10,20 +10,27 @@ from server.core.config import (
     cookie_secure, cookie_samesite,
     LLM_ADMIN_TOKEN_ENV, LLM_ADMIN_TOKEN_HEADER,
     INTERNAL_ALERT_TOKEN_ENV, INTERNAL_ALERT_TOKEN_HEADER,
+    ACCESS_TOKEN_EXPIRES_MINUTES,
 )
+from server.core import refresh_tokens
 from server.security_utils import decode_access_token, issue_access_token, DecryptionError, decrypt_api_key
 from server.models_db import User
 from server.core.database import get_db
 
 
-def _issue_token_for_user(user: User) -> str:
+def _issue_token_for_user(user: User, session_id: str | None = None) -> str:
     pwd_ts = None
     if user.password_changed_at:
         if user.password_changed_at.tzinfo is None:
             pwd_ts = user.password_changed_at.replace(tzinfo=timezone.utc).timestamp()
         else:
             pwd_ts = user.password_changed_at.timestamp()
-    return issue_access_token(str(user.id), password_changed_at=pwd_ts, token_version=user.token_version)
+    return issue_access_token(
+        str(user.id),
+        password_changed_at=pwd_ts,
+        token_version=user.token_version,
+        session_id=session_id,
+    )
 
 
 def set_access_cookie(response: Response, token: str) -> None:
@@ -33,7 +40,19 @@ def set_access_cookie(response: Response, token: str) -> None:
         httponly=True,
         samesite=cookie_samesite(),
         secure=cookie_secure(),
-        max_age=60 * 60 * 24 * 7,  # 7 days
+        max_age=ACCESS_TOKEN_EXPIRES_MINUTES * 60,
+    )
+
+
+def set_refresh_cookie(response: Response, token: str, max_age_seconds: int) -> None:
+    response.set_cookie(
+        "refresh_token",
+        token,
+        httponly=True,
+        samesite=cookie_samesite(),
+        secure=cookie_secure(),
+        max_age=max_age_seconds,
+        path="/api/backend/auth",  # only sent to auth endpoints
     )
 
 
@@ -43,6 +62,16 @@ def clear_access_cookie(response: Response) -> None:
         httponly=True,
         samesite=cookie_samesite(),
         secure=cookie_secure(),
+    )
+
+
+def clear_refresh_cookie(response: Response) -> None:
+    response.delete_cookie(
+        "refresh_token",
+        httponly=True,
+        samesite=cookie_samesite(),
+        secure=cookie_secure(),
+        path="/api/backend/auth",
     )
 
 
@@ -96,6 +125,12 @@ def get_current_user(
     token_version = payload.get("tv", 0)
     if token_version != user.token_version:
         raise HTTPException(status_code=401, detail="会话已失效，请重新登录")
+
+    # Optional session-id binding: a revoked refresh-token session invalidates
+    # the access token on the next request, even before it expires.
+    session_id = payload.get("sid")
+    if session_id is not None and not refresh_tokens.is_session_active(db, session_id):
+        raise HTTPException(status_code=401, detail="会话已被注销")
 
     return user
 

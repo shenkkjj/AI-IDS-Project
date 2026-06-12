@@ -8,7 +8,8 @@ from server.core.config import load_dotenv_file
 _ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv_file(_ENV_PATH)
 
-from fastapi import FastAPI  # noqa: E402
+from fastapi import Depends, FastAPI, Request  # noqa: E402
+from fastapi.responses import JSONResponse  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 from fastapi.middleware.trustedhost import TrustedHostMiddleware  # noqa: E402
 from loguru import logger  # noqa: E402
@@ -18,9 +19,14 @@ from server.core.config import (  # noqa: E402
     load_timeout_seconds,
     validate_cookie_config,
 )
-from server.core.database import init_db, ensure_user_config_columns  # noqa: E402
+from server.core.logging_setup import configure_logging  # noqa: E402
+
+configure_logging()
+from server.core.database import init_db, ensure_user_config_columns, start_log_flusher, stop_log_flusher  # noqa: E402
+from server.core.exceptions import DomainException  # noqa: E402
 from server.core.state import app_state  # noqa: E402
 from server.core.websocket import manager  # noqa: E402
+from server.middleware.waf import WAFMiddleware  # noqa: E402
 from server.routers import (  # noqa: E402
     admin_router,
     auth_router,
@@ -38,6 +44,8 @@ from server.routers import (  # noqa: E402
 )
 from server.services.alert_service import alert_worker  # noqa: E402
 from server.services.site_monitor_service import _ssl_monitor_loop  # noqa: E402
+from sqlalchemy.orm import Session  # noqa: E402
+from typing import Any  # noqa: E402
 
 project_root = str(Path(__file__).resolve().parents[1])
 if project_root not in sys.path:
@@ -74,6 +82,24 @@ ensure_user_config_columns()
 app = FastAPI(title="AI-IDS Alert Backend", version="0.2.0")
 
 
+@app.exception_handler(DomainException)
+async def _domain_exception_handler(request: Request, exc: DomainException) -> JSONResponse:
+    """Convert business exceptions raised by services into HTTP responses.
+
+    Service layer code raises `DomainException` subclasses (AuthException,
+    NotFoundException, etc.) without importing fastapi. This handler is the
+    single point that turns them into HTTP responses with consistent shape.
+    """
+    headers = {}
+    if exc.status_code == 401:
+        headers["WWW-Authenticate"] = "Bearer"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail, **({"extra": exc.extra} if exc.extra else {})},
+        headers=headers,
+    )
+
+
 @app.middleware("http")
 async def add_security_headers(request, call_next):
     response = await call_next(request)
@@ -87,7 +113,96 @@ async def add_security_headers(request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     # Permissions policy
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # CSP for backend API responses (frontend at :3000 has its own via nginx).
+    # API responses are JSON, so a tight default-src 'none' is appropriate —
+    # any resource the client loads must come from the explicit connect-src
+    # allowlist.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    )
     return response
+
+
+# Optional authentication middleware: extracts the JWT from the request and
+# attaches the User object to `request.state.user` (or `None` if not
+# authenticated). This lets routes use `Depends(get_optional_user)` and
+# avoid the duplicate work of resolving the user twice (once in the
+# middleware, once in a Depends). The existing `Depends(require_auth_user)`
+# pattern continues to work; new routes should prefer this fast path.
+_PUBLIC_API_PATH_PREFIXES: tuple[str, ...] = (
+    "/auth/login",
+    "/auth/register",
+    "/auth/login/oauth",
+    "/auth/login/otp",
+    "/auth/password/reset",
+    "/auth/refresh",
+    "/alerts/receive",  # alerts ingest — gated by ALERTS_INGEST_TOKEN
+    "/llm/test",  # gated by LLM_ADMIN_TOKEN
+    "/health",
+    "/ready",
+    "/waf",
+    "/threat-intel",
+    "/openapi.json",
+    "/docs",
+    "/redoc",
+)
+
+
+@app.middleware("http")
+async def attach_user_to_request(request: Request, call_next):
+    """Resolve the current user (if any) once per request and stash it on
+    `request.state.user`. Routes that need the user can then use
+    `Depends(get_request_user)` and avoid re-parsing the JWT.
+    """
+    request.state.user = None
+    path = request.url.path
+    if not any(path.startswith(p) for p in _PUBLIC_API_PATH_PREFIXES):
+        try:
+            from server.core.database import SessionLocal
+            from server.core.security import (
+                _extract_bearer_token,
+                decode_access_token,
+            )
+            access_cookie = request.cookies.get("access_token")
+            bearer = _extract_bearer_token(request.headers.get("authorization"))
+            token = bearer or access_cookie
+            if token:
+                payload = decode_access_token(token)
+                user_id = int(payload.get("sub", "0"))
+                if user_id > 0:
+                    from server.core.refresh_tokens import is_session_active
+                    from server.models_db import User
+                    db = SessionLocal()
+                    try:
+                        user = (
+                            db.query(User)
+                            .filter(User.id == user_id, User.is_active.is_(True))
+                            .first()
+                        )
+                        if user is not None and user.token_version == payload.get("tv", 0):
+                            sid = payload.get("sid")
+                            if sid is None or is_session_active(db, sid):
+                                request.state.user = user
+                    finally:
+                        db.close()
+        except Exception:
+            # Any error resolving the user is treated as "not authenticated";
+            # the route's own dependency will raise 401 if it requires auth.
+            request.state.user = None
+    return await call_next(request)
+
+
+def get_request_user(request: Request):
+    """FastAPI dependency that returns the user attached by the middleware.
+
+    Raises 401 if the route requires authentication. Use this in new code;
+    `require_auth_user` continues to work for backward compatibility.
+    """
+    user = getattr(request.state, "user", None)
+    if user is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return user
 
 _cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
 _cors_origins = (
@@ -104,6 +219,7 @@ if os.getenv("APP_ENV", "development").strip().lower() in {"prod", "production"}
     logger.error("CORS allows localhost in production — set CORS_ORIGINS explicitly")
     sys.exit(1)
 
+app.add_middleware(WAFMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
@@ -148,6 +264,7 @@ app.include_router(compliance_router.router)
 async def startup_event() -> None:
     manager.start_heartbeat()
     app_state.rate_limit.start_cleanup()
+    start_log_flusher()
     for worker_id in range(4):
         app_state.worker_tasks.append(asyncio.create_task(alert_worker(worker_id)))
     app_state.ssl_monitor_task = asyncio.create_task(_ssl_monitor_loop())
@@ -159,8 +276,47 @@ async def shutdown_event() -> None:
         task.cancel()
     if app_state.ssl_monitor_task is not None:
         app_state.ssl_monitor_task.cancel()
+    stop_log_flusher()
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
+    """Liveness probe. Returns 200 as long as the process is responsive.
+
+    Suitable for `livenessProbe` in Kubernetes — failing this means the
+    process is stuck and should be restarted.
+    """
     return {"status": "ok"}
+
+
+@app.get("/ready")
+async def ready(db: Session = Depends(get_db)) -> dict[str, Any]:
+    """Readiness probe. Returns 200 only when the process can serve traffic.
+
+    Checks:
+    - Database connectivity (SELECT 1 against the configured engine)
+    - Alert worker pool is alive
+    - Log flusher is running
+
+    Suitable for `readinessProbe` in Kubernetes — failing this should take
+    the pod out of the load-balancer rotation, not kill it.
+    """
+    from sqlalchemy import text as sql_text
+
+    checks: dict[str, str] = {}
+    try:
+        db.execute(sql_text("SELECT 1"))
+        checks["database"] = "ok"
+    except Exception as exc:  # noqa: BLE001
+        checks["database"] = f"fail: {type(exc).__name__}"
+
+    checks["alert_workers"] = (
+        "ok" if app_state.worker_tasks and not all(t.done() for t in app_state.worker_tasks)
+        else "fail"
+    )
+
+    overall = "ok" if all(v == "ok" for v in checks.values()) else "fail"
+    payload: dict[str, Any] = {"status": overall, "checks": checks}
+    if overall != "ok":
+        return JSONResponse(status_code=503, content=payload)
+    return payload
