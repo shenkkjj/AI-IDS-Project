@@ -14,3 +14,7 @@ out/
 
 # misc
 *.log
+
+# Generated OpenAPI client types
+types/api.generated.ts
+types/api.generated.d.ts
