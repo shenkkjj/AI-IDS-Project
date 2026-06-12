@@ -96,6 +96,17 @@ class AuditLog(Base):
     __table_args__ = (
         Index("ix_audit_logs_user_action", "user_id", "action"),
         Index("ix_audit_logs_created_at", "created_at"),
+        # SC-22: supports `get_stats` and any SOC query that aggregates
+        # guardrail events by status within a time window. Leading column
+        # is the most selective (`action='guardrail_check'`) so the
+        # planner can use the index for both the WHERE filter and the
+        # GROUP BY status sort.
+        Index("ix_audit_logs_action_status_created", "action", "status", "created_at"),
+        # SC-22: supports the "which user tried this attack" join from
+        # the SOC dashboard — user_id, action, and time all in one
+        # covering index, so a `WHERE user_id=? AND action=?
+        # AND created_at >= ?` hits an index-only scan.
+        Index("ix_audit_logs_user_action_created", "user_id", "action", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)

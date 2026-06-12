@@ -1,0 +1,14 @@
+define bot refuse to respond
+  "抱歉,该请求触发了安全策略,无法处理。"
+
+define flow openai moderation check
+  $ok = execute openai_moderation_check
+  if not $ok
+    bot refuse to respond
+    stop
+
+define flow self check input
+  $ok = execute self_check_input
+  if not $ok
+    bot refuse to respond
+    stop

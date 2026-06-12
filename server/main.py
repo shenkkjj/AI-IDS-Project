@@ -42,6 +42,7 @@ from server.routers import (  # noqa: E402
     export_router,
     llm_router,
     logs_router,
+    metrics_router,
     notify_router,
     site_router,
     threat_intel_router,
@@ -264,13 +265,93 @@ app.include_router(notify_router.router)
 app.include_router(export_router.router)
 app.include_router(threat_intel_router.router)
 app.include_router(compliance_router.router)
+app.include_router(metrics_router.router)
+
+# --- LLM Guardrails MCP endpoint ---
+# Mount the FastMCP server (NeMoGuardrails) at /mcp so external agents
+# (Claude Code, Cursor, custom internal agents) can call
+# `guardrail.scan_text` / `guardrail.get_stats` over the Model Context
+# Protocol. Falls back to a no-op stub if the `mcp` SDK is not installed.
+#
+# AUTH (security review SC-1 / C-4): The /mcp endpoint is gated by an
+# API key passed in the `X-Guardrails-Key` header. The expected key
+# comes from `GUARDRAILS_MCP_API_KEY` env var; if unset, the endpoint
+# refuses all requests with 401 (fail-closed). Set the env var in any
+# environment that exposes /mcp.
+import os
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import JSONResponse as StarletteJSONResponse
+
+
+_MCP_API_KEY = os.getenv("GUARDRAILS_MCP_API_KEY", "").strip()
+if not _MCP_API_KEY:
+    logger.warning(
+        "GUARDRAILS_MCP_API_KEY not set — /mcp endpoint will reject all "
+        "requests with 401. Set the env var to enable MCP access."
+    )
+
+
+class _MCPAuthMiddleware(BaseHTTPMiddleware):
+    """Reject any /mcp request that doesn't carry the configured key.
+
+    Without this, an unauthenticated attacker can enumerate L1 regex via
+    the `scan_text` tool (Guardrail Oracle attack) and call `get_stats`
+    for traffic analysis. See security review SC-1.
+    """
+
+    async def dispatch(self, request: StarletteRequest, call_next):  # type: ignore[override]
+        if not request.url.path.startswith("/mcp"):
+            return await call_next(request)
+        if not _MCP_API_KEY:
+            return StarletteJSONResponse(
+                {"detail": "MCP endpoint disabled: GUARDRAILS_MCP_API_KEY not configured"},
+                status_code=401,
+            )
+        provided = request.headers.get("x-guardrails-key", "")
+        if not provided or provided != _MCP_API_KEY:
+            return StarletteJSONResponse(
+                {"detail": "Missing or invalid X-Guardrails-Key header"},
+                status_code=401,
+            )
+        return await call_next(request)
+
+
+app.add_middleware(_MCPAuthMiddleware)
+
+try:
+    from server.security.llm_guardrails.mcp_server import mcp as guardrails_mcp
+
+    app.mount("/mcp", guardrails_mcp.streamable_http_app())
+    logger.info("MCP guardrails endpoint mounted at /mcp (auth: X-Guardrails-Key)")
+except Exception as exc:  # noqa: BLE001
+    logger.warning("MCP guardrails endpoint not mounted: {}", exc)
 
 
 @app.on_event("startup")
 async def startup_event() -> None:
+    # Eagerly instantiate the LLM guardrail engine so the first
+    # request doesn't pay the (multi-second) NeMo / Colang load.
+    try:
+        from server.security.llm_guardrails.core import GuardrailEngine
+
+        GuardrailEngine.instance()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("guardrail engine eager init failed: {}", exc)
+
     manager.start_heartbeat()
     app_state.rate_limit.start_cleanup()
     start_log_flusher()
+
+    # P2-C: GDPR / PCI retention. Opt-in via env var; default 0 = disabled
+    # so dev environments don't accidentally nuke recent rows.
+    cleanup_days = int(os.getenv("GUARDRAIL_AUDIT_CLEANUP_DAYS", "0"))
+    if cleanup_days > 0:
+        try:
+            from server.security.llm_guardrails.audit import cleanup_old_audit_logs
+            cleanup_old_audit_logs(days=cleanup_days)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("audit cleanup skipped: {}", exc)
     for worker_id in range(4):
         app_state.worker_tasks.append(asyncio.create_task(alert_worker(worker_id)))
     app_state.ssl_monitor_task = asyncio.create_task(_ssl_monitor_loop())

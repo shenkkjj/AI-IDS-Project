@@ -12,6 +12,9 @@ from server.core.llm_utils import user_config_to_llm_runtime
 from server.core.state import app_state
 from server.models.schemas import CopilotMessageIn, CopilotStreamIn
 from server.models_db import User
+from server.security.llm_guardrails import guard_input, guard_output
+from server.security.llm_guardrails.audit import log_guardrail_event
+from server.security.llm_guardrails.exceptions import GuardrailViolation
 from server.services.llm_providers import (
     resolve_provider,
     sse_done,
@@ -93,6 +96,43 @@ async def copilot_stream(user: User, data: CopilotStreamIn, client_ip: str, db: 
         alert = await find_alert_by_id(str(data.alert_id).strip(), user_id=user.id)
 
     context_block = _build_context_from_alert(alert)
+
+    # LLM Guardrails: input rail. Runs BEFORE the LLM is invoked so a
+    # jailbreak / prompt-injection attempt is caught with zero cost.
+    try:
+        from server.security.llm_guardrails.core import GuardrailEngine
+
+        reason = await GuardrailEngine.instance().check_input(
+            scope="copilot",
+            message=str(data.message).strip(),
+            history=[{"role": m.role, "content": m.content} for m in (data.history or [])],
+        )
+        if reason:
+            # The full reason (including the matched L1 regex) goes ONLY
+            # to the audit log. The user-facing SSE error shows only the
+            # category, so an attacker probing the endpoint cannot learn
+            # the exact regex (security review SC-2).
+            category = reason.split(" ", 1)[0] if reason else "policy_violation"
+            log_guardrail_event(
+                scope="copilot", layer="input", status="blocked",
+                reason=reason[:200], user_id=user.id,
+            )
+            yield sse_error(
+                f"请求被安全护栏拦截(类别: {category})。"
+                f"如需协助请改写请求,或联系管理员。"
+            )
+            return
+        log_guardrail_event(
+            scope="copilot", layer="input", status="passed", reason="",
+            user_id=user.id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # Guardrail 异常绝不能阻断用户请求 —— 记录 warning 后继续
+        logger.warning("copilot guardrail input check failed err={}", exc)
+        log_guardrail_event(
+            scope="copilot", layer="input", status="warning",
+            reason=f"infrastructure_error:{type(exc).__name__}", user_id=user.id,
+        )
 
     create_log(
         db,

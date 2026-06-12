@@ -1,0 +1,8 @@
+# output.co: flow definitions for the L4 output rail.
+#
+# `self_check_output` is already declared in config.yml's
+# rails.output.flows, so no custom flow is needed here unless we want
+# to override the default `define bot refuse to respond` from input.co.
+#
+# Keep this file present so NeMo's `RailsConfig.from_path` finds it and
+# the L2/L3 layer is recognised as configured (security review SC-7).
