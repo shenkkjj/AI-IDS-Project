@@ -1,7 +1,9 @@
 # Local runtime artifacts
 .gstack/
 web-next/.gstack/
-.omc/state/
+.omc/
+server/.omc/
+web-next/.omc/
 .claude/worktrees/
 
 # Secrets and local env
