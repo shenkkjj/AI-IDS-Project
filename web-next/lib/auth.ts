@@ -51,21 +51,37 @@ async function backendPost<T>(path: string, payload: Record<string, unknown>): P
   return data;
 }
 
+const MIN_SECRET_LENGTH = 32;
+const DEV_BUILD_TIME_PHASE = "phase-production-build";
+
+function isBuildPhase(): boolean {
+  return process.env.NEXT_PHASE === DEV_BUILD_TIME_PHASE;
+}
+
 function getAuthSecret(): string {
   const secret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+
   if (secret) {
-    if (process.env.NODE_ENV === "production" && secret.length < 32) {
-      throw new Error("[auth] AUTH_SECRET length < 32 is unacceptable in production. Generate a strong random value (openssl rand -base64 48).");
+    if (secret.length < MIN_SECRET_LENGTH) {
+      throw new Error(
+        `[auth] AUTH_SECRET must be at least ${MIN_SECRET_LENGTH} characters long. ` +
+          "Generate a strong random value (e.g. openssl rand -base64 48).",
+      );
     }
     return secret;
   }
-  if (process.env.NODE_ENV === "development") {
-    return "dev-insecure-secret-do-not-use-in-production";
+
+  // Allow omission only during the static build phase so CI/SSG builds do not
+  // require a live secret. Any other runtime path must fail fast.
+  if (isBuildPhase()) {
+    return "build-time-placeholder-not-a-real-secret-" + "x".repeat(48);
   }
-  if (process.env.NEXT_PHASE === "phase-production-build") {
-    return "build-time-placeholder-not-a-real-secret";
-  }
-  throw new Error("[auth] AUTH_SECRET (or NEXTAUTH_SECRET) is required. Set it to a strong random value before starting.");
+
+  throw new Error(
+    "[auth] AUTH_SECRET (or NEXTAUTH_SECRET) is required. " +
+      "Set it to a strong random value (min 32 chars) before starting. " +
+      "Generate one with: openssl rand -base64 48",
+  );
 }
 
 export const {
@@ -99,24 +115,33 @@ export const {
   },
   providers: [
     Credentials({
-      name: "邮箱密码",
+      name: "邮箱密码 / OTP",
       credentials: {
         email: { label: "邮箱", type: "email" },
         password: { label: "密码", type: "password" },
+        otp: { label: "邮箱验证码", type: "text" },
       },
       authorize: async (credentials) => {
         const email = String(credentials?.email || "").trim();
         const password = String(credentials?.password || "");
-        if (!email || !password) {
-          return null;
-        }
+        const otp = String(credentials?.otp || "").trim();
+        if (!email) return null;
 
         let payload: BackendAuthPayload;
         try {
-          payload = await backendPost<BackendAuthPayload>("/auth/login/password", {
-            email,
-            password,
-          });
+          if (otp) {
+            payload = await backendPost<BackendAuthPayload>("/auth/login/otp/verify", {
+              email,
+              code: otp,
+            });
+          } else if (password) {
+            payload = await backendPost<BackendAuthPayload>("/auth/login/password", {
+              email,
+              password,
+            });
+          } else {
+            return null;
+          }
         } catch (error: unknown) {
           if (isBackendRequestError(error) && error.status === 401) {
             return null;
@@ -133,7 +158,7 @@ export const {
           id: String(payload.user.id),
           email: payload.user.email,
           name: payload.user.display_name || payload.user.email,
-          authProvider: payload.user.auth_provider || "password",
+          authProvider: payload.user.auth_provider || (otp ? "otp" : "password"),
           backendAccessToken: payload.access_token,
         };
 

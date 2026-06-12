@@ -1,6 +1,6 @@
 "use client";
 
-import { Send } from "lucide-react";
+import { Send, Sparkles } from "lucide-react";
 import type { CopilotMessage } from "@/types/copilot";
 
 type CopilotPanelProps = {
@@ -13,52 +13,74 @@ type CopilotPanelProps = {
 
 export default function CopilotPanel({ messages, draft, loading, onDraftChange, onSend }: CopilotPanelProps) {
   return (
-    <div className="h-full flex flex-col bg-surface rounded-apple-lg shadow-card overflow-hidden">
-      <div className="bg-background p-4 border-b border-border-subtle flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-text">AI 助手</h3>
-        <span className="w-2 h-2 bg-primary rounded-full" />
+    <div className="h-full flex flex-col border-l border-accent">
+      <div className="px-5 py-3 flex items-baseline justify-between border-b border-line">
+        <span className="font-display text-base text-ink flex items-center gap-2">
+          <Sparkles className="w-3.5 h-3.5 text-accent" />
+          AI 助手
+        </span>
+        <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent">
+          ON
+        </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {messages.map((message, index) => (
-          <div key={`${message.role}-${index}`} className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}>
-            <span className="text-[11px] text-text-tertiary font-medium mb-1">{message.role === "assistant" ? "系统" : "用户"}</span>
-            <div
-              className={`p-3 text-sm max-w-[90%] rounded-apple ${
-                message.role === "assistant"
-                  ? "bg-background text-text"
-                  : "bg-primary text-white"
-              }`}
-            >
-              {message.content}
-            </div>
+      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">
+        {messages.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-center text-ink-tertiary text-xs gap-2 py-8">
+            <Sparkles className="w-5 h-5 text-ink-tertiary" />
+            <div>开始与 AI 助手对话</div>
+            <div className="text-[10px] font-mono">上下文 · 流式响应 · 告警关联</div>
           </div>
-        ))}
+        ) : (
+          messages.map((message, index) => (
+            <div
+              key={`${message.role}-${index}`}
+              className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}
+            >
+              <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-ink-tertiary mb-1.5">
+                {message.role === "assistant" ? "AI" : "YOU"}
+              </span>
+              <div
+                className={`px-3 py-2 text-xs max-w-[90%] leading-relaxed rounded-md ${
+                  message.role === "assistant"
+                    ? "bg-bg-sunken text-ink"
+                    : "bg-accent text-white"
+                }`}
+              >
+                {message.content || (loading && message.role === "assistant" ? (
+                  <span className="inline-flex gap-1 font-mono">
+                    <span className="animate-pulse">·</span>
+                    <span className="animate-pulse" style={{ animationDelay: "150ms" }}>·</span>
+                    <span className="animate-pulse" style={{ animationDelay: "300ms" }}>·</span>
+                  </span>
+                ) : null)}
+              </div>
+            </div>
+          ))
+        )}
       </div>
 
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!draft.trim() || loading) {
-            return;
-          }
+          if (!draft.trim() || loading) return;
           onSend();
         }}
-        className="p-4 border-t border-border-subtle bg-surface"
+        className="px-3 py-3 border-t border-line"
       >
         <div className="flex items-center gap-2">
           <input
             value={draft}
             onChange={(event) => onDraftChange(event.target.value)}
             placeholder="输入问题..."
-            className="flex-1 bg-background border border-border-subtle rounded-apple text-text text-sm py-2.5 px-3 focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all"
+            className="flex-1 bg-transparent text-ink text-xs py-1.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent transition-colors placeholder:text-ink-tertiary"
           />
           <button
             type="submit"
             disabled={loading || !draft.trim()}
-            className="w-10 h-10 bg-primary text-white rounded-apple flex items-center justify-center hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="text-accent hover:text-accent-hover disabled:opacity-30 transition-colors p-1"
           >
-            <Send className="w-4 h-4" />
+            <Send className="w-3.5 h-3.5" />
           </button>
         </div>
       </form>

@@ -6,8 +6,15 @@ import { useDesktopNotify } from "@/hooks/useDesktopNotify";
 import type { AlertItem, BackendAlertItem } from "@/types/alert";
 import { mapBackendAlert } from "@/utils/alertUtils";
 
-const ALERTS_POLL_MS = 8000;
+// Polling cadence is now a single tunable. Keep this aligned with the
+// backend's /alerts handler capacity; the WebSocket connection is the
+// preferred real-time path, polling is the fallback.
+const ALERTS_POLL_MS = Number(process.env.NEXT_PUBLIC_ALERTS_POLL_MS) || 8_000;
 const PAGE_SIZE = 15;
+// Maximum in-memory alerts kept after a poll refresh. Older entries are
+// dropped on the next poll, but `id`-based dedup below keeps WebSocket
+// pushes from re-introducing already-evicted entries.
+const MAX_RETAINED_ALERTS = 300;
 
 export function useAlerts() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
@@ -15,19 +22,31 @@ export function useAlerts() {
   const [loadState, setLoadState] = useState<"loading" | "ready" | "empty" | "error">("loading");
   const [page, setPage] = useState(0);
 
-  const { wsAlerts, wsConnected } = useWebSocket(null);
+  const { wsAlerts, wsConnected } = useWebSocket();
   const { notifyAlert } = useDesktopNotify();
 
   const prevAlertCount = useRef(0);
+  const prevAlertIds = useRef<Set<string>>(new Set());
+  const [newAlertIds, setNewAlertIds] = useState<Set<string>>(new Set());
   const pollTimer = useRef<number | null>(null);
+  const newIdTimers = useRef<Map<string, number>>(new Map());
+  // Stable id-keyed lookup so dedup is O(1) regardless of buffer size.
+  // Both polling and WebSocket pushes are merged through this map.
+  const alertById = useRef<Map<string, AlertItem>>(new Map());
 
+  // Stable merge: WebSocket pushes go into the same `alerts` array via the
+  // id-keyed map, so we never have the previous "polled set was replaced
+  // but ws buffer still had the same ids" race.
   const mergedAlerts = useMemo(() => {
-    const wsMapped = (wsAlerts || []).map(mapBackendAlert);
-    const existingIds = new Set(alerts.map((a) => a.id));
-    const newWsAlerts = wsMapped.filter((a) => !existingIds.has(a.id));
-    const combined = [...alerts, ...newWsAlerts];
-    return combined.slice(-300);
-  }, [alerts, wsAlerts]);
+    // First, ingest any WebSocket items we have not yet seen.
+    wsAlerts?.forEach((raw, index) => {
+      const mapped = mapBackendAlert(raw, index);
+      if (mapped.id && !alertById.current.has(mapped.id)) {
+        alertById.current.set(mapped.id, mapped);
+      }
+    });
+    return Array.from(alertById.current.values()).slice(-MAX_RETAINED_ALERTS);
+  }, [wsAlerts]);
 
   const paginatedAlerts = useMemo(() => {
     const start = page * PAGE_SIZE;
@@ -40,14 +59,50 @@ export function useAlerts() {
     const currentCount = mergedAlerts.length;
     if (prevAlertCount.current > 0 && currentCount > prevAlertCount.current) {
       const newAlerts = mergedAlerts.slice(prevAlertCount.current);
+      const trulyNew: string[] = [];
       for (const alert of newAlerts) {
+        if (!prevAlertIds.current.has(alert.id)) {
+          trulyNew.push(alert.id);
+        }
         if (alert.risk === "critical" || alert.risk === "high") {
           notifyAlert({ alertId: alert.id, risk: alert.risk, summary: alert.summary, source: alert.source });
         }
       }
+
+      if (trulyNew.length > 0) {
+        setNewAlertIds((prev) => {
+          const next = new Set(prev);
+          for (const id of trulyNew) next.add(id);
+          return next;
+        });
+        for (const id of trulyNew) {
+          const existing = newIdTimers.current.get(id);
+          if (existing) window.clearTimeout(existing);
+          const timer = window.setTimeout(() => {
+            setNewAlertIds((prev) => {
+              if (!prev.has(id)) return prev;
+              const next = new Set(prev);
+              next.delete(id);
+              return next;
+            });
+            newIdTimers.current.delete(id);
+          }, 1500);
+          newIdTimers.current.set(id, timer);
+        }
+      }
     }
     prevAlertCount.current = currentCount;
-  }, [mergedAlerts.length, mergedAlerts, notifyAlert]);
+    prevAlertIds.current = new Set(mergedAlerts.map((a) => a.id));
+  }, [mergedAlerts, notifyAlert]);
+
+  useEffect(() => {
+    return () => {
+      for (const timer of newIdTimers.current.values()) {
+        window.clearTimeout(timer);
+      }
+      newIdTimers.current.clear();
+    };
+  }, []);
 
   const loadAlerts = useCallback(async (options?: { signal?: AbortSignal; showLoading?: boolean }) => {
     const showLoading = Boolean(options?.showLoading);
@@ -79,6 +134,9 @@ export function useAlerts() {
     }
 
     const mapped = items.map(mapBackendAlert).reverse();
+    // Replace the id-keyed map with the latest poll snapshot. WebSocket
+    // pushes that arrive later are merged in via `mergedAlerts` memo above.
+    alertById.current = new Map(mapped.map((a) => [a.id, a] as const));
     setAlerts(mapped);
     setLoadState("ready");
 
@@ -133,5 +191,6 @@ export function useAlerts() {
     totalPages,
     wsConnected,
     handleSelectLog,
+    newAlertIds,
   };
 }

@@ -17,11 +17,12 @@ type AlertItem = {
   risk: string;
 };
 
+// Mercury 暖色 + Linear 紫的克制 palette
 const COLORS: Record<string, string> = {
-  critical: "rgba(255,50,50,0.85)",
-  high: "rgba(255,180,0,0.85)",
-  medium: "rgba(0,200,255,0.75)",
-  low: "rgba(100,200,100,0.65)",
+  critical: "#B91C1C",
+  high: "#B45309",
+  medium: "#1D4ED8",
+  low: "#15803D",
 };
 
 const RISK_LABELS: Record<string, string> = {
@@ -42,7 +43,7 @@ export default function SourcePieChart({ alerts }: { alerts: AlertItem[] }) {
       .map(([risk, count]) => ({
         name: RISK_LABELS[risk] || risk,
         value: count,
-        color: COLORS[risk] || "#666",
+        color: COLORS[risk] || "#8A8A86",
       }))
       .sort((a, b) => b.value - a.value);
   }, [alerts]);
@@ -67,26 +68,30 @@ export default function SourcePieChart({ alerts }: { alerts: AlertItem[] }) {
 
   if (alerts.length === 0) {
     return (
-      <div className="h-full min-h-[180px] flex items-center justify-center text-cyber-text/50 text-xs">
+      <div className="h-full min-h-[180px] flex items-center justify-center text-ink-tertiary text-xs font-mono">
         暂无分布数据
       </div>
     );
   }
 
   return (
-    <div className="flex flex-col gap-2 h-full">
+    <div className="flex flex-col gap-3 h-full">
       <div className="flex-1 min-h-0">
-        <div className="text-[10px] uppercase tracking-wider text-cyber-text/50 mb-1">风险级别分布</div>
+        <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-ink-tertiary mb-1">
+          风险级别
+        </div>
         <ResponsiveContainer width="100%" height="85%">
           <PieChart>
             <Pie
               data={riskData}
               cx="50%"
               cy="50%"
-              innerRadius={28}
-              outerRadius={50}
-              paddingAngle={3}
+              innerRadius={36}
+              outerRadius={60}
+              paddingAngle={2}
               dataKey="value"
+              stroke="#FBFAF7"
+              strokeWidth={2}
             >
               {riskData.map((entry, index) => (
                 <Cell key={index} fill={entry.color} />
@@ -94,52 +99,62 @@ export default function SourcePieChart({ alerts }: { alerts: AlertItem[] }) {
             </Pie>
             <Tooltip
               contentStyle={{
-                background: "rgba(0,0,0,0.85)",
-                border: "1px solid rgba(0,245,255,0.3)",
-                fontSize: 12,
-                color: "#c8dcf0",
+                background: "#FFFFFF",
+                border: "1px solid #E5E1D5",
+                borderRadius: "6px",
+                fontSize: 11,
+                color: "#0A0A0A",
+                fontFamily: "JetBrains Mono",
+                boxShadow: "0 4px 12px rgba(10, 10, 10, 0.08)",
               }}
             />
             <Legend
-              wrapperStyle={{ fontSize: 10, color: "rgba(200,220,240,0.6)" }}
+              wrapperStyle={{ fontSize: 10, color: "#4A4A48", fontFamily: "JetBrains Mono" }}
               iconSize={6}
-              formatter={(value: string) => <span style={{ color: "rgba(200,220,240,0.7)" }}>{value}</span>}
+              formatter={(value: string) => <span style={{ color: "#4A4A48" }}>{value}</span>}
             />
           </PieChart>
         </ResponsiveContainer>
       </div>
       <div className="flex-1 min-h-0">
-        <div className="text-[10px] uppercase tracking-wider text-cyber-text/50 mb-1">Top 攻击来源</div>
+        <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-ink-tertiary mb-1">
+          Top 攻击来源
+        </div>
         <ResponsiveContainer width="100%" height="85%">
           <PieChart>
             <Pie
               data={sourceData}
               cx="50%"
               cy="50%"
-              outerRadius={50}
-              paddingAngle={2}
+              outerRadius={60}
+              paddingAngle={1}
               dataKey="value"
+              stroke="#FBFAF7"
+              strokeWidth={1}
               label={({ name, percent }) => {
                 const n = String(name || "");
                 const p = Number(percent || 0);
                 const shortName = n.length > 10 ? n.slice(0, 10) + "…" : n;
                 return `${shortName} ${(p * 100).toFixed(0)}%`;
               }}
-              labelLine={{ stroke: "rgba(0,245,255,0.25)", strokeWidth: 0.5 }}
+              labelLine={{ stroke: "#D6D1C2", strokeWidth: 0.5 }}
             >
               {sourceData.map((_, index) => (
                 <Cell
                   key={index}
-                  fill={`hsla(${(index * 57) % 360}, 60%, 55%, 0.75)`}
+                  fill={`hsla(${(index * 47 + 25) % 360}, 30%, 50%, 0.85)`}
                 />
               ))}
             </Pie>
             <Tooltip
               contentStyle={{
-                background: "rgba(0,0,0,0.85)",
-                border: "1px solid rgba(0,245,255,0.3)",
-                fontSize: 12,
-                color: "#c8dcf0",
+                background: "#FFFFFF",
+                border: "1px solid #E5E1D5",
+                borderRadius: "6px",
+                fontSize: 11,
+                color: "#0A0A0A",
+                fontFamily: "JetBrains Mono",
+                boxShadow: "0 4px 12px rgba(10, 10, 10, 0.08)",
               }}
             />
           </PieChart>

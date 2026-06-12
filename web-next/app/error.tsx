@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { RefreshCw } from "lucide-react";
 
 export default function ErrorPage({
   error,
@@ -14,30 +15,24 @@ export default function ErrorPage({
   }, [error]);
 
   return (
-    <html lang="zh-CN" className="dark">
-      <body className="min-h-screen bg-[#050a14] text-[#00f0ff] flex items-center justify-center font-mono">
-        <div className="text-center max-w-md px-6">
-          <div className="text-lg mb-4">CONNECTION INTERRUPTED</div>
-          <div className="text-sm text-[#00f0ff]/60 mb-2">
-            {error.digest ? `Ref: ${error.digest}` : "RSC 连接中断"}
-          </div>
-          <div className="text-xs text-[#00f0ff]/40 mb-6">
-            点击重试，或刷新浏览器
-          </div>
-          <button
-            onClick={reset}
-            className="px-6 py-2 border border-[#00f0ff]/40 text-[#00f0ff] hover:bg-[#00f0ff]/10 transition-colors mr-3"
-          >
-            RETRY
-          </button>
-          <button
-            onClick={() => window.location.reload()}
-            className="px-6 py-2 border border-[#00f0ff]/40 text-[#00f0ff] hover:bg-[#00f0ff]/10 transition-colors"
-          >
-            RELOAD
-          </button>
+    <div className="min-h-screen bg-bg text-ink flex items-center justify-center px-6">
+      <div className="max-w-md w-full">
+        <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-danger mb-4">
+          · 错误
         </div>
-      </body>
-    </html>
+        <h1 className="font-display text-5xl text-ink leading-tight tracking-tight mb-3">
+          连接中断
+        </h1>
+        <p className="text-sm text-ink-secondary mb-1">
+          {error.digest ? `Ref: ${error.digest}` : "RSC 连接中断"}
+        </p>
+        <p className="text-[10px] font-mono text-ink-tertiary mb-8">
+          点击重试，或刷新浏览器
+        </p>
+        <button onClick={reset} className="btn-primary">
+          <RefreshCw className="w-3.5 h-3.5" /> 重试
+        </button>
+      </div>
+    </div>
   );
 }

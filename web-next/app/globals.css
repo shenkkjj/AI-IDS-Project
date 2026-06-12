@@ -10,20 +10,33 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background-color: #F5F5F7;
-  color: #1D1D1F;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background-color: #FBFAF7;
+  color: #0A0A0A;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Helvetica Neue", "PingFang SC", "Microsoft YaHei", sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "cv11", "ss01";
+}
+
+/* Instrument Serif 大数字极轻字重感 — 用 letter-spacing 调呼吸 */
+.font-display {
+  letter-spacing: -0.02em;
+  font-feature-settings: "liga", "dlig", "kern";
+}
+
+* {
+  box-sizing: border-box;
 }
 
 ::selection {
-  background: rgba(0, 113, 227, 0.15);
+  background: rgba(94, 106, 210, 0.18);
+  color: #0A0A0A;
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -31,14 +44,94 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #D2D2D7;
-  border-radius: 9999px;
+  background: #E5E1D5;
+  border-radius: 0;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #86868B;
+  background: #D6D1C2;
 }
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Mercury 风格组件工具类 */
+@layer components {
+  /* 输入框：极简下划线（亮色背景上更克制） */
+  .field {
+    @apply w-full bg-transparent text-ink text-base py-2.5 px-0 border-0 border-b border-line
+      placeholder:text-ink-tertiary focus:outline-none focus:border-accent
+      transition-colors duration-150;
+  }
+
+  /* 主按钮：实色紫底白字 */
+  .btn-primary {
+    @apply h-10 px-5 bg-accent text-white font-medium text-sm rounded-md
+      transition-colors duration-150 hover:bg-accent-hover
+      disabled:opacity-40 disabled:cursor-not-allowed
+      inline-flex items-center justify-center gap-2;
+  }
+
+  /* 次按钮：透明 + 描边 */
+  .btn-ghost {
+    @apply h-10 px-4 text-ink-secondary hover:text-ink text-sm
+      transition-colors duration-150
+      inline-flex items-center justify-center gap-2;
+  }
+
+  .btn-outline {
+    @apply h-10 px-4 border border-line text-ink text-sm rounded-md bg-bg-raised
+      hover:border-ink-secondary hover:text-ink-secondary
+      transition-colors duration-150
+      inline-flex items-center justify-center gap-2;
+  }
+
+  /* 1px 浅灰分隔 */
+  .hr {
+    @apply border-0 border-t border-line;
+  }
+
+  /* 左侧细紫条 — 用于强调某个区块 */
+  .accent-rail {
+    @apply border-l border-accent;
+  }
+
+  /* 新告警行高亮淡出 */
+  .row-new {
+    animation: row-new-flash 1.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+@keyframes row-new-flash {
+  0% {
+    background-color: rgba(94, 106, 210, 0.18);
+  }
+  60% {
+    background-color: rgba(94, 106, 210, 0.06);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes ws-pulse-reduced {
+  0%,
+  100% { opacity: 0.5; transform: scale(0.6); }
+  50%  { opacity: 0.15; transform: scale(1.8); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  /* 给 WS 脉冲保留极慢呼吸，让 reduced-motion 用户也能感知活跃状态 */
+  .animate-pulse-soft {
+    animation-name: ws-pulse-reduced !important;
+    animation-duration: 6s !important;
+  }
 }

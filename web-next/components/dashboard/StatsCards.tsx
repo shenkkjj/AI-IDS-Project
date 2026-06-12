@@ -1,8 +1,6 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
-import { motion } from "framer-motion";
-import { AlertTriangle, ShieldCheck, Shield, Activity } from "lucide-react";
 
 type StatsCardsProps = {
   stats: {
@@ -40,83 +38,78 @@ function useCountUp(target: number, duration = 1200) {
   return count;
 }
 
-const cardVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: (i: number) => ({
-    opacity: 1,
-    y: 0,
-    transition: {
-      delay: i * 0.1,
-      duration: 0.5,
-      ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number],
-    },
-  }),
-};
+interface CardConfig {
+  label: string;
+  value: string;
+  tone: "default" | "warning" | "danger" | "success";
+  index: string;
+}
 
 export default function StatsCards({ stats }: StatsCardsProps) {
   const alertsCount = useCountUp(stats.alertsTotal);
   const highRiskCount = useCountUp(stats.highRiskTotal);
   const blockedCount = useCountUp(stats.blockedTotal);
 
-  const cards = [
+  const cards: CardConfig[] = [
     {
-      label: "告警总数",
+      label: "总告警",
       value: String(alertsCount),
-      color: "text-warning",
-      bg: "bg-warning-subtle",
-      icon: AlertTriangle,
+      tone: "warning",
+      index: "01",
     },
     {
       label: "高危告警",
       value: String(highRiskCount),
-      color: "text-danger",
-      bg: "bg-danger-subtle",
-      icon: ShieldCheck,
+      tone: "danger",
+      index: "02",
     },
     {
-      label: "自动拦截",
+      label: "已拦截",
       value: String(blockedCount),
-      color: "text-success",
-      bg: "bg-success-subtle",
-      icon: Shield,
+      tone: "success",
+      index: "03",
     },
     {
       label: "站点状态",
       value: stats.siteHealthText,
-      color: "text-primary",
-      bg: "bg-primary-subtle",
-      icon: Activity,
+      tone: "default",
+      index: "04",
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      {cards.map((card, index) => {
-        const Icon = card.icon;
-        return (
-          <motion.div
-            key={card.label}
-            custom={index}
-            variants={cardVariants}
-            initial="hidden"
-            animate="visible"
-            whileHover={{ y: -4, transition: { duration: 0.2 } }}
-            className="bg-surface rounded-apple-lg shadow-card p-5 flex flex-col justify-center items-start hover:shadow-card-hover transition-shadow duration-300 cursor-default"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <div className={`w-8 h-8 ${card.bg} rounded-apple flex items-center justify-center`}>
-                <Icon className={`w-4 h-4 ${card.color}`} />
-              </div>
-              <span className="text-xs font-medium text-text-secondary uppercase tracking-wider">
-                {card.label}
-              </span>
-            </div>
-            <span className={`text-2xl md:text-3xl font-bold tracking-tight ${card.color}`}>
-              {card.value}
+    <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-line border border-line">
+      {cards.map((card, index) => (
+        <div
+          key={card.label}
+          className="bg-bg-raised p-6 sm:p-8"
+          style={{
+            animation: `fade-soft 320ms ${index * 60}ms cubic-bezier(0.16, 1, 0.3, 1) both`,
+          }}
+        >
+          <div className="flex items-baseline justify-between mb-6">
+            <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-ink-tertiary">
+              {card.index}
             </span>
-          </motion.div>
-        );
-      })}
+            <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-ink-tertiary">
+              {card.label}
+            </span>
+          </div>
+          <div
+            className={`font-display text-3xl sm:text-4xl md:text-5xl tracking-tight tabular-nums leading-none ${
+              card.tone === "danger"
+                ? "text-danger"
+                : card.tone === "warning"
+                  ? "text-warning"
+                  : card.tone === "success"
+                    ? "text-success"
+                    : "text-ink"
+            }`}
+          >
+            {card.value}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

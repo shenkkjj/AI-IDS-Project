@@ -1,12 +1,12 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { getSession, signIn, signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Eye, EyeOff, Shield, Mail, Lock, ArrowRight, UserPlus, KeyRound, ChevronLeft } from "lucide-react";
+import { LogOut, ArrowRight, AlertCircle, CheckCircle2 } from "lucide-react";
 
-type AuthMode = "login" | "register" | "forgot" | "reset";
+type AuthMode = "login" | "register" | "forgot" | "reset" | "otp-login";
 type LoginState = "idle" | "loading" | "success" | "error";
 
 function getLoginErrorMessage(errorCode: string): string {
@@ -34,83 +34,12 @@ async function waitForSessionReady(maxAttempts = 8, intervalMs = 250): Promise<b
   return false;
 }
 
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: {
-    opacity: 1,
-    transition: { staggerChildren: 0.08, delayChildren: 0.1 },
-  },
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.5, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] },
-  },
-};
-
-const leftPanelVariants = {
-  hidden: { opacity: 0, x: -40 },
-  visible: {
-    opacity: 1,
-    x: 0,
-    transition: { duration: 0.7, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] },
-  },
-};
-
-const rightPanelVariants = {
-  hidden: { opacity: 0, x: 40 },
-  visible: {
-    opacity: 1,
-    x: 0,
-    transition: { duration: 0.7, delay: 0.15, ease: [0.25, 0.46, 0.45, 0.94] as [number, number, number, number] },
-  },
-};
-
-const circleVariants = {
-  hidden: { scale: 0, opacity: 0 },
-  visible: (i: number) => ({
-    scale: 1,
-    opacity: 1,
-    transition: { duration: 1.2, delay: 0.3 + i * 0.2, ease: "easeOut" as const },
-  }),
-};
-
-const formVariants = {
-  hidden: { opacity: 0, y: 15 },
-  visible: {
-    opacity: 1,
-    y: 0,
-    transition: { duration: 0.4, ease: "easeOut" as const },
-  },
-  exit: {
-    opacity: 0,
-    y: -10,
-    transition: { duration: 0.2 },
-  },
-};
-
-function InputField({
-  type,
-  value,
-  onChange,
-  placeholder,
-  icon: Icon,
-  showToggle,
-  showValue,
-  onToggle,
-  maxLength,
-  inputMode,
-  autoComplete,
-  disabled,
-}: {
+interface InputFieldProps {
   type: string;
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
-  icon: React.ElementType;
+  label: string;
   showToggle?: boolean;
   showValue?: boolean;
   onToggle?: () => void;
@@ -118,40 +47,60 @@ function InputField({
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   autoComplete?: string;
   disabled?: boolean;
-}) {
+}
+
+function InputField({
+  type,
+  value,
+  onChange,
+  placeholder,
+  label,
+  showToggle,
+  showValue,
+  onToggle,
+  maxLength,
+  inputMode,
+  autoComplete,
+  disabled,
+}: InputFieldProps) {
   const [focused, setFocused] = useState(false);
+  const inputType = showToggle ? (showValue ? "text" : "password") : type;
+  const isFilled = value.length > 0;
 
   return (
-    <motion.div
-      variants={itemVariants}
-      className="relative"
-    >
-      <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors duration-300 ${focused ? "text-primary" : "text-text-tertiary"}`}>
-        <Icon className="w-5 h-5" />
+    <div>
+      <label
+        className={`block text-[11px] font-mono uppercase tracking-[0.15em] mb-1.5 transition-colors ${
+          focused ? "text-accent" : isFilled ? "text-ink-secondary" : "text-ink-tertiary"
+        }`}
+      >
+        {label}
+      </label>
+      <div className="relative">
+        <input
+          type={inputType}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          className="w-full bg-transparent text-ink text-base py-2.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent transition-colors duration-150 placeholder:text-ink-tertiary disabled:opacity-50 disabled:cursor-not-allowed"
+          placeholder={placeholder}
+          maxLength={maxLength}
+          inputMode={inputMode}
+          autoComplete={autoComplete}
+        />
+        {showToggle && onToggle && (
+          <button
+            type="button"
+            onClick={onToggle}
+            className="absolute right-0 top-1/2 -translate-y-1/2 text-ink-tertiary hover:text-ink-secondary text-xs font-mono uppercase tracking-wider transition-colors"
+          >
+            {showValue ? "隐藏" : "显示"}
+          </button>
+        )}
       </div>
-      <input
-        type={showToggle ? (showValue ? "text" : "password") : type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
-        className="w-full h-12 pl-12 pr-10 bg-surface border border-border-subtle rounded-apple text-text text-base placeholder:text-text-tertiary focus:outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 transition-all duration-300"
-        placeholder={placeholder}
-        maxLength={maxLength}
-        inputMode={inputMode}
-        autoComplete={autoComplete}
-      />
-      {showToggle && onToggle && (
-        <button
-          type="button"
-          onClick={onToggle}
-          className="absolute right-4 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text transition-colors duration-200"
-        >
-          {showValue ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-        </button>
-      )}
-    </motion.div>
+    </div>
   );
 }
 
@@ -164,6 +113,9 @@ export default function HomePage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [otpCode, setOtpCode] = useState("");
+  const [otpRequestSent, setOtpRequestSent] = useState(false);
+  const [otpEmailLocked, setOtpEmailLocked] = useState("");
+  const [otpSending, setOtpSending] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -220,7 +172,7 @@ export default function HomePage() {
         setLoading(false);
       }
     },
-    [email, password, router]
+    [email, password, router],
   );
 
   const handleRegister = useCallback(
@@ -269,7 +221,7 @@ export default function HomePage() {
         setLoading(false);
       }
     },
-    [email, password, confirmPassword, displayName, router]
+    [email, password, confirmPassword, displayName, router],
   );
 
   const handleForgotPassword = useCallback(
@@ -304,7 +256,7 @@ export default function HomePage() {
         setLoading(false);
       }
     },
-    [email]
+    [email],
   );
 
   const handleResetPassword = useCallback(
@@ -357,7 +309,7 @@ export default function HomePage() {
         setLoading(false);
       }
     },
-    [email, lockedResetEmail, otpCode, password, confirmPassword, router]
+    [email, lockedResetEmail, otpCode, password, confirmPassword, router],
   );
 
   const handleLogout = useCallback(async () => {
@@ -367,229 +319,263 @@ export default function HomePage() {
     router.refresh();
   }, [router]);
 
+  const handleOtpRequest = useCallback(
+    async (event?: React.FormEvent) => {
+      if (event) event.preventDefault();
+      const target = (otpRequestSent ? otpEmailLocked : email).trim().toLowerCase();
+      if (!target) {
+        setMessage("请输入邮箱");
+        return;
+      }
+      setOtpSending(true);
+      setLoading(true);
+      setMessage("");
+      try {
+        const res = await fetch("/api/backend/auth/login/otp/request", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: target }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { detail?: string; message?: string };
+        if (!res.ok) {
+          setMessage(`发送失败: ${sanitizeBackendError(data.detail || "")}`);
+          return;
+        }
+        setOtpRequestSent(true);
+        setOtpEmailLocked(target);
+        setMessage(data.message || "验证码已发送至邮箱");
+      } catch {
+        setMessage("网络错误，验证码发送失败");
+      } finally {
+        setOtpSending(false);
+        setLoading(false);
+      }
+    },
+    [email, otpEmailLocked, otpRequestSent],
+  );
+
+  const handleOtpLogin = useCallback(
+    async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (!/^\d{4,6}$/.test(otpCode)) {
+        setMessage("验证码必须为4-6位数字");
+        return;
+      }
+      setLoading(true);
+      setLoginState("loading");
+      setMessage("");
+      try {
+        const result = await signIn("credentials", {
+          email: otpEmailLocked,
+          otp: otpCode,
+          redirect: false,
+        });
+        if (result?.error) {
+          setLoginState("error");
+          setMessage(sanitizeBackendError(getLoginErrorMessage(result.error)));
+          return;
+        }
+        if (!result?.ok) {
+          setLoginState("error");
+          setMessage("认证流程未完成");
+          return;
+        }
+        const ready = await waitForSessionReady();
+        if (!ready) {
+          setLoginState("error");
+          setMessage("会话未建立，请刷新页面重试");
+          return;
+        }
+        setLoginState("success");
+        setMessage("登录成功，正在进入系统...");
+        setTimeout(() => {
+          router.push("/dashboard");
+          router.refresh();
+        }, 600);
+      } catch {
+        setLoginState("error");
+        setMessage("请稍后重试");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [otpCode, otpEmailLocked, router],
+  );
+
   const switchMode = (newMode: AuthMode) => {
     setMode(newMode);
     setMessage("");
     setLoginState("idle");
+    setOtpRequestSent(false);
+    setOtpEmailLocked("");
+    setOtpCode("");
   };
 
   const getTitle = () => {
     switch (mode) {
       case "login": return "登录";
-      case "register": return "注册账号";
+      case "register": return "注册";
       case "forgot": return "找回密码";
       case "reset": return "重置密码";
+      case "otp-login": return otpRequestSent ? "输入验证码" : "邮箱验证码登录";
     }
   };
 
-  const getSubtitle = () => {
+  const getEyebrow = () => {
     switch (mode) {
-      case "login": return "欢迎回到 AI-CyberSentinel";
-      case "register": return "创建您的新账号";
-      case "forgot": return "我们将向您的邮箱发送验证码";
-      case "reset": return "请输入验证码和新密码";
+      case "login": return "01 / SIGN IN";
+      case "register": return "02 / CREATE ACCOUNT";
+      case "forgot": return "03 / RESET PASSWORD";
+      case "reset": return "04 / NEW PASSWORD";
+      case "otp-login": return "05 / ONE-TIME CODE";
     }
   };
 
+  const getDescription = () => {
+    switch (mode) {
+      case "login": return "使用邮箱与密码进入 AI-CyberSentinel 防御中心。";
+      case "register": return "创建新账号以访问 SOC 仪表板。";
+      case "forgot": return "我们会将验证码发送至你的邮箱。";
+      case "reset": return "输入邮箱中的验证码，并设置新密码。";
+      case "otp-login": return otpRequestSent
+        ? `验证码已发送至 ${otpEmailLocked || email}`
+        : "无需密码，使用邮箱验证码直接登录。";
+    }
+  };
+
+  /* ---------- 已登录视图 ---------- */
   if (isAuthenticated) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-background">
+      <div className="min-h-screen w-full flex items-center justify-center bg-bg">
         <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.5 }}
-          className="bg-surface rounded-apple-lg shadow-card p-8 max-w-sm w-full mx-4 text-center"
+          initial={false}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.24 }}
+          className="w-full max-w-md px-6"
         >
-          <div className="w-16 h-16 bg-primary-subtle rounded-full flex items-center justify-center mx-auto mb-4">
-            <Shield className="w-8 h-8 text-primary" />
+          <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-accent mb-6">
+            · 已登录
           </div>
-          <h2 className="text-xl font-semibold text-text mb-1">已登录</h2>
-          <p className="text-text-secondary text-sm mb-6">{session?.user?.email || "unknown"}</p>
+          <h1 className="font-display text-5xl text-ink mb-2 leading-[1.05] tracking-tight">
+            欢迎回来
+          </h1>
+          <p className="text-ink-secondary text-sm mb-10">
+            {session?.user?.email || "unknown"}
+          </p>
           <div className="space-y-3">
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              type="button"
-              onClick={() => router.push("/dashboard")}
-              className="w-full h-12 bg-primary hover:bg-primary-hover text-white font-medium rounded-apple transition-colors"
-            >
-              进入控制台
-            </motion.button>
-            <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.98 }}
-              type="button"
-              onClick={handleLogout}
-              className="w-full h-12 bg-transparent hover:bg-background text-danger font-medium rounded-apple transition-colors"
-            >
-              退出登录
-            </motion.button>
+            <button onClick={() => router.push("/dashboard")} className="btn-primary w-full">
+              进入控制台 <ArrowRight className="w-4 h-4" />
+            </button>
+            <button onClick={handleLogout} className="btn-ghost w-full">
+              <LogOut className="w-4 h-4" /> 退出登录
+            </button>
           </div>
         </motion.div>
       </div>
     );
   }
 
+  /* ---------- 主视图 ---------- */
   return (
-    <div className="min-h-screen w-full flex bg-background">
-      {/* Left Panel - Branding */}
-      <motion.div
-        variants={leftPanelVariants}
-        initial="hidden"
-        animate="visible"
-        className="hidden lg:flex lg:w-1/2 bg-primary relative flex-col justify-between p-12 text-white overflow-hidden"
-      >
-        <motion.div
-          variants={containerVariants}
-          initial="hidden"
-          animate="visible"
-          className="relative z-10"
-        >
-          <motion.div variants={itemVariants} className="flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 bg-white/20 rounded-apple flex items-center justify-center backdrop-blur-sm">
-              <Shield className="w-5 h-5 text-white" />
-            </div>
-            <span className="text-xl font-semibold tracking-tight">AI-CyberSentinel</span>
-          </motion.div>
-          <motion.h1 variants={itemVariants} className="text-4xl font-bold leading-tight mb-4">
-            智能入侵检测
-            <br />
-            守护数字安全
-          </motion.h1>
-          <motion.p variants={itemVariants} className="text-white/70 text-lg max-w-md leading-relaxed">
-            基于人工智能的实时威胁检测与防御系统，为您的网络资产提供全天候保护。
-          </motion.p>
-        </motion.div>
+    <div className="min-h-screen w-full bg-bg">
+      {/* 顶部 logo */}
+      <header className="px-6 sm:px-10 py-6 flex items-center justify-between border-b border-line">
+        <div className="flex items-baseline gap-3">
+          <span className="font-display text-xl text-ink tracking-tight">AI-CyberSentinel</span>
+          <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-ink-tertiary hidden sm:inline">
+            SOC · v2
+          </span>
+        </div>
+        <div className="text-[10px] font-mono uppercase tracking-[0.2em] text-ink-tertiary">
+          {new Date().toLocaleDateString("zh-CN", { year: "numeric", month: "short", day: "2-digit" })}
+        </div>
+      </header>
 
-        <motion.div
-          variants={containerVariants}
-          initial="hidden"
-          animate="visible"
-          className="relative z-10"
-        >
-          <motion.div variants={itemVariants} className="flex items-center gap-4 mb-4">
-            <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center">
-              <span className="text-2xl font-bold">99.9%</span>
-            </div>
-            <div>
-              <div className="font-semibold">威胁检测率</div>
-              <div className="text-white/60 text-sm">基于深度学习的实时分析</div>
-            </div>
-          </motion.div>
-          <motion.div variants={itemVariants} className="flex items-center gap-4">
-            <div className="w-12 h-12 bg-white/10 rounded-full flex items-center justify-center">
-              <span className="text-2xl font-bold">&lt;1s</span>
-            </div>
-            <div>
-              <div className="font-semibold">响应时间</div>
-              <div className="text-white/60 text-sm">毫秒级威胁拦截</div>
-            </div>
-          </motion.div>
-        </motion.div>
-
-        {/* Decorative circles */}
-        <motion.div
-          custom={0}
-          variants={circleVariants}
-          initial="hidden"
-          animate="visible"
-          className="absolute top-1/4 right-0 w-[28rem] h-[28rem] bg-white/[0.08] rounded-full -translate-y-1/2 translate-x-1/3 blur-sm"
-        />
-        <motion.div
-          custom={1}
-          variants={circleVariants}
-          initial="hidden"
-          animate="visible"
-          className="absolute bottom-0 left-1/4 w-72 h-72 bg-white/[0.06] rounded-full translate-y-1/3 blur-sm"
-        />
-        <motion.div
-          custom={2}
-          variants={circleVariants}
-          initial="hidden"
-          animate="visible"
-          className="absolute top-1/2 left-1/2 w-48 h-48 bg-white/[0.04] rounded-full -translate-x-1/2 -translate-y-1/2"
-        />
-      </motion.div>
-
-      {/* Right Panel - Form */}
-      <motion.div
-        variants={rightPanelVariants}
-        initial="hidden"
-        animate="visible"
-        className="w-full lg:w-1/2 flex items-center justify-center p-6 lg:p-12"
-      >
-        <div className="w-full max-w-md">
-          {/* Mobile Logo */}
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="lg:hidden flex items-center justify-center gap-2 mb-8"
-          >
-            <div className="w-8 h-8 bg-primary rounded-[10px] flex items-center justify-center">
-              <Shield className="w-4 h-4 text-white" />
-            </div>
-            <span className="text-lg font-semibold text-text">AI-CyberSentinel</span>
-          </motion.div>
-
+      {/* 主区域：单列居中 */}
+      <main className="px-6 sm:px-10 py-12 sm:py-20">
+        <div className="max-w-[440px] mx-auto">
           <AnimatePresence mode="wait">
             <motion.div
-              key={mode}
-              variants={formVariants}
-              initial="hidden"
-              animate="visible"
-              exit="exit"
-              className="mb-8"
+              key={`${mode}-header`}
+              initial={false}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="mb-10"
             >
-              <h2 className="text-2xl font-semibold text-text mb-1">{getTitle()}</h2>
-              <p className="text-text-secondary">{getSubtitle()}</p>
+              <div className="text-[11px] font-mono uppercase tracking-[0.2em] text-accent mb-3">
+                {getEyebrow()}
+              </div>
+              <h1 className="font-display text-5xl sm:text-6xl text-ink leading-[1.02] tracking-tight mb-4">
+                {getTitle()}
+              </h1>
+              <p className="text-ink-secondary text-sm leading-relaxed max-w-[360px]">
+                {getDescription()}
+              </p>
             </motion.div>
           </AnimatePresence>
 
           <AnimatePresence mode="wait">
             <motion.form
               key={mode}
-              variants={formVariants}
-              initial="hidden"
-              animate="visible"
-              exit="exit"
+              initial={false}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -4 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
               onSubmit={
                 mode === "login"
                   ? handleCredentialsLogin
                   : mode === "register"
-                  ? handleRegister
-                  : mode === "forgot"
-                  ? handleForgotPassword
-                  : handleResetPassword
+                    ? handleRegister
+                    : mode === "forgot"
+                      ? handleForgotPassword
+                      : mode === "otp-login"
+                        ? (otpRequestSent ? handleOtpLogin : handleOtpRequest)
+                        : handleResetPassword
               }
-              className="space-y-4"
+              className="space-y-6"
             >
               {mode === "register" && (
                 <InputField
                   type="text"
                   value={displayName}
                   onChange={setDisplayName}
-                  placeholder="昵称（可选）"
-                  icon={UserPlus}
+                  placeholder="你的名字"
+                  label="昵称（可选）"
                 />
               )}
 
               <InputField
                 type="email"
-                value={mode === "reset" && lockedResetEmail ? lockedResetEmail : email}
-                onChange={mode === "reset" && lockedResetEmail ? () => {} : setEmail}
-                placeholder="邮箱地址"
-                icon={Mail}
-                disabled={mode === "reset" && !!lockedResetEmail}
+                value={
+                  mode === "reset" && lockedResetEmail
+                    ? lockedResetEmail
+                    : mode === "otp-login" && otpRequestSent
+                      ? otpEmailLocked
+                      : email
+                }
+                onChange={
+                  mode === "reset" && lockedResetEmail
+                    ? () => {}
+                    : mode === "otp-login" && otpRequestSent
+                      ? () => {}
+                      : setEmail
+                }
+                placeholder="you@company.com"
+                label="邮箱"
+                disabled={
+                  (mode === "reset" && !!lockedResetEmail) ||
+                  (mode === "otp-login" && otpRequestSent)
+                }
               />
 
-              {mode === "reset" && (
+              {(mode === "reset" || (mode === "otp-login" && otpRequestSent)) && (
                 <InputField
                   type="text"
                   value={otpCode}
                   onChange={(v: string) => setOtpCode(v.replace(/\D/g, "").slice(0, 6))}
-                  placeholder="验证码（4-6位数字）"
-                  icon={KeyRound}
+                  placeholder="6 位数字"
+                  label="验证码"
                   maxLength={6}
                   inputMode="numeric"
                   autoComplete="one-time-code"
@@ -601,8 +587,8 @@ export default function HomePage() {
                   type="password"
                   value={password}
                   onChange={setPassword}
-                  placeholder="密码"
-                  icon={Lock}
+                  placeholder={mode === "register" ? "至少 8 位" : "输入密码"}
+                  label="密码"
                   showToggle
                   showValue={showPassword}
                   onToggle={() => setShowPassword(!showPassword)}
@@ -614,107 +600,130 @@ export default function HomePage() {
                   type="password"
                   value={confirmPassword}
                   onChange={setConfirmPassword}
-                  placeholder="确认密码"
-                  icon={Lock}
+                  placeholder="再次输入"
+                  label="确认密码"
                   showToggle
                   showValue={showPassword}
                   onToggle={() => setShowPassword(!showPassword)}
                 />
               )}
 
-              {/* Message */}
+              {mode === "otp-login" && otpRequestSent && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOtpCode("");
+                    void handleOtpRequest();
+                  }}
+                  disabled={otpSending || loading}
+                  className="text-xs text-ink-secondary hover:text-accent font-mono uppercase tracking-wider transition-colors disabled:opacity-50"
+                >
+                  {otpSending ? "重新发送中..." : "← 重新发送验证码"}
+                </button>
+              )}
+
+              {/* 消息提示 */}
               <AnimatePresence>
                 {message && (
                   <motion.div
                     initial={{ opacity: 0, height: 0 }}
                     animate={{ opacity: 1, height: "auto" }}
                     exit={{ opacity: 0, height: 0 }}
-                    className={`text-sm px-4 py-3 rounded-apple overflow-hidden ${
+                    transition={{ duration: 0.16 }}
+                    className={`text-xs px-3 py-2.5 flex items-start gap-2 overflow-hidden rounded-md ${
                       loginState === "error" || message.includes("失败") || message.includes("错误")
-                        ? "text-danger bg-danger-subtle"
-                        : message.includes("成功") || message.includes("通过")
-                        ? "text-success bg-success-subtle"
-                        : "text-warning bg-warning-subtle"
+                        ? "text-danger bg-danger-soft border-l-2 border-danger"
+                        : message.includes("成功")
+                          ? "text-success bg-success-soft border-l-2 border-success"
+                          : "text-warning bg-warning-soft border-l-2 border-warning"
                     }`}
                   >
-                    {message}
+                    {loginState === "error" || message.includes("失败") ? (
+                      <AlertCircle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    ) : (
+                      <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                    )}
+                    <span>{message}</span>
                   </motion.div>
                 )}
               </AnimatePresence>
 
-              {/* Submit Button */}
-              <motion.button
-                type="submit"
-                disabled={loading || loginState === "success"}
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.98 }}
-                className="w-full h-12 bg-primary hover:bg-primary-hover text-white font-medium rounded-apple transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm hover:shadow-md"
-              >
-                <span>{loading ? "处理中..." : loginState === "success" ? "登录成功" : getTitle()}</span>
-                <motion.span
-                  animate={loading ? { x: [0, 4, 0] } : {}}
-                  transition={{ repeat: Infinity, duration: 1 }}
+              {/* 提交按钮 */}
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={loading || loginState === "success"}
+                  className="btn-primary w-full"
                 >
+                  <span>
+                    {loading ? "处理中..." : loginState === "success" ? "登录成功" : getTitle()}
+                  </span>
                   <ArrowRight className="w-4 h-4" />
-                </motion.span>
-              </motion.button>
+                </button>
+              </div>
             </motion.form>
           </AnimatePresence>
 
-          {/* Mode Switch Links */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.5 }}
-            className="mt-6 pt-6 border-t border-border-subtle space-y-3"
-          >
+          {/* 模式切换链接 */}
+          <div className="mt-10 pt-6 border-t border-line">
             <AnimatePresence mode="wait">
               {mode === "login" ? (
                 <motion.div
                   key="login-links"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
-                  className="space-y-3"
+                  initial={false}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="flex flex-col gap-2.5 text-sm"
                 >
-                  <motion.button
+                  <button
                     type="button"
                     onClick={() => switchMode("register")}
-                    whileHover={{ x: 2 }}
-                    className="w-full text-center text-primary hover:text-primary-hover text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                    className="text-ink hover:text-accent text-left transition-colors flex items-center gap-2"
                   >
-                    <UserPlus className="w-4 h-4" />
-                    <span>创建新账号</span>
-                  </motion.button>
-                  <motion.button
+                    <span className="text-ink-tertiary font-mono text-xs">→</span>
+                    创建新账号
+                  </button>
+                  <button
                     type="button"
                     onClick={() => switchMode("forgot")}
-                    whileHover={{ x: 2 }}
-                    className="w-full text-center text-text-secondary hover:text-text text-sm transition-colors flex items-center justify-center gap-2"
+                    className="text-ink-secondary hover:text-ink text-left transition-colors flex items-center gap-2"
                   >
-                    <KeyRound className="w-4 h-4" />
-                    <span>忘记密码？</span>
-                  </motion.button>
+                    <span className="text-ink-tertiary font-mono text-xs">→</span>
+                    忘记密码
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => switchMode("otp-login")}
+                    className="text-ink-secondary hover:text-ink text-left transition-colors flex items-center gap-2"
+                  >
+                    <span className="text-ink-tertiary font-mono text-xs">→</span>
+                    使用邮箱验证码登录
+                  </button>
                 </motion.div>
               ) : (
                 <motion.button
                   key="back-link"
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -10 }}
+                  initial={false}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
                   type="button"
                   onClick={() => switchMode("login")}
-                  whileHover={{ x: -2 }}
-                  className="w-full text-center text-primary hover:text-primary-hover text-sm font-medium transition-colors flex items-center justify-center gap-2"
+                  className="text-ink-secondary hover:text-ink text-sm transition-colors flex items-center gap-2"
                 >
-                  <ChevronLeft className="w-4 h-4" />
-                  <span>返回登录</span>
+                  <span className="text-ink-tertiary font-mono text-xs">←</span>
+                  返回登录
                 </motion.button>
               )}
             </AnimatePresence>
-          </motion.div>
+          </div>
         </div>
-      </motion.div>
+      </main>
+
+      {/* 底部 — 极简 metadata */}
+      <footer className="px-6 sm:px-10 py-6 mt-8 border-t border-line flex items-center justify-between text-[10px] font-mono uppercase tracking-[0.2em] text-ink-tertiary">
+        <span>SECURE · ENCRYPTED · LOGGED</span>
+        <span className="hidden sm:inline">© AI-CYBERSENTINEL</span>
+      </footer>
     </div>
   );
 }
