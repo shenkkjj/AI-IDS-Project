@@ -29,11 +29,15 @@ node_modules/
 dist/
 build/
 
-# Debug/development files
-debug_*.py
-test_*.py
-_*.py
-check_*.py
+# Debug/development files (project root only — server/tests/ test files are tracked)
+/debug_*.py
+/test_*.py
+/_*.py
+/check_*.py
+# Allow tracked test files under server/tests/
+!server/tests/**/test_*.py
+!server/tests/**/conftest.py
+!server/tests/**/corpus/
 
 # Package lock files (track these for apps, ignore for libraries)
 # package-lock.json is tracked for this app project

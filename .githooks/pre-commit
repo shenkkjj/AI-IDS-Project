@@ -40,4 +40,27 @@ for f in $staged_files; do
   fi
 done
 
+# Rule 3 (P2-E): if any file under server/security/llm_guardrails/ is
+# staged, run the guardrail test suite before allowing the commit.
+# Catches a broken regex / N+1 / SQL injection at commit time, not at
+# CI time when the branch is already pushed.
+guardrail_staged=$(echo "$staged_files" | grep -E '^server/security/llm_guardrails/' || true)
+if [ -n "$guardrail_staged" ]; then
+  echo "🛡️  Guardrail layer changed — running pytest for server/security/llm_guardrails/ ..."
+  # Use python -m pytest so the .venv is auto-detected.
+  if command -v .venv/Scripts/python.exe >/dev/null 2>&1; then
+    py=".venv/Scripts/python.exe"
+  elif command -v python3 >/dev/null 2>&1; then
+    py="python3"
+  else
+    py="python"
+  fi
+  if ! "$py" -m pytest server/tests/security/llm_guardrails/ -q --tb=line 2>&1 | tail -40; then
+    echo "❌ Guardrail tests failed — refusing to commit."
+    echo "   Fix the failures above and stage the fix before re-running commit."
+    exit 1
+  fi
+  echo "✅ Guardrail tests passed."
+fi
+
 exit 0
