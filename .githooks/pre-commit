@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Pre-commit guard. Run by `git commit`.
+#
+# Blocks committing of files that must NEVER enter the repository:
+#   - .env and .env.* (real secrets, even with default values)
+#   - any file containing what looks like an SMTP password
+#
+# Install:  git config core.hooksPath .githooks
+
+set -e
+
+staged_files=$(git diff --cached --name-only --diff-filter=ACM)
+if [ -z "$staged_files" ]; then
+  exit 0
+fi
+
+# Rule 1: forbid .env files (the .env.example / .env.*.example templates
+# are explicitly allowed because they contain placeholder values).
+for f in $staged_files; do
+  base=$(basename "$f")
+  if [ "$base" = ".env" ] || [[ "$base" == .env.* && "$base" != .env.example && "$base" != *.env.example ]]; then
+    echo "❌ Refusing to commit $f — .env files must never be committed."
+    echo "   Add it to .gitignore and use .env.example as the template."
+    exit 1
+  fi
+done
+
+# Rule 2: scan staged file contents for hardcoded SMTP credentials.
+# Cheap regex check; we only flag obvious patterns, not real secrets.
+for f in $staged_files; do
+  case "$f" in
+    *.env|*.env.*) continue ;;
+    *.example)     continue ;;
+    *.md)          continue ;;
+  esac
+  if git show ":$f" 2>/dev/null | grep -qE 'MAIL_PASSWORD\s*=\s*[A-Za-z0-9+/=_-]{8,}'; then
+    echo "❌ Refusing to commit $f — looks like a hardcoded MAIL_PASSWORD value."
+    echo "   Move secrets to environment variables / a secret manager."
+    exit 1
+  fi
+done
+
+exit 0

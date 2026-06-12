@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Branch-name validator. Run by `git push`.
+#
+# Allowed formats (case-sensitive):
+#   <type>/<scope>-<desc>   (e.g. feat/auth-add-totp)
+#   <type>/<desc>           (e.g. docs-readme)
+#   main, master, release-*, hotfix-*
+#
+# Type whitelist: feat, fix, refactor, docs, test, chore, perf, security
+#
+# Install:  git config core.hooksPath .githooks
+
+set -e
+
+current_branch=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+if [ -z "$current_branch" ]; then
+  exit 0
+fi
+
+# Always allow protected branches.
+case "$current_branch" in
+  main|master|release-*|hotfix-*)
+    exit 0
+    ;;
+esac
+
+# Require <type>/<scope-or-desc> shape.
+if [[ ! "$current_branch" =~ ^(feat|fix|refactor|docs|test|chore|perf|security)/[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+  echo "❌ Branch name '$current_branch' does not match the required format."
+  echo ""
+  echo "   Expected: <type>/<scope-or-desc>"
+  echo "   Types:    feat | fix | refactor | docs | test | chore | perf | security"
+  echo "   Example:  feat/auth-add-totp"
+  echo ""
+  echo "   See docs/BRANCH_NAMING.md for the full guide."
+  exit 1
+fi
+
+exit 0
