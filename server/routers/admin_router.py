@@ -4,29 +4,16 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from server.core.database import get_db
-from server.core.rbac import Role, has_role
-from server.core.security import get_current_user
+from server.core.rbac import Role, require_admin
 from server.models_db import User
 
 router = APIRouter(prefix="/admin/roles", tags=["角色管理"])
 
 
-def _get_admin(
-    token: str | None = None,
-    db: Session = Depends(get_db),
-) -> User:
-    user = get_current_user(db, token, None)
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="未认证")
-    if not has_role(user, Role.ADMIN):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅管理员可操作")
-    return user
-
-
 @router.get("/users")
 async def list_users(
     db: Session = Depends(get_db),
-    admin: User = Depends(_get_admin),
+    admin: User = Depends(require_admin),
 ) -> list[dict[str, Any]]:
     from server.models_db import User as UserModel
     users = db.query(UserModel).order_by(UserModel.id).all()
@@ -47,7 +34,7 @@ async def update_user_role(
     user_id: int,
     role: str = "analyst",
     db: Session = Depends(get_db),
-    admin: User = Depends(_get_admin),
+    admin: User = Depends(require_admin),
 ) -> dict[str, Any]:
     allowed = {r.value for r in Role}
     if role not in allowed:

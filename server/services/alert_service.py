@@ -133,14 +133,22 @@ async def _send_alert_email_if_enabled(payload: dict[str, Any]) -> None:
     if not await _should_send_alert_email(alert_user_id):
         return
 
+    # Single JOIN to load user + config in one round-trip (was N+1 with two
+    # sequential queries). `contains_eager` tells SQLAlchemy the relationship
+    # is already populated so it does not lazy-load `config` again below.
     db = SessionLocal()
     try:
-        user = db.query(User).filter(User.id == alert_user_id, User.is_active.is_(True)).first()
-        if not user:
+        from sqlalchemy.orm import joinedload
+        user = (
+            db.query(User)
+            .options(joinedload(User.config))
+            .filter(User.id == alert_user_id, User.is_active.is_(True))
+            .first()
+        )
+        if user is None:
             return
-
-        config = db.query(UserConfig).filter(UserConfig.user_id == alert_user_id).first()
-        if not config or not config.alert_email_enabled:
+        config = getattr(user, "config", None)
+        if config is None or not config.alert_email_enabled:
             return
 
         llm_analysis = payload.get("llm_analysis") or {}

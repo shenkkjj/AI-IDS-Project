@@ -1,10 +1,11 @@
 from typing import Any
 
-from fastapi import APIRouter, Cookie, Depends, Header, HTTPException, Request, Response
+from fastapi import APIRouter, Body, Cookie, Depends, Header, HTTPException, Request, Response
 from sqlalchemy.orm import Session
 
 from server.core.database import get_db, create_log
-from server.core.security import get_current_user
+from server.core.security import decode_access_token, get_current_user
+from server.core import refresh_tokens
 from server.models.schemas import (LoginPasswordIn, OAuthLoginIn, OTPRequestIn, OTPVerifyIn,
                                    PasswordResetConfirmIn, PasswordResetRequestIn, UserRegisterIn)
 from server.services import auth_service
@@ -109,9 +110,9 @@ async def auth_register(
 @router.post("/login/password")
 async def auth_login_password(
     data: LoginPasswordIn, response: Response,
-    db: Session = Depends(get_db),
+    request: Request, db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    return await auth_service.login_password(data, response, db)
+    return await auth_service.login_password(data, response, request, db)
 
 
 @router.post("/login/oauth")
@@ -128,29 +129,55 @@ async def auth_login_otp_request(data: OTPRequestIn, db: Session = Depends(get_d
 
 
 @router.post("/login/otp/verify")
-async def auth_login_otp_verify(data: OTPVerifyIn, response: Response, db: Session = Depends(get_db)) -> dict[str, Any]:
-    return await auth_service.otp_verify(data, response, db)
+async def auth_login_otp_verify(
+    data: OTPVerifyIn, response: Response,
+    request: Request, db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    return await auth_service.otp_verify(data, response, request, db)
 
 
-@router.post("/password/reset/request")
-async def auth_password_reset_request(data: PasswordResetRequestIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    return await auth_service.password_reset_request(data, db)
+@router.post("/refresh")
+async def auth_refresh(
+    response: Response,
+    refresh_token_cookie: str | None = Cookie(default=None, alias="refresh_token"),
+    refresh_token_body: str | None = Body(default=None, embed=True),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Rotate the refresh token and issue a new access token.
 
-
-@router.post("/password/reset/confirm")
-async def auth_password_reset_confirm(data: PasswordResetConfirmIn, db: Session = Depends(get_db)) -> dict[str, Any]:
-    return await auth_service.password_reset_confirm(data, db)
+    Accepts the refresh token from either the HttpOnly cookie (preferred) or
+    the request body (for non-cookie clients). Returns the new session id and
+    expiry, plus sets the new cookies.
+    """
+    value = refresh_token_cookie or refresh_token_body
+    if not value:
+        raise HTTPException(status_code=401, detail="缺少 refresh token")
+    return auth_service.refresh_session(db, response, value)
 
 
 @router.post("/logout")
 async def auth_logout(
     response: Response,
+    revoke_all: bool = False,
     authorization: str | None = Header(default=None, alias="Authorization"),
     access_token_cookie: str | None = Cookie(default=None, alias="access_token"),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     user = get_current_user(db, access_token_cookie, authorization)
-    return auth_service.logout(response, db, user)
+    current_session_id: str | None = None
+    if access_token_cookie:
+        try:
+            payload = decode_access_token(access_token_cookie)
+            current_session_id = payload.get("sid")
+        except Exception:
+            current_session_id = None
+    return auth_service.logout(
+        response,
+        db,
+        user,
+        current_session_id=current_session_id,
+        revoke_all=revoke_all,
+    )
 
 
 @router.get("/session")
@@ -161,3 +188,40 @@ async def auth_session(
 ) -> dict[str, Any]:
     user = get_current_user(db, access_token_cookie, authorization)
     return auth_service.get_session(user, db)
+
+
+@router.get("/sessions")
+async def auth_sessions(
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    access_token_cookie: str | None = Cookie(default=None, alias="access_token"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """List active sessions for the current user (for a "devices" view)."""
+    user = get_current_user(db, access_token_cookie, authorization)
+    sessions = refresh_tokens.list_active_sessions(db, user.id)
+    return {"sessions": sessions}
+
+
+@router.delete("/sessions/{session_id}")
+async def auth_revoke_session(
+    session_id: str,
+    response: Response,
+    authorization: str | None = Header(default=None, alias="Authorization"),
+    access_token_cookie: str | None = Cookie(default=None, alias="access_token"),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """Revoke a specific session by id."""
+    user = get_current_user(db, access_token_cookie, authorization)
+    refresh_tokens.revoke_session(db, session_id)
+    db.commit()
+    return {"status": "ok", "revoked": session_id}
+
+
+@router.post("/password/reset/request")
+async def auth_password_reset_request(data: PasswordResetRequestIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    return await auth_service.password_reset_request(data, db)
+
+
+@router.post("/password/reset/confirm")
+async def auth_password_reset_confirm(data: PasswordResetConfirmIn, db: Session = Depends(get_db)) -> dict[str, Any]:
+    return await auth_service.password_reset_confirm(data, db)

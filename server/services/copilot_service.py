@@ -1,7 +1,6 @@
 import json
 from typing import Any, AsyncIterator
 
-import httpx
 from fastapi import HTTPException
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -9,101 +8,16 @@ from sqlalchemy.orm import Session
 from server.analyzer import AnalyzerConfig
 from server.core.config import COPILOT_RATE_LIMIT_WINDOW, COPILOT_RATE_LIMIT_MAX
 from server.core.database import create_log
-from server.core.llm_utils import (
-    COPILOT_SYSTEM_PROMPT,
-    _provider_headers,
-    user_config_to_llm_runtime,
-)
+from server.core.llm_utils import user_config_to_llm_runtime
 from server.core.state import app_state
 from server.models.schemas import CopilotMessageIn, CopilotStreamIn
 from server.models_db import User
-
-
-def _sanitize_user_input(text: str) -> str:
-    """清理用户输入，移除可能的提示注入标记。"""
-    if not text:
-        return text
-    # 移除常见的提示注入尝试模式
-    injection_patterns = [
-        r"(?i)ignore\s+previous\s+instructions",
-        r"(?i)disregard\s+.*system\s+prompt",
-        r"(?i)forget\s+.*instructions",
-        r"(?i)system\s*:\s*",
-        r"(?i)you\s+are\s+now\s+",
-        r"<\s*script\b",
-        r"javascript\s*:",
-    ]
-    import re
-    sanitized = text
-    for pattern in injection_patterns:
-        sanitized = re.sub(pattern, "[FILTERED]", sanitized)
-    return sanitized
-
-
-def _build_openai_messages(
-    user_message: str, context_block: str, history: list[CopilotMessageIn],
-) -> list[dict[str, str]]:
-    messages: list[dict[str, str]] = [{"role": "system", "content": COPILOT_SYSTEM_PROMPT}]
-    for item in history:
-        messages.append({"role": item.role, "content": _sanitize_user_input(item.content)})
-
-    user_content = _sanitize_user_input(user_message)
-    if context_block:
-        user_content = f"{user_content}\n\n{context_block}"
-    messages.append({"role": "user", "content": user_content})
-    return messages
-
-
-def _build_gemini_contents(
-    user_message: str, context_block: str, history: list[CopilotMessageIn],
-) -> list[dict[str, Any]]:
-    contents: list[dict[str, Any]] = []
-    for item in history:
-        role = "model" if item.role == "assistant" else "user"
-        contents.append({"role": role, "parts": [{"text": _sanitize_user_input(item.content)}]})
-
-    user_content = _sanitize_user_input(user_message)
-    if context_block:
-        user_content = f"{user_content}\n\n{context_block}"
-    contents.append({"role": "user", "parts": [{"text": user_content}]})
-    return contents
-
-
-def _extract_openai_delta(payload: dict[str, Any]) -> str:
-    choices = payload.get("choices")
-    if not choices:
-        return ""
-    return str((choices[0] or {}).get("delta", {}).get("content", "") or "")
-
-
-def _extract_claude_delta(payload: dict[str, Any]) -> str:
-    if payload.get("type") != "content_block_delta":
-        return ""
-    return str(payload.get("delta", {}).get("text", "") or "")
-
-
-def _extract_gemini_delta(payload: dict[str, Any]) -> str:
-    candidates = payload.get("candidates") or []
-    if not candidates:
-        return ""
-    content = (candidates[0] or {}).get("content") or {}
-    parts = content.get("parts") or []
-    if not parts:
-        return ""
-    return str((parts[0] or {}).get("text", "") or "").strip()
-
-
-def _sse_pack(text: str) -> str:
-    return f"data: {json.dumps({'token': text}, ensure_ascii=False)}\n\n"
-
-
-def _sse_error(text: str) -> str:
-    return f"event: error\ndata: {json.dumps({'message': text}, ensure_ascii=False)}\n\n"
-
-
-def _sse_done(provider: str, model_name: str) -> str:
-    payload = {"provider": provider, "model": model_name}
-    return f"event: done\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+from server.services.llm_providers import (
+    resolve_provider,
+    sse_done,
+    sse_error,
+    stream_completion,
+)
 
 
 def _build_context_from_alert(alert: dict[str, Any] | None) -> str:
@@ -136,104 +50,32 @@ async def stream_user_chat_completion(
     context_block: str,
     history: list[CopilotMessageIn],
 ) -> AsyncIterator[str]:
+    """Stream a chat completion from the chosen LLM provider.
+
+    Dispatches to the provider strategy in `server.services.llm_providers`.
+    New providers can be added without touching this function.
+    """
     if not runtime.api_key or not runtime.base_url:
-        yield _sse_error("请先在配置页设置可用的 API Key 与 Base URL")
+        yield sse_error("请先在配置页设置可用的 API Key 与 Base URL")
         return
 
-    timeout = httpx.Timeout(connect=8.0, read=120.0, write=30.0, pool=20.0)
-
+    strategy = resolve_provider(provider)
     try:
-        if provider == "claude":
-            endpoint = f"{runtime.base_url.rstrip('/')}/v1/messages"
-            request_body = {
-                "model": runtime.model,
-                "system": COPILOT_SYSTEM_PROMPT,
-                "messages": _build_openai_messages(user_message, context_block, history)[1:],
-                "max_tokens": 2048,
-                "temperature": 0.2,
-                "stream": True,
-            }
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream(
-                    "POST", endpoint,
-                    headers=_provider_headers(provider, runtime.api_key),
-                    json=request_body,
-                ) as response:  # noqa: E501
-                    response.raise_for_status()
-                    async for raw_line in response.aiter_lines():
-                        line = str(raw_line or "").strip()
-                        if not line.startswith("data:"):
-                            continue
-                        payload_text = line[5:].strip()
-                        if payload_text == "[DONE]":
-                            break
-                        try:
-                            payload = json.loads(payload_text)
-                        except Exception:
-                            continue
-                        token = _extract_claude_delta(payload)
-                        if token:
-                            yield _sse_pack(token)
-
-        elif provider == "gemini":
-            endpoint = (
-                f"{runtime.base_url.rstrip('/')}/v1beta/models/{runtime.model}:streamGenerateContent"
-                f"?alt=sse"
-            )
-            request_body = {
-                "system_instruction": {"parts": [{"text": COPILOT_SYSTEM_PROMPT}]},
-                "contents": _build_gemini_contents(user_message, context_block, history),
-                "generationConfig": {"temperature": 0.2},
-            }
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", endpoint, headers=_provider_headers(provider, runtime.api_key), json=request_body) as response:  # noqa: E501
-                    response.raise_for_status()
-                    async for raw_line in response.aiter_lines():
-                        line = str(raw_line or "").strip()
-                        if not line.startswith("data:"):
-                            continue
-                        payload_text = line[5:].strip()
-                        if payload_text == "[DONE]":
-                            break
-                        try:
-                            payload = json.loads(payload_text)
-                        except Exception:
-                            continue
-                        token = _extract_gemini_delta(payload)
-                        if token:
-                            yield _sse_pack(token)
-
-        else:
-            from server.analyzer import build_chat_completions_url
-            endpoint = build_chat_completions_url(runtime.base_url)
-            request_body = {
-                "model": runtime.model,
-                "messages": _build_openai_messages(user_message, context_block, history),
-                "temperature": 0.2,
-                "stream": True,
-            }
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                async with client.stream("POST", endpoint, headers=_provider_headers(provider, runtime.api_key), json=request_body) as response:  # noqa: E501
-                    response.raise_for_status()
-                    async for raw_line in response.aiter_lines():
-                        line = str(raw_line or "").strip()
-                        if not line or not line.startswith("data:"):
-                            continue
-                        payload_text = line[5:].strip()
-                        if payload_text == "[DONE]":
-                            break
-                        try:
-                            payload = json.loads(payload_text)
-                        except Exception:
-                            continue
-                        token = _extract_openai_delta(payload)
-                        if token:
-                            yield _sse_pack(token)
-
-        yield _sse_done(provider, runtime.model)
+        async for token in stream_completion(
+            strategy,
+            runtime,
+            user_message=user_message,
+            context_block=context_block,
+            history=history,
+        ):
+            yield token
+        yield sse_done(provider, runtime.model)
     except Exception as exc:
-        logger.exception("copilot stream failed provider={} model={} err_type={}", provider, runtime.model, type(exc).__name__)  # noqa: E501
-        yield _sse_error("AI 服务暂时不可用，请稍后重试")
+        logger.exception(
+            "copilot stream failed provider={} model={} err_type={}",
+            provider, runtime.model, type(exc).__name__,
+        )
+        yield sse_error("AI 服务暂时不可用，请稍后重试")
 
 
 async def copilot_stream(user: User, data: CopilotStreamIn, client_ip: str, db: Session) -> AsyncIterator[str]:

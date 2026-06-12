@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
@@ -8,6 +8,46 @@ from server.core.llm_utils import normalize_ai_provider
 from server.core.security import _mask_key, _safe_decrypt
 from server.models.schemas import UserConfigIn
 from server.models_db import User, UserConfig
+
+
+# Field whitelist: every updatable scalar field on UserConfig, with its
+# normalizer. Add a new field here when extending UserConfigIn — no need to
+# touch the body of `update_user_config`.
+def _normalize_str(value: Any, *, max_length: int | None = None, default: str = "") -> str:
+    text = str(value or "").strip()
+    if max_length is not None:
+        text = text[:max_length]
+    return text or default
+
+
+def _normalize_base_url(value: Any) -> str:
+    return str(value or "").strip().rstrip("/")
+
+
+def _normalize_provider(value: Any) -> str:
+    return normalize_ai_provider(value)
+
+
+def _normalize_int(value: Any) -> int:
+    return int(value)
+
+
+def _normalize_bool(value: Any) -> bool:
+    return bool(value)
+
+
+CONFIG_FIELD_WHITELIST: dict[str, tuple[str, Callable[[Any], Any]]] = {
+    "ai_provider": ("ai_provider", _normalize_provider),
+    "model": ("model", lambda v: _normalize_str(v, max_length=120)),
+    "base_url": ("base_url", _normalize_base_url),
+    "timeout_seconds": ("timeout_seconds", _normalize_int),
+    "alert_email_enabled": ("alert_email_enabled", _normalize_bool),
+    "alert_voice_enabled": ("alert_voice_enabled", _normalize_bool),
+    "webhook_url": ("webhook_url", lambda v: _normalize_str(v, max_length=500)),
+    "webhook_type": ("webhook_type", lambda v: _normalize_str(v, max_length=16, default="generic")),
+    "ui_theme": ("ui_theme", lambda v: _normalize_str(v, max_length=32, default="dark")),
+    "ui_density": ("ui_density", lambda v: _normalize_str(v, max_length=16, default="comfortable")),
+}
 
 
 def build_default_config(user_id: int) -> UserConfig:
@@ -51,6 +91,8 @@ def get_user_config(user: User, db: Session) -> dict[str, Any]:
         "timeout_seconds": config.timeout_seconds,
         "alert_email_enabled": config.alert_email_enabled,
         "alert_voice_enabled": config.alert_voice_enabled,
+        "webhook_url": config.webhook_url,
+        "webhook_type": config.webhook_type,
         "ui_theme": config.ui_theme,
         "ui_density": config.ui_density,
         "has_api_key": bool(api_key_plain),
@@ -65,22 +107,12 @@ def update_user_config(user: User, data: UserConfigIn, db: Session) -> dict[str,
     log_payload = payload.copy()
     if "api_key" in log_payload:
         log_payload["api_key"] = "***"
-    if "ai_provider" in payload:
-        config.ai_provider = normalize_ai_provider(payload["ai_provider"])
-    if "model" in payload:
-        config.model = str(payload["model"]).strip()
-    if "base_url" in payload:
-        config.base_url = str(payload["base_url"]).strip().rstrip("/")
-    if "timeout_seconds" in payload:
-        config.timeout_seconds = int(payload["timeout_seconds"])
-    if "alert_email_enabled" in payload:
-        config.alert_email_enabled = bool(payload["alert_email_enabled"])
-    if "alert_voice_enabled" in payload:
-        config.alert_voice_enabled = bool(payload["alert_voice_enabled"])
-    if "ui_theme" in payload:
-        config.ui_theme = str(payload["ui_theme"]).strip() or config.ui_theme
-    if "ui_density" in payload:
-        config.ui_density = str(payload["ui_density"]).strip() or config.ui_density
+
+    # Walk the whitelist instead of an if-per-field chain. New fields only
+    # require a (field, normalizer) entry in CONFIG_FIELD_WHITELIST.
+    for key, (attr_name, normalizer) in CONFIG_FIELD_WHITELIST.items():
+        if key in payload:
+            setattr(config, attr_name, normalizer(payload[key]))
 
     if "api_key" in payload:
         key_text = str(payload["api_key"]).strip()
@@ -102,6 +134,8 @@ def update_user_config(user: User, data: UserConfigIn, db: Session) -> dict[str,
             "timeout_seconds": config.timeout_seconds,
             "alert_email_enabled": config.alert_email_enabled,
             "alert_voice_enabled": config.alert_voice_enabled,
+            "webhook_url": config.webhook_url,
+            "webhook_type": config.webhook_type,
             "ui_theme": config.ui_theme,
             "ui_density": config.ui_density,
             "has_api_key": bool(user.encrypted_api_key),

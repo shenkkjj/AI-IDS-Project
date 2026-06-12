@@ -8,9 +8,25 @@ from fastapi import HTTPException, Request, Response
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from server.core.config import OTP_EXPIRES_MINUTES, PASSWORD_RESET_EXPIRES_MINUTES, OTP_VERIFY_MAX_ATTEMPTS
+from server.core.config import (
+    OTP_EXPIRES_MINUTES,
+    PASSWORD_RESET_EXPIRES_MINUTES,
+    OTP_VERIFY_MAX_ATTEMPTS,
+    REFRESH_TOKEN_EXPIRES_DAYS,
+)
 from server.core.database import create_log
-from server.core.security import set_access_cookie, _issue_token_for_user, _safe_decrypt, _mask_key
+from server.core.exceptions import (
+    AuthException,
+    TotpRequiredException,
+)
+from server.core import refresh_tokens
+from server.core.security import (
+    set_access_cookie,
+    set_refresh_cookie,
+    _issue_token_for_user,
+    _safe_decrypt,
+    _mask_key,
+)
 from server.core.state import app_state
 from server.core.utils import _sanitize_for_log
 from server.mailer import send_otp_email, send_reset_email
@@ -31,6 +47,7 @@ def _build_auth_payload(user: User, config: Any, token: str | None = None) -> di
             "email": user.email,
             "display_name": user.display_name,
             "auth_provider": user.auth_provider,
+            "totp_enabled": bool(user.totp_enabled),
         },
         "config": {
             "ai_provider": provider,
@@ -39,6 +56,8 @@ def _build_auth_payload(user: User, config: Any, token: str | None = None) -> di
             "timeout_seconds": config.timeout_seconds,
             "alert_email_enabled": config.alert_email_enabled,
             "alert_voice_enabled": config.alert_voice_enabled,
+            "webhook_url": config.webhook_url,
+            "webhook_type": config.webhook_type,
             "ui_theme": config.ui_theme,
             "ui_density": config.ui_density,
             "has_api_key": bool(_safe_decrypt(user.encrypted_api_key)),
@@ -48,6 +67,78 @@ def _build_auth_payload(user: User, config: Any, token: str | None = None) -> di
     if token:
         payload["access_token"] = token
     return payload
+
+
+def _enforce_totp_or_raise(user: User, totp_code: str | None) -> None:
+    """If the user has TOTP enabled, require a valid code. Otherwise no-op.
+
+    Raises:
+        TotpRequiredException: when TOTP is enabled but the caller did not
+            supply a `totp_code`. The global exception handler converts this
+            into a 401 response with `extra.code = "totp_required"` so the
+            frontend can switch to the TOTP input UI.
+        AuthException: when a code was supplied but did not match.
+    """
+    if not user.totp_enabled:
+        return
+    if not totp_code:
+        raise TotpRequiredException()
+    from server.services.totp_service import verify_totp
+    if not verify_totp(user.totp_secret, totp_code):
+        raise AuthException("TOTP 验证码错误")
+
+
+def _issue_session(
+    db: Session,
+    user: User,
+    response: Response,
+    *,
+    user_agent: str | None = None,
+    ip_address: str | None = None,
+) -> str:
+    """Mint a refresh-token row, then issue an access-token bound to it.
+
+    Returns the new `session_id` so the caller can include it in the response
+    body (useful for clients that want to manage sessions explicitly).
+    """
+    refresh_pair = refresh_tokens.issue_refresh_token(
+        db,
+        user,
+        user_agent=user_agent,
+        ip_address=ip_address,
+    )
+    access_token = _issue_token_for_user(user, session_id=refresh_pair["session_id"])
+    set_access_cookie(response, access_token)
+    set_refresh_cookie(
+        response,
+        refresh_pair["value"],
+        max_age_seconds=REFRESH_TOKEN_EXPIRES_DAYS * 24 * 3600,
+    )
+    return refresh_pair["session_id"]
+
+
+def refresh_session(
+    db: Session,
+    response: Response,
+    refresh_token_value: str,
+) -> dict[str, Any]:
+    """Atomically rotate a refresh token and issue a new access token.
+
+    Raises AuthException if the token is unknown, expired, or revoked.
+    """
+    result = refresh_tokens.consume_refresh_token(db, refresh_token_value)
+    if result is None:
+        raise AuthException("Refresh token 无效或已过期")
+    consumed, new_pair = result
+    user = db.query(User).filter(User.id == consumed.user_id).one()
+    access_token = _issue_token_for_user(user, session_id=new_pair["session_id"])
+    set_access_cookie(response, access_token)
+    set_refresh_cookie(
+        response,
+        new_pair["value"],
+        max_age_seconds=REFRESH_TOKEN_EXPIRES_DAYS * 24 * 3600,
+    )
+    return {"session_id": new_pair["session_id"], "expires_at": new_pair["expires_at"]}
 
 
 async def register_user(data: UserRegisterIn, request: Request, response: Response, db: Session) -> dict[str, Any]:
@@ -74,17 +165,29 @@ async def register_user(data: UserRegisterIn, request: Request, response: Respon
     db.commit()
     db.refresh(user)
 
-    token = _issue_token_for_user(user)
-    set_access_cookie(response, token)
+    user_agent = request.headers.get("user-agent") if request else None
+    _issue_session(db, user, response, user_agent=user_agent, ip_address=client_ip)
+    db.commit()
 
     from server.services.user_service import get_or_create_user_config
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="register", detail="password register")
 
+    # access_token is delivered via cookie; payload can still expose it for
+    # clients that prefer header-based access (e.g. the NextAuth bridge).
+    from server.core.config import ACCESS_TOKEN_EXPIRES_MINUTES
+    from server.security_utils import issue_access_token
+    from datetime import timezone
+    pwd_ts = user.password_changed_at.replace(tzinfo=timezone.utc).timestamp() if user.password_changed_at else None
+    token = issue_access_token(
+        str(user.id),
+        password_changed_at=pwd_ts,
+        token_version=user.token_version,
+    )
     return _build_auth_payload(user, config, token)
 
 
-async def login_password(data: LoginPasswordIn, response: Response, db: Session) -> dict[str, Any]:
+async def login_password(data: LoginPasswordIn, response: Response, request: Request, db: Session) -> dict[str, Any]:
     if not await app_state.rate_limit.check_login_limit(data.email):
         raise HTTPException(status_code=429, detail="登录尝试过于频繁，请5分钟后再试")
 
@@ -94,8 +197,13 @@ async def login_password(data: LoginPasswordIn, response: Response, db: Session)
     if not verify_password(data.password, user.password_hash):
         raise HTTPException(status_code=401, detail="邮箱或密码错误")
 
-    token = _issue_token_for_user(user)
-    set_access_cookie(response, token)
+    # Activate MFA: require TOTP code if the user has enabled it.
+    _enforce_totp_or_raise(user, data.totp_code)
+
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent") if request else None
+    _issue_session(db, user, response, user_agent=user_agent, ip_address=client_ip)
+    db.commit()
 
     from server.services.user_service import get_or_create_user_config
     config = get_or_create_user_config(db, user.id)
@@ -224,6 +332,9 @@ async def login_oauth(data: OAuthLoginIn, response: Response, request: Request, 
         db.commit()
         db.refresh(user)
 
+    # OAuth 登录同样受 TOTP 保护：用户若已启用 2FA，必须提供动态码。
+    _enforce_totp_or_raise(user, data.totp_code)
+
     token = _issue_token_for_user(user)
     set_access_cookie(response, token)
 
@@ -265,7 +376,7 @@ async def otp_request(data: OTPRequestIn, db: Session) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail="邮件服务未配置")
 
 
-async def otp_verify(data: OTPVerifyIn, response: Response, db: Session) -> dict[str, Any]:
+async def otp_verify(data: OTPVerifyIn, response: Response, request: Request, db: Session) -> dict[str, Any]:
     email_key = data.email.lower()
     async with app_state.rate_limit.otp_verify_lock:
         failures = app_state.rate_limit.otp_verify_failures.get(email_key, 0)
@@ -288,8 +399,13 @@ async def otp_verify(data: OTPVerifyIn, response: Response, db: Session) -> dict
     async with app_state.rate_limit.otp_verify_lock:
         app_state.rate_limit.otp_verify_failures.pop(email_key, None)
 
-    token = _issue_token_for_user(user)
-    set_access_cookie(response, token)
+    # OTP 登录流程同样受 TOTP 保护。
+    _enforce_totp_or_raise(user, data.totp_code)
+
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent") if request else None
+    _issue_session(db, user, response, user_agent=user_agent, ip_address=client_ip)
+    db.commit()
 
     from server.services.user_service import get_or_create_user_config
     config = get_or_create_user_config(db, user.id)
@@ -363,12 +479,39 @@ async def password_reset_confirm(data: PasswordResetConfirmIn, db: Session) -> d
     return {"status": "ok", "message": "密码已更新"}
 
 
-def logout(response: Response, db: Session, user: User) -> dict[str, Any]:
-    from server.core.security import clear_access_cookie
-    user.token_version = user.token_version + 1
+def logout(
+    response: Response,
+    db: Session,
+    user: User,
+    *,
+    current_session_id: str | None = None,
+    revoke_all: bool = False,
+) -> dict[str, Any]:
+    """Log out the current session.
+
+    - `revoke_all=False` (default): revoke only the current session, leave
+      other devices logged in. Access token is invalidated because the
+      session_id is no longer active.
+    - `revoke_all=True`: revoke every active session for this user and bump
+      the global token_version so all access tokens issued previously stop
+      working. Use this on "log out everywhere" or password change.
+    """
+    from server.core.security import clear_access_cookie, clear_refresh_cookie
+
+    if revoke_all:
+        refresh_tokens.revoke_user_sessions(db, user.id)
+        user.token_version = user.token_version + 1
+    elif current_session_id is not None:
+        refresh_tokens.revoke_session(db, current_session_id)
+    else:
+        # No session binding (e.g. legacy token); fall back to bumping
+        # token_version so this token is invalidated.
+        user.token_version = user.token_version + 1
+
     db.add(user)
     db.commit()
     clear_access_cookie(response)
+    clear_refresh_cookie(response)
     create_log(db, user_id=user.id, level="info", action="logout", detail="user logged out")
     return {"status": "ok"}
 
