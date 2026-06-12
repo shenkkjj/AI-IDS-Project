@@ -22,7 +22,13 @@ from server.core.config import (  # noqa: E402
 from server.core.logging_setup import configure_logging  # noqa: E402
 
 configure_logging()
-from server.core.database import init_db, ensure_user_config_columns, start_log_flusher, stop_log_flusher  # noqa: E402
+from server.core.database import (  # noqa: E402
+    get_db,
+    init_db,
+    ensure_user_config_columns,
+    start_log_flusher,
+    stop_log_flusher,
+)
 from server.core.exceptions import DomainException  # noqa: E402
 from server.core.state import app_state  # noqa: E402
 from server.core.websocket import manager  # noqa: E402

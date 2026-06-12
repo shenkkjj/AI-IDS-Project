@@ -95,11 +95,12 @@ def _issue_session(
     *,
     user_agent: str | None = None,
     ip_address: str | None = None,
-) -> str:
+) -> dict[str, str]:
     """Mint a refresh-token row, then issue an access-token bound to it.
 
-    Returns the new `session_id` so the caller can include it in the response
-    body (useful for clients that want to manage sessions explicitly).
+    Returns `{"session_id": ..., "access_token": ...}` so the caller can
+    include both in the response body when the client wants explicit
+    session management (the cookies are set for browser flows regardless).
     """
     refresh_pair = refresh_tokens.issue_refresh_token(
         db,
@@ -114,7 +115,10 @@ def _issue_session(
         refresh_pair["value"],
         max_age_seconds=REFRESH_TOKEN_EXPIRES_DAYS * 24 * 3600,
     )
-    return refresh_pair["session_id"]
+    return {
+        "session_id": refresh_pair["session_id"],
+        "access_token": access_token,
+    }
 
 
 def refresh_session(
@@ -202,14 +206,14 @@ async def login_password(data: LoginPasswordIn, response: Response, request: Req
 
     client_ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent") if request else None
-    _issue_session(db, user, response, user_agent=user_agent, ip_address=client_ip)
+    session = _issue_session(db, user, response, user_agent=user_agent, ip_address=client_ip)
     db.commit()
 
     from server.services.user_service import get_or_create_user_config
     config = get_or_create_user_config(db, user.id)
     create_log(db, user_id=user.id, level="info", action="login_password", detail="password login")
 
-    return _build_auth_payload(user, config, token)
+    return _build_auth_payload(user, config, session["access_token"])
 
 
 async def _verify_google_token(id_token: str) -> dict[str, Any] | None:
