@@ -42,6 +42,7 @@ export default function CopilotPanel({
             type="button"
             onClick={onAnalyzeAlert}
             disabled={loading}
+            data-testid="analyze-current-alert"
             className="mt-2 text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover disabled:opacity-30 transition-colors"
           >
             分析当前告警
@@ -60,6 +61,8 @@ export default function CopilotPanel({
           messages.map((message, index) => (
             <div
               key={`${message.role}-${index}`}
+              data-testid="copilot-message"
+              data-role={message.role}
               className={`flex flex-col ${message.role === "user" ? "items-end" : "items-start"}`}
             >
               <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-ink-tertiary mb-1.5">

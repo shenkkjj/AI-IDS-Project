@@ -566,6 +566,7 @@ export default function HomePage() {
                   onChange={setDisplayName}
                   placeholder="你的名字"
                   label="昵称（可选）"
+                  {...{ "data-testid": "register-displayname" }}
                 />
               )}
 
@@ -591,6 +592,8 @@ export default function HomePage() {
                   (mode === "reset" && !!lockedResetEmail) ||
                   (mode === "otp-login" && otpRequestSent)
                 }
+                autoComplete="email"
+                {...(mode === "login" || mode === "register" ? { "data-testid": "login-email" } : {})}
               />
 
               {(mode === "reset" || (mode === "otp-login" && otpRequestSent)) && (
@@ -616,6 +619,8 @@ export default function HomePage() {
                   showToggle
                   showValue={showPassword}
                   onToggle={() => setShowPassword(!showPassword)}
+                  autoComplete={mode === "login" ? "current-password" : "new-password"}
+                  {...(mode === "login" || mode === "register" ? { "data-testid": "login-password" } : {})}
                 />
               )}
 
@@ -677,6 +682,7 @@ export default function HomePage() {
                 <button
                   type="submit"
                   disabled={loading || loginState === "success"}
+                  data-testid="login-submit"
                   className="btn-primary w-full"
                 >
                   <span>
@@ -702,6 +708,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() => switchMode("register")}
+                    data-testid="register-toggle"
                     className="text-ink hover:text-accent text-left transition-colors flex items-center gap-2"
                   >
                     <span className="text-ink-tertiary font-mono text-xs">→</span>

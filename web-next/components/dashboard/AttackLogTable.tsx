@@ -69,6 +69,9 @@ export default function AttackLogTable({ logs, highlightId, selectedId, onSelect
               return (
                 <tr
                   key={log.id}
+                  data-testid="attack-log-row"
+                  data-risk={log.risk}
+                  data-alert-id={log.alertId || log.id}
                   className={`border-b border-line-subtle transition-colors ${
                     isSelected ? "bg-accent-soft" : ""
                   } ${onSelect ? "cursor-pointer hover:bg-bg-sunken" : ""} ${

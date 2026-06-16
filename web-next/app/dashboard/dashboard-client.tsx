@@ -15,6 +15,7 @@ import { signOut } from "next-auth/react";
 import StatsCards from "@/components/dashboard/StatsCards";
 import AttackLogTable from "@/components/dashboard/AttackLogTable";
 import HackerTerminal from "@/components/dashboard/HackerTerminal";
+import SecurityTimeline from "@/components/dashboard/SecurityTimeline";
 import { Button } from "@/components/ui/button";
 
 // Heavy components are code-split. Recharts (~45KB gzip) only loads when
@@ -40,6 +41,7 @@ import { useCopilot } from "@/hooks/useCopilot";
 import { useTerminal } from "@/hooks/useTerminal";
 import { useReport } from "@/hooks/useReport";
 import { useSiteHealth } from "@/hooks/useSiteHealth";
+import { useSecurityTimeline } from "@/hooks/useSecurityTimeline";
 import { useThreatConfirm } from "@/hooks/useThreatConfirm";
 import { routeDescription } from "@/utils/routeUtils";
 import { formatLoadError } from "@/utils/alertUtils";
@@ -128,6 +130,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   const terminalCtx = useTerminal(alertsCtx.alerts);
   const reportCtx = useReport(alertsCtx.alerts);
   const siteHealthCtx = useSiteHealth(configCtx.setStatus);
+  const securityTimelineCtx = useSecurityTimeline();
   const threatCtx = useThreatConfirm(
     alertsCtx.selected,
     configCtx.config,
@@ -355,6 +358,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                     <button
                       onClick={() => void handleTriggerDemoAttack()}
                       disabled={alertsCtx.demoState === "running"}
+                      data-testid="trigger-demo-attack"
                       className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover disabled:opacity-30 transition-colors"
                     >
                       {alertsCtx.demoState === "running"
@@ -484,6 +488,26 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                     {reportCtx.markdown}
                   </pre>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* 安全运营时间线（概览/监测） */}
+          {(isOverviewRoute || isMonitorRoute) && (
+            <div className="mt-14">
+              <SectionHeading
+                index="§ 03.5"
+                title="安全运营时间线"
+                description="Demo 攻击 / Copilot / 护栏 / 认证 / 配置摘要"
+              />
+              <div className="min-h-[280px]">
+                <SecurityTimeline
+                  items={securityTimelineCtx.items}
+                  loadState={securityTimelineCtx.loadState}
+                  degraded={securityTimelineCtx.degraded}
+                  limit={securityTimelineCtx.limit}
+                  onRefresh={() => void securityTimelineCtx.refresh()}
+                />
               </div>
             </div>
           )}
