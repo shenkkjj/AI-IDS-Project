@@ -1,0 +1,250 @@
+"""Demo Flow 浏览器级端到端测试（可选，需 --run-e2e 显式运行）。
+
+设计目标（docs/agent/M2_SOC_OPERATIONS_BASELINE_TASK.md §8-9）：
+
+- 默认 `pytest server/tests` 仍跳过；通过 ``--run-e2e`` 显式触发。
+- 缺 playwright / 缺浏览器 / 缺 dev server 都给出明确提示。
+- 不依赖真实 LLM API key（专门验证无 key 降级态）。
+- 不依赖公网（仅连本地 dev server）。
+- 注册 → Dashboard → 触发 Demo 攻击 → 告警表出现 → 分析当前告警
+  → 验证 Copilot 降级态 → 验证页面无 stack trace / sk-* / regex 泄漏。
+
+运行前置：
+
+1. 启动后端 dev server（默认 :8000）和前端 dev server（默认 :3000）。
+2. 安装 Playwright：``pip install playwright && playwright install chromium``。
+3. 运行：``pytest server/tests/test_demo_flow_e2e.py --run-e2e``。
+"""
+from __future__ import annotations
+
+import os
+import re
+import time
+from importlib.util import find_spec
+from typing import Iterable
+
+import pytest
+
+pytestmark = pytest.mark.e2e
+
+BASE = os.getenv("E2E_BASE_URL", "http://localhost:3000")
+DEFAULT_PASSWORD = os.getenv("E2E_DEFAULT_PASSWORD", "DemoE2EPass123!")
+
+# 任何真密钥、stack trace、Guardrails L1 regex 都不应出现在用户可见 DOM
+# 中（security review SC-2 / SC-4）。这些是 sanity sentinel —— 命中即 fail。
+_FORBIDDEN_DOM_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"sk-[A-Za-z0-9]{16,}"),
+    re.compile(r"sk-proj-[A-Za-z0-9_-]+"),
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"ghp_[A-Za-z0-9]{36}"),
+    re.compile(r"\bTraceback\s+\(most recent call last\)", re.IGNORECASE),
+    re.compile(r"ignore\s+previous\s+instructions", re.IGNORECASE),
+    re.compile(r"disregard\s+.*system\s+prompt", re.IGNORECASE),
+    re.compile(r"forget\s+.*instructions", re.IGNORECASE),
+    re.compile(r"\bsystem\s*:\s*", re.IGNORECASE),
+    re.compile(r"PRIVATE\s+KEY", re.IGNORECASE),
+)
+
+
+def _skip_without_playwright() -> None:
+    if find_spec("playwright") is None:
+        pytest.skip(
+            "未安装 playwright。运行 `pip install playwright && "
+            "playwright install chromium` 后加 --run-e2e 显式执行。"
+        )
+
+
+def _assert_dev_server_reachable(page) -> None:
+    """在浏览器上下文中探测 Next.js API 代理，确保前后端都已就绪。
+
+    失败信息明确指向：需要先启动 dev server。
+    """
+    try:
+        response = page.request.get(f"{BASE}/api/backend/health", timeout=5000)
+    except Exception as exc:  # noqa: BLE001
+        pytest.fail(
+            f"E2E 前置失败：无法连到 {BASE}/api/backend/health。"
+            f"请先启动后端 (:8000) 和前端 (:3000) dev server：\n"
+            f"  1) ./.venv/Scripts/python.exe -m uvicorn server.main:app --port 8000\n"
+            f"  2) cd web-next && npm run dev\n"
+            f"原始错误：{exc}"
+        )
+
+    if response.status != 200:
+        pytest.fail(
+            f"E2E 前置失败：{BASE}/api/backend/health 返回 {response.status}。"
+            f"请确认后端 dev server 正在 :8000 运行。"
+        )
+
+
+def _collect_visible_text(page) -> str:
+    """读取 body 文本，过滤 script/style 节点。"""
+    return page.evaluate(
+        """
+        () => {
+            const body = document.body;
+            if (!body) return '';
+            const clone = body.cloneNode(true);
+            clone.querySelectorAll('script, style, noscript').forEach((n) => n.remove());
+            return (clone.innerText || clone.textContent || '').trim();
+        }
+        """
+    )
+
+
+def _contains_forbidden(text: str) -> str | None:
+    """命中任一敏感 sentinel 则返回对应 pattern；否则 None。"""
+    for pattern in _FORBIDDEN_DOM_PATTERNS:
+        if pattern.search(text):
+            return pattern.pattern
+    return None
+
+
+def _register_unique_user() -> tuple[str, str]:
+    """生成时间戳邮箱，确保测试可重入。"""
+    ts = int(time.time() * 1000)
+    email = f"e2e-demo-{ts}@example.com"
+    return email, DEFAULT_PASSWORD
+
+
+async def _register_via_ui(page, email: str, password: str) -> None:
+    """在前端 UI 上注册并等待自动跳转 /dashboard。"""
+    await page.goto(f"{BASE}/", wait_until="domcontentloaded", timeout=15000)
+
+    # 切到注册模式
+    register_toggle = page.get_by_test_id("register-toggle")
+    if await register_toggle.count() > 0:
+        await register_toggle.first.click()
+        await page.wait_for_timeout(300)
+
+    # 注册 + 自动登录后会自动跳到 /dashboard，最多等 12s
+    await page.get_by_test_id("login-email").fill(email)
+    await page.get_by_test_id("login-password").fill(password)
+
+    async with page.expect_navigation(
+        url=re.compile(r"/dashboard(\?.*)?$"),
+        timeout=12000,
+        wait_until="domcontentloaded",
+    ):
+        await page.get_by_test_id("login-submit").click()
+
+
+async def _wait_for_demo_button(page) -> None:
+    await page.wait_for_selector(
+        '[data-testid="trigger-demo-attack"]',
+        state="visible",
+        timeout=15000,
+    )
+
+
+async def _run_demo_flow() -> dict:
+    """Playwright 端到端 Demo Flow 主流程。
+
+    Returns 一个诊断字典，便于测试报告。
+    """
+    # 缺 playwright 必须先 skip，否则下面的 import 会抛 ModuleNotFoundError
+    _skip_without_playwright()
+
+    from playwright.async_api import async_playwright
+
+    diag: dict = {"registered": False, "demo": False, "copilot": False, "forbidden": None}
+    email, password = _register_unique_user()
+
+    async with async_playwright() as p:
+        launch_options = {"headless": True}
+        executable_path = os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+        if executable_path:
+            launch_options["executable_path"] = executable_path
+
+        try:
+            browser = await p.chromium.launch(**launch_options)
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(
+                f"无法启动 chromium 浏览器。请运行 `playwright install chromium`。"
+                f"原始错误：{exc}"
+            )
+
+        try:
+            context = await browser.new_context(viewport={"width": 1280, "height": 800})
+            page = await context.new_page()
+
+            _assert_dev_server_reachable(page)
+
+            await _register_via_ui(page, email, password)
+            diag["registered"] = True
+
+            await _wait_for_demo_button(page)
+
+            # 1) 触发 Demo 攻击
+            await page.get_by_test_id("trigger-demo-attack").click()
+
+            # 2) 等待告警表出现新行（最多 10s 轮询）
+            demo_row = None
+            for _ in range(20):
+                rows = await page.query_selector_all('[data-testid="attack-log-row"]')
+                if rows:
+                    demo_row = rows[0]
+                    break
+                await page.wait_for_timeout(500)
+
+            assert demo_row is not None, "触发 Demo 攻击后告警表未出现新行。"
+            diag["demo"] = True
+
+            # 3) 点击 "分析当前告警"
+            analyze_btn = page.get_by_test_id("analyze-current-alert")
+            await analyze_btn.wait_for(state="visible", timeout=10000)
+            await analyze_btn.click()
+
+            # 4) 等待 Copilot 出现 assistant 消息（最多 10s）
+            assistant_message = None
+            for _ in range(20):
+                messages = await page.query_selector_all(
+                    '[data-testid="copilot-message"][data-role="assistant"]'
+                )
+                # 跳过空内容（初始占位）
+                for msg in messages:
+                    text = (await msg.inner_text()).strip()
+                    if text and text != "..." and "AI" not in text[:5].upper() == False and "AI" not in text[:6]:
+                        # 找到一条非空 assistant 消息
+                        assistant_message = msg
+                        break
+                if assistant_message is None and messages:
+                    # 兜底：取最后一条 assistant 消息
+                    last = messages[-1]
+                    text = (await last.inner_text()).strip()
+                    if text:
+                        assistant_message = last
+                        break
+                if assistant_message is not None:
+                    break
+                await page.wait_for_timeout(500)
+
+            assert assistant_message is not None, "Copilot 未在 10s 内返回任何消息。"
+            diag["copilot"] = True
+
+            # 5) 验证降级态文案：必须包含 "API Key" 或 "Base URL"
+            assistant_text = (await assistant_message.inner_text()).strip()
+            assert (
+                "API Key" in assistant_text or "Base URL" in assistant_text
+            ), f"Copilot 降级态文案异常：{assistant_text!r}"
+
+            # 6) 整页扫描，禁止出现敏感字面量
+            body_text = _collect_visible_text(page)
+            forbidden = _contains_forbidden(body_text)
+            diag["forbidden"] = forbidden
+            assert forbidden is None, (
+                f"Dashboard 出现禁止外泄的内容（命中模式：{forbidden}）。"
+                f"首 200 字：{body_text[:200]!r}"
+            )
+        finally:
+            await browser.close()
+
+    return diag
+
+
+@pytest.mark.asyncio
+async def test_demo_flow_e2e_browser():
+    """Demo Flow 完整浏览器级 E2E：注册 → 触发 → 分析 → 降级态。"""
+    diag = await _run_demo_flow()
+    # 让测试输出在 -v 模式下可见
+    print(f"\n[E2E 诊断] {diag}")
