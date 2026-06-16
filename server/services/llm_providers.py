@@ -215,6 +215,92 @@ def resolve_provider(name: str) -> LLMProvider:
     return _PROVIDERS.get(name, _PROVIDERS["openai"])
 
 
+# ---- test-only fake provider ----
+#
+# ``FakeLLMProvider`` is **only** used by the Copilot contract test suite.
+# It deliberately is NOT inserted into ``_PROVIDERS``: production code paths
+# (and any non-test caller of ``resolve_provider("fake_test")``) will fall
+# back to ``OpenAICompatibleProvider``. Tests register it explicitly via
+# ``register_provider("fake_test", FakeLLMProvider())`` so a stray reference
+# to ``"fake_test"`` outside the test suite still hits the real OpenAI
+# dialect.
+#
+# The fake emulates the SSE contract:
+#   - each ``request_body`` invocation records the user message / context.
+#   - ``stream_completion`` is overridden to yield ``sse_pack`` tokens
+#     without any network I/O, and finally ``sse_done`` is emitted by the
+#     upstream ``stream_user_chat_completion`` (unchanged).
+#
+# Guardrails in ``copilot_service.copilot_stream`` still run **before**
+# ``stream_user_chat_completion`` is invoked, so a fake provider never
+# receives traffic that the input rail blocks. The contract test asserts
+# this explicitly via ``FakeLLMProvider.call_count``.
+
+
+class FakeLLMProvider(LLMProvider):
+    """Test-only provider that records calls and emits canned SSE tokens.
+
+    Do NOT add to ``_PROVIDERS``; only inject via ``register_provider`` from
+    the ``server/tests/`` tree. Production code MUST never reach this class
+    because the registry does not include ``"fake_test"``.
+    """
+
+    name = "fake_test"
+
+    def __init__(self, response: str | None = None) -> None:
+        self.response = response or "这是测试 fake provider 的安全分析。告警已确认为 SQL 注入，建议立即阻断源 IP。"
+        self.calls: list[dict[str, Any]] = []
+
+    def endpoint(self, runtime: AnalyzerConfig) -> str:
+        return "fake://noop"
+
+    def request_body(
+        self,
+        runtime: AnalyzerConfig,
+        user_message: str,
+        context_block: str,
+        history: list[CopilotMessageIn],
+    ) -> dict[str, Any]:
+        # Record what the upstream layer actually sent. The contract test
+        # asserts that ``context_block`` (which contains the alert_id) is
+        # forwarded, but the fake does **not** persist this payload to any
+        # I/O channel.
+        self.calls.append(
+            {
+                "user_message": user_message,
+                "context_block": context_block,
+                "history_len": len(history),
+                "model": runtime.model,
+            }
+        )
+        return {
+            "model": runtime.model or "fake-model",
+            "messages": [{"role": "user", "content": user_message + context_block}],
+            "stream": True,
+        }
+
+    def extract_delta(self, payload: dict[str, Any]) -> str:
+        return ""
+
+    @property
+    def call_count(self) -> int:
+        return len(self.calls)
+
+    async def fake_stream(self) -> AsyncIterator[str]:
+        """Duck-typed hook that the streaming dispatcher recognises.
+
+        ``stream_completion`` checks for this attribute; if present it
+        yields the canned SSE tokens directly without any network I/O. The
+        dispatcher does not import ``FakeLLMProvider`` — the contract is
+        purely structural.
+        """
+        # Emit a few short tokens so the SSE parser exercises the same
+        # chunk-boundary code path as a real OpenAI stream.
+        chunks = [self.response[i : i + 8] for i in range(0, len(self.response), 8)]
+        for chunk in chunks:
+            yield sse_pack(chunk)
+
+
 def register_provider(name: str, provider: LLMProvider) -> None:
     """Plugin a new strategy at runtime."""
     _PROVIDERS[name] = provider
@@ -231,6 +317,18 @@ async def stream_completion(
     history: list[CopilotMessageIn],
 ) -> AsyncIterator[str]:
     """Iterate SSE tokens from the chosen provider, normalizing deltas."""
+    # Duck-typed fast path: a provider that exposes ``fake_stream`` returns
+    # canned tokens without network I/O. This is how the contract test
+    # exercises the streaming dispatcher end-to-end; the dispatcher does
+    # NOT import any test class — the contract is purely structural.
+    fake_stream = getattr(provider, "fake_stream", None)
+    if fake_stream is not None:
+        # Still let the provider record what it received.
+        provider.request_body(runtime, user_message, context_block, history)
+        async for token in fake_stream():
+            yield token
+        return
+
     endpoint = provider.endpoint(runtime)
     body = provider.request_body(runtime, user_message, context_block, history)
     headers = _provider_headers(provider.name, runtime.api_key)
