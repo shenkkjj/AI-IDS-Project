@@ -71,6 +71,7 @@ interface InputFieldProps {
   inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
   autoComplete?: string;
   disabled?: boolean;
+  testId?: string;
 }
 
 function InputField({
@@ -86,6 +87,7 @@ function InputField({
   inputMode,
   autoComplete,
   disabled,
+  testId,
 }: InputFieldProps) {
   const [focused, setFocused] = useState(false);
   const inputType = showToggle ? (showValue ? "text" : "password") : type;
@@ -113,6 +115,7 @@ function InputField({
           maxLength={maxLength}
           inputMode={inputMode}
           autoComplete={autoComplete}
+          data-testid={testId}
         />
         {showToggle && onToggle && (
           <button
@@ -592,9 +595,9 @@ export default function HomePage() {
                   (mode === "reset" && !!lockedResetEmail) ||
                   (mode === "otp-login" && otpRequestSent)
                 }
-                autoComplete="email"
-                {...(mode === "login" || mode === "register" ? { "data-testid": "login-email" } : {})}
-              />
+                  autoComplete="email"
+                  testId={mode === "login" || mode === "register" ? "login-email" : undefined}
+                />
 
               {(mode === "reset" || (mode === "otp-login" && otpRequestSent)) && (
                 <InputField
@@ -620,7 +623,7 @@ export default function HomePage() {
                   showValue={showPassword}
                   onToggle={() => setShowPassword(!showPassword)}
                   autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  {...(mode === "login" || mode === "register" ? { "data-testid": "login-password" } : {})}
+                  testId={mode === "login" || mode === "register" ? "login-password" : undefined}
                 />
               )}
 
@@ -634,6 +637,7 @@ export default function HomePage() {
                   showToggle
                   showValue={showPassword}
                   onToggle={() => setShowPassword(!showPassword)}
+                  testId={mode === "register" ? "register-confirm-password" : undefined}
                 />
               )}
 

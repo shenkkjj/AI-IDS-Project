@@ -54,13 +54,13 @@ def _skip_without_playwright() -> None:
         )
 
 
-def _assert_dev_server_reachable(page) -> None:
+async def _assert_dev_server_reachable(page) -> None:
     """在浏览器上下文中探测 Next.js API 代理，确保前后端都已就绪。
 
     失败信息明确指向：需要先启动 dev server。
     """
     try:
-        response = page.request.get(f"{BASE}/api/backend/health", timeout=5000)
+        response = await page.request.get(f"{BASE}/api/backend/health", timeout=5000)
     except Exception as exc:  # noqa: BLE001
         pytest.fail(
             f"E2E 前置失败：无法连到 {BASE}/api/backend/health。"
@@ -77,9 +77,9 @@ def _assert_dev_server_reachable(page) -> None:
         )
 
 
-def _collect_visible_text(page) -> str:
+async def _collect_visible_text(page) -> str:
     """读取 body 文本，过滤 script/style 节点。"""
-    return page.evaluate(
+    return await page.evaluate(
         """
         () => {
             const body = document.body;
@@ -110,6 +110,7 @@ def _register_unique_user() -> tuple[str, str]:
 async def _register_via_ui(page, email: str, password: str) -> None:
     """在前端 UI 上注册并等待自动跳转 /dashboard。"""
     await page.goto(f"{BASE}/", wait_until="domcontentloaded", timeout=15000)
+    await page.wait_for_load_state("networkidle", timeout=15000)
 
     # 切到注册模式
     register_toggle = page.get_by_test_id("register-toggle")
@@ -120,6 +121,9 @@ async def _register_via_ui(page, email: str, password: str) -> None:
     # 注册 + 自动登录后会自动跳到 /dashboard，最多等 12s
     await page.get_by_test_id("login-email").fill(email)
     await page.get_by_test_id("login-password").fill(password)
+    confirm_password = page.get_by_test_id("register-confirm-password")
+    if await confirm_password.count() > 0:
+        await confirm_password.first.fill(password)
 
     async with page.expect_navigation(
         url=re.compile(r"/dashboard(\?.*)?$"),
@@ -168,7 +172,7 @@ async def _run_demo_flow() -> dict:
             context = await browser.new_context(viewport={"width": 1280, "height": 800})
             page = await context.new_page()
 
-            _assert_dev_server_reachable(page)
+            await _assert_dev_server_reachable(page)
 
             await _register_via_ui(page, email, password)
             diag["registered"] = True
@@ -195,41 +199,31 @@ async def _run_demo_flow() -> dict:
             await analyze_btn.wait_for(state="visible", timeout=10000)
             await analyze_btn.click()
 
-            # 4) 等待 Copilot 出现 assistant 消息（最多 10s）
-            assistant_message = None
-            for _ in range(20):
+            # 4) 等待 Copilot 出现可验证的 assistant 降级消息（最多 15s）
+            assistant_text = ""
+            for _ in range(30):
                 messages = await page.query_selector_all(
                     '[data-testid="copilot-message"][data-role="assistant"]'
                 )
-                # 跳过空内容（初始占位）
-                for msg in messages:
+                for msg in reversed(messages):
                     text = (await msg.inner_text()).strip()
-                    if text and text != "..." and "AI" not in text[:5].upper() == False and "AI" not in text[:6]:
-                        # 找到一条非空 assistant 消息
-                        assistant_message = msg
+                    if "API Key" in text or "Base URL" in text:
+                        assistant_text = text
                         break
-                if assistant_message is None and messages:
-                    # 兜底：取最后一条 assistant 消息
-                    last = messages[-1]
-                    text = (await last.inner_text()).strip()
-                    if text:
-                        assistant_message = last
-                        break
-                if assistant_message is not None:
+                if assistant_text:
                     break
                 await page.wait_for_timeout(500)
 
-            assert assistant_message is not None, "Copilot 未在 10s 内返回任何消息。"
+            assert assistant_text, "Copilot 未在 15s 内返回可验证的降级态消息。"
             diag["copilot"] = True
 
             # 5) 验证降级态文案：必须包含 "API Key" 或 "Base URL"
-            assistant_text = (await assistant_message.inner_text()).strip()
             assert (
                 "API Key" in assistant_text or "Base URL" in assistant_text
             ), f"Copilot 降级态文案异常：{assistant_text!r}"
 
             # 6) 整页扫描，禁止出现敏感字面量
-            body_text = _collect_visible_text(page)
+            body_text = await _collect_visible_text(page)
             forbidden = _contains_forbidden(body_text)
             diag["forbidden"] = forbidden
             assert forbidden is None, (
