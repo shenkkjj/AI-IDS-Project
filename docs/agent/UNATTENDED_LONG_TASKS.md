@@ -1,0 +1,305 @@
+# 无人值守长任务手册
+
+> 读者：项目 owner、AI Agent。
+> 目的：允许 agent 连续工作较长时间，同时防止无限乱改、偷偷越权、重复失败和不可审查的大 diff。
+> 使用方式：给 agent 下长任务前，把本文件和 `PRODUCT.md` 一起列为必读。
+
+---
+
+## 1. 核心原则
+
+无人值守不等于完全放权。这个项目可以让 agent 长时间执行，但必须满足四个条件：
+
+1. **边界清楚**：知道能改什么、不能改什么。
+2. **预算清楚**：知道最多跑多久、最多尝试几轮。
+3. **证据清楚**：每个阶段留下日志、diff、测试结果和未解决问题。
+4. **停止清楚**：遇到高风险、重复失败、测试无法恢复时必须停下，而不是硬凑完成。
+
+本项目默认采用 **Sequential Pipeline + De-sloppify + Verification** 模式：
+
+```text
+读取上下文 -> 制定小计划 -> 实现一小段 -> 清理 AI 赘余 -> 验证 -> 记录 -> 下一小段
+```
+
+只有当任务已经有完整 RFC、工作单元能互不重叠、并且有清晰合并策略时，才使用并行 agent 或 DAG 模式。
+
+---
+
+## 2. 长任务分级
+
+### L1：低风险无人值守
+
+适合直接跑 1-2 小时：
+
+- 修复文档乱码。
+- 改 README / docs / 注释。
+- 补非核心测试。
+- 拆小型前端组件，但不改业务语义。
+- 清理明显 dead code，且有测试覆盖。
+
+要求：
+
+- 可以自动改文件。
+- 可以自动运行测试。
+- 不允许 commit / push / deploy，除非用户明确要求。
+
+### L2：中风险无人值守
+
+适合跑 1-3 小时，但必须有阶段检查点：
+
+- 新增普通 UI 功能。
+- 新增普通 API。
+- 重构 service/router，但不改认证、安全、数据库 schema。
+- 修复明确 bug。
+
+要求：
+
+- 每完成一个子任务就更新运行日志。
+- 测试失败最多连续修复 3 轮。
+- 如果 diff 超过约 800 行，必须停下并总结，不继续扩大范围。
+
+### L3：高风险半自动
+
+不适合完全无人值守，必须设置硬停止点：
+
+- 认证、授权、session、cookie、JWT。
+- `server/security/**`。
+- LLM Guardrails / prompt injection / MCP。
+- 数据库 schema / migration。
+- `.env.example`、部署、nginx、CI 安全策略。
+- 删除大量文件或跨模块重构。
+
+要求：
+
+- agent 可以研究和写计划。
+- 如果要真正改代码，必须先写风险说明和回滚方案。
+- 改完必须做安全审查。
+- 不允许自动 commit / push / deploy。
+
+---
+
+## 3. 无人值守运行日志
+
+每次长任务必须创建一个运行日志：
+
+```text
+docs/runs/YYYY-MM-DD-task-slug.md
+```
+
+日志模板：
+
+```markdown
+# Run: <任务名>
+
+开始时间：
+运行模式：L1 / L2 / L3
+预算：最长 X 小时，最多 Y 轮修复
+
+## 目标
+
+-
+
+## 范围
+
+允许修改：
+-
+
+禁止修改：
+-
+
+## 计划
+
+- [ ]
+
+## 阶段记录
+
+### 阶段 1
+
+改动：
+验证：
+结果：
+下一步：
+
+## 验证证据
+
+-
+
+## 未解决问题
+
+-
+
+## 最终状态
+
+完成 / 部分完成 / 阻塞
+```
+
+agent 每完成一个阶段都要更新这个文件。长任务结束后，你只看这个文件、`git diff --stat` 和测试结果，就能判断它干了什么。
+
+---
+
+## 4. 默认允许和禁止
+
+### 默认允许
+
+- 读取代码、文档、测试、配置样例。
+- 修改任务范围内的代码和测试。
+- 新增小型文档、运行日志、测试文件。
+- 运行本地测试、typecheck、build。
+- 用小步补丁修复验证失败。
+
+### 默认禁止
+
+- 不经用户明确要求就 commit、push、merge、deploy。
+- 修改真实 `.env` 的 secret 值。
+- 打印、复制、提交任何 secret。
+- 删除数据库、清空数据、重置 git 历史。
+- 为了通过测试而删除、跳过、弱化测试。
+- 在 L3 高风险区域连续大改而不停止汇报。
+
+---
+
+## 5. 停止条件
+
+满足任一条件时，agent 必须停下并写总结：
+
+1. 同一个测试失败连续修复 3 轮仍失败。
+2. 发现任务目标和现有产品边界冲突。
+3. 需要修改认证、授权、密钥、数据库 schema、安全护栏，但原任务没有授权。
+4. 需要外部登录、付费服务、真实生产 secret。
+5. diff 明显失控，超过约 800 行且不是纯文档或生成文件。
+6. 当前验证无法运行，且无法在本地修复环境问题。
+7. 任务已经达到时间预算。
+
+停止不是失败。停止时要交付：
+
+- 已完成内容。
+- 未完成内容。
+- 阻塞原因。
+- 推荐下一条最小工单。
+
+---
+
+## 6. 验证命令基线
+
+### 后端普通任务
+
+```powershell
+$env:APP_SECRET='test-local-secret-key-for-baseline-32chars'
+$env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
+.venv\Scripts\python.exe -m pytest server\tests -q --tb=short
+```
+
+### 可选 Playwright E2E
+
+```powershell
+$env:APP_SECRET='test-local-secret-key-for-baseline-32chars'
+$env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
+.venv\Scripts\python.exe -m pytest server\tests\test_e2e.py -q --tb=short --run-e2e
+```
+
+### LLM Guardrails / 安全护栏任务
+
+```powershell
+$env:APP_SECRET='test-local-secret-key-for-baseline-32chars'
+$env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
+.venv\Scripts\python.exe -m pytest server\tests\security\llm_guardrails -q --tb=short
+```
+
+### 前端任务
+
+```powershell
+npm run typecheck
+npm run build
+```
+
+工作目录：
+
+```powershell
+cd web-next
+```
+
+### 注意
+
+- `pytest server\tests` 是默认后端基线；Playwright E2E 默认跳过，必须用 `--run-e2e` 显式运行。
+- 当前没有独立 ESLint 配置；不要在无人值守或 CI 中使用 `npx next lint`。前端默认使用 `npm run typecheck` 和 `npm run build`。
+
+---
+
+## 7. 无人值守任务提示词
+
+把下面这段复制给 agent，然后替换尖括号内容。
+
+```markdown
+你是 AI-CyberSentinel 的长任务执行 agent。请用中文回复。
+
+启动前必读：
+- `PRODUCT.md`
+- `AGENTS.md`
+- `CLAUDE.md`
+- `docs/agent/UNATTENDED_LONG_TASKS.md`
+
+任务名称：
+- <例如：M0-01 修复 README 与关键文档乱码>
+
+运行模式：
+- <L1 / L2 / L3>
+
+时间与重试预算：
+- 最长运行：<例如 2 小时>
+- 同一失败最多修复：3 轮
+- diff 超过约 800 行时停止总结，除非主要是文档
+
+任务目标：
+- <一句话说明完成后用户能做什么>
+
+允许修改：
+- <path>
+
+禁止修改：
+- 真实 `.env`
+- git 历史
+- 认证/授权/安全护栏/数据库 schema，除非本任务明确列入允许修改
+- 部署、push、merge、生产配置
+
+执行要求：
+1. 先创建 `docs/runs/YYYY-MM-DD-<task-slug>.md` 运行日志。
+2. 把任务拆成 15-30 分钟可验证的小阶段。
+3. 每阶段结束更新运行日志。
+4. 每轮实现后做一次 de-sloppify：删除无意义测试、重复防御、调试输出、注释掉的废代码。
+5. 运行相关验证命令。
+6. 遇到停止条件时立刻停下，写清楚阻塞和下一步。
+
+验收标准：
+- <用户可见行为>
+- <测试或构建命令>
+- <安全要求>
+
+完成时输出：
+- 完成状态：完成 / 部分完成 / 阻塞
+- 改动文件列表
+- 运行过的验证命令和结果
+- 运行日志路径
+- 下一条建议工单
+```
+
+---
+
+## 8. 推荐无人值守队列
+
+当前项目最适合无人值守的顺序：
+
+1. **L1 / M0-01**：修复 README 与关键文档乱码，重写小白启动说明。
+2. **L2 / M0-CI-COVERAGE-01**：对齐后端 CI 覆盖率门槛，补覆盖率或拆分覆盖率边界，不降低真实测试强度。
+3. **L2 / M0-E2E-01**：安装 Playwright 浏览器并启动前后端后，跑通真实 `--run-e2e`。
+4. **L2 / M1-01**：建立 demo 攻击闭环脚本和 smoke test。
+5. **L2 / M1-02**：优化 Copilot 失败态与 Guardrails 拦截态 UI。
+
+不建议一上来让 agent 做：
+
+- 大规模重构 dashboard。
+- Alembic 迁移。
+- 改认证 / 授权。
+- 改 LLM Guardrails 核心策略。
+- 自动部署。
+
+这些可以做，但要先写 RFC，再半自动执行。

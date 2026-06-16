@@ -84,7 +84,7 @@ try:
     if resp.status_code == 200:
         data = resp.json()
         ACCESS_TOKEN = data.get("access_token")
-        log_test("密码登录", True, f"Token: {ACCESS_TOKEN[:30]}..." if ACCESS_TOKEN else "无Token")
+        log_test("密码登录", True, f"Token length: {len(ACCESS_TOKEN)} chars" if ACCESS_TOKEN else "无Token")
     else:
         log_test("密码登录", False, f"状态码: {resp.status_code}, {resp.text[:100]}")
 except Exception as e:

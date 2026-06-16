@@ -15,13 +15,37 @@ function getLoginErrorMessage(errorCode: string): string {
   return "请稍后重试";
 }
 
-function sanitizeBackendError(detail: string): string {
-  if (detail.includes("already") || detail.includes("已存在") || detail.includes("exists")) return "该邮箱已注册";
-  if (detail.includes("weak") || detail.includes("强度")) return "密码强度不足";
-  if (detail.includes("invalid") || detail.includes("无效")) return "输入信息无效";
-  if (detail.includes("expired") || detail.includes("过期")) return "验证码已过期，请重新获取";
-  if (detail.includes("rate") || detail.includes("频繁")) return "请求过于频繁，请稍后重试";
-  if (detail.includes("SMTP") || detail.includes("邮件")) return "邮件服务未配置，请联系管理员或使用密码登录";
+function flattenBackendDetail(detail: unknown): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object" && "msg" in item) {
+          return String((item as { msg?: unknown }).msg || "");
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("；");
+  }
+  if (detail && typeof detail === "object") {
+    const value = detail as { detail?: unknown; msg?: unknown; message?: unknown };
+    return flattenBackendDetail(value.detail || value.msg || value.message || "");
+  }
+  return "";
+}
+
+function sanitizeBackendError(detail: unknown): string {
+  const text = flattenBackendDetail(detail);
+  const lower = text.toLowerCase();
+  if (lower.includes("already") || text.includes("已存在") || lower.includes("exists")) return "该邮箱已注册";
+  if (lower.includes("weak") || text.includes("强度")) return "密码强度不足";
+  if (lower.includes("email") && (lower.includes("valid") || lower.includes("reserved") || text.includes("邮箱"))) return "邮箱格式无效";
+  if (lower.includes("invalid") || text.includes("无效")) return "输入信息无效";
+  if (lower.includes("expired") || text.includes("过期")) return "验证码已过期，请重新获取";
+  if (lower.includes("rate") || text.includes("频繁")) return "请求过于频繁，请稍后重试";
+  if (text.includes("SMTP") || text.includes("邮件")) return "邮件服务未配置，请联系管理员或使用密码登录";
   return "操作失败，请稍后重试";
 }
 

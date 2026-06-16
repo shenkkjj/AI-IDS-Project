@@ -212,3 +212,109 @@ async def receive_alert(alert: AlertIn, request) -> dict[str, Any]:
         "received_at": time.time(),
         "replaced_oldest": replaced_oldest,
     }
+
+
+DEMO_ATTACK_SCENARIOS: dict[str, dict[str, Any]] = {
+    "sql_injection": {
+        "event": "waf_block",
+        "source_ip": "203.0.113.45",
+        "destination_ip": "10.0.0.15",
+        "payload": "' UNION SELECT username,password FROM users --",
+        "model_probability": 0.98,
+        "blocked": True,
+        "risk_level": "critical",
+        "summary": "Demo 攻击：WAF 拦截到疑似 SQL 注入，攻击者尝试枚举用户凭据。",
+        "recommended_actions": [
+            "确认目标接口已使用参数化查询",
+            "检查同源 IP 是否还有扫描或撞库行为",
+            "保留载荷与访问日志用于复盘",
+        ],
+    },
+    "xss": {
+        "event": "waf_block",
+        "source_ip": "198.51.100.23",
+        "destination_ip": "10.0.0.22",
+        "payload": "<script>fetch('/session')</script>",
+        "model_probability": 0.92,
+        "blocked": True,
+        "risk_level": "high",
+        "summary": "Demo 攻击：WAF 拦截到脚本注入载荷，疑似尝试窃取会话信息。",
+        "recommended_actions": [
+            "检查受影响页面是否正确转义用户输入",
+            "确认 CSP 与 HttpOnly cookie 配置",
+            "搜索相同 payload 是否重复出现",
+        ],
+    },
+    "scanner": {
+        "event": "anomaly",
+        "source_ip": "192.0.2.88",
+        "destination_ip": "10.0.0.10",
+        "payload": "nmap scan /admin /wp-login.php /phpmyadmin",
+        "model_probability": 0.81,
+        "blocked": False,
+        "risk_level": "medium",
+        "summary": "Demo 事件：检测到自动化路径扫描，建议关注后续爆破或漏洞利用尝试。",
+        "recommended_actions": [
+            "启用路径访问频率限制",
+            "确认管理入口不暴露在公网",
+            "将来源 IP 加入观察列表",
+        ],
+    },
+}
+
+
+async def trigger_demo_attack(*, user_id: int, scenario: str) -> dict[str, Any]:
+    """Create a deterministic demo alert for the current authenticated user."""
+    template = DEMO_ATTACK_SCENARIOS[scenario]
+    now = time.time()
+    alert = AlertIn(
+        event=template["event"],
+        source_ip=template["source_ip"],
+        destination_ip=template["destination_ip"],
+        payload=template["payload"],
+        alert_user_id=user_id,
+        timestamp=now,
+        model_probability=template["model_probability"],
+        blocked=template["blocked"],
+        block_expires_at=now + 1800 if template["blocked"] else None,
+    )
+    payload = {
+        "alert_id": uuid.uuid4().hex,
+        "raw_alert": alert.model_dump(),
+        "llm_analysis": {
+            "risk_level": template["risk_level"],
+            "summary": template["summary"],
+            "recommended_actions": template["recommended_actions"],
+            "demo_mode": True,
+        },
+        "analysis_error": None,
+        "processed_at": now,
+        "demo": {
+            "scenario": scenario,
+            "story": "模拟攻击 -> 告警入队 -> Dashboard 展示 -> Copilot 告警上下文",
+        },
+    }
+
+    await app_state.alert.append_backlog(payload)
+    await manager.broadcast_json(user_id, payload)
+    return payload
+
+
+def build_demo_copilot_state(user: User, db) -> dict[str, Any]:
+    from server.core.llm_utils import user_config_to_llm_runtime
+    from server.services.user_service import get_or_create_user_config
+
+    config = get_or_create_user_config(db, user.id)
+    runtime, provider = user_config_to_llm_runtime(config, user)
+    ready = bool(runtime.api_key and runtime.base_url)
+    return {
+        "ready": ready,
+        "provider": provider,
+        "model": runtime.model,
+        "fallback_reason": None if ready else "missing_api_key_or_base_url",
+        "next_action": (
+            "点击 AI 助手中的“分析当前告警”获取流式分析。"
+            if ready
+            else "演示闭环已生成告警；如需真实 AI 分析，请先在配置页设置可用的 API Key 与 Base URL。"
+        ),
+    }

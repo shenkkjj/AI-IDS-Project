@@ -3,7 +3,11 @@ from server.analyzer import _is_ssrf_safe, build_chat_completions_url
 
 
 class TestSsrfProtection:
-    def test_public_domain_ok(self):
+    def test_public_domain_ok(self, monkeypatch):
+        monkeypatch.setattr(
+            "server.core.utils._is_url_pointing_to_internal",
+            lambda _url: False,
+        )
         assert _is_ssrf_safe("https://api.deepseek.com")
         assert _is_ssrf_safe("https://api.openai.com")
         assert _is_ssrf_safe("https://www.google.com")

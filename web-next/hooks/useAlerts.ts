@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useDesktopNotify } from "@/hooks/useDesktopNotify";
-import type { AlertItem, BackendAlertItem } from "@/types/alert";
+import type { AlertItem, BackendAlertItem, DemoAttackResponse } from "@/types/alert";
 import { mapBackendAlert } from "@/utils/alertUtils";
 
 // Polling cadence is now a single tunable. Keep this aligned with the
@@ -20,6 +20,8 @@ export function useAlerts() {
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const [selected, setSelected] = useState<AlertItem | null>(null);
   const [loadState, setLoadState] = useState<"loading" | "ready" | "empty" | "error">("loading");
+  const [demoState, setDemoState] = useState<"idle" | "running" | "success" | "error">("idle");
+  const [demoMessage, setDemoMessage] = useState("点击触发 Demo 攻击，生成一条可分析告警。");
   const [page, setPage] = useState(0);
 
   const { wsAlerts, wsConnected } = useWebSocket();
@@ -34,19 +36,25 @@ export function useAlerts() {
   // Both polling and WebSocket pushes are merged through this map.
   const alertById = useRef<Map<string, AlertItem>>(new Map());
 
-  // Stable merge: WebSocket pushes go into the same `alerts` array via the
-  // id-keyed map, so we never have the previous "polled set was replaced
-  // but ws buffer still had the same ids" race.
-  const mergedAlerts = useMemo(() => {
-    // First, ingest any WebSocket items we have not yet seen.
+  const syncAlertsFromMap = useCallback(() => {
+    setAlerts(Array.from(alertById.current.values()).slice(-MAX_RETAINED_ALERTS));
+  }, []);
+
+  useEffect(() => {
+    let changed = false;
     wsAlerts?.forEach((raw, index) => {
       const mapped = mapBackendAlert(raw, index);
       if (mapped.id && !alertById.current.has(mapped.id)) {
         alertById.current.set(mapped.id, mapped);
+        changed = true;
       }
     });
-    return Array.from(alertById.current.values()).slice(-MAX_RETAINED_ALERTS);
-  }, [wsAlerts]);
+    if (changed) {
+      syncAlertsFromMap();
+    }
+  }, [syncAlertsFromMap, wsAlerts]);
+
+  const mergedAlerts = alerts;
 
   const paginatedAlerts = useMemo(() => {
     const start = page * PAGE_SIZE;
@@ -127,6 +135,7 @@ export function useAlerts() {
     const payload = (await response.json().catch(() => ({}))) as { items?: BackendAlertItem[] };
     const items = Array.isArray(payload.items) ? payload.items : [];
     if (items.length === 0) {
+      alertById.current = new Map();
       setAlerts([]);
       setSelected(null);
       setLoadState("empty");
@@ -148,6 +157,41 @@ export function useAlerts() {
       return mapped[0] || null;
     });
   }, []);
+
+  const triggerDemoAttack = useCallback(async (scenario: "sql_injection" | "xss" | "scanner" = "sql_injection") => {
+    setDemoState("running");
+    setDemoMessage("正在触发固定攻击样本...");
+    const response = await fetch(`/api/backend/alerts/demo`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ scenario }),
+      cache: "no-store",
+    });
+
+    if (!response.ok) {
+      const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+      setDemoState("error");
+      setDemoMessage("Demo 攻击触发失败，请检查登录状态和后端服务。");
+      throw new Error(payload.detail || `HTTP ${response.status}`);
+    }
+
+    const payload = (await response.json().catch(() => ({}))) as Partial<DemoAttackResponse>;
+    if (!payload.alert) {
+      setDemoState("error");
+      setDemoMessage("Demo 攻击触发失败：后端响应缺少告警。");
+      throw new Error("Demo alert response missing alert");
+    }
+
+    const mapped = mapBackendAlert(payload.alert, alertById.current.size);
+    alertById.current.set(mapped.id, mapped);
+    syncAlertsFromMap();
+    setSelected(mapped);
+    setLoadState("ready");
+    setDemoState("success");
+    setDemoMessage(payload.copilot?.next_action || "Demo 告警已生成，可在 AI 助手中分析。");
+    return { alert: mapped, copilot: payload.copilot };
+  }, [syncAlertsFromMap]);
 
   useEffect(() => {
     let cancelled = false;
@@ -187,6 +231,9 @@ export function useAlerts() {
     setPage,
     setSelected,
     loadAlerts,
+    triggerDemoAttack,
+    demoState,
+    demoMessage,
     paginatedAlerts,
     totalPages,
     wsConnected,

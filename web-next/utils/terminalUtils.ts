@@ -60,6 +60,6 @@ export function buildTerminalBootstrapLines(): string[] {
 
 export function formatTerminalLine(text: string, tone: TerminalTone = "normal"): string {
   const now = new Date().toLocaleTimeString();
-  const prefix = tone === "warn" ? "[WARN]" : tone === "error" ? "[ERR ]" : "[INFO]";
+  const prefix = tone === "warn" ? "[WARN]" : tone === "error" ? "[ERR ]" : tone === "success" ? "[ OK ]" : "[INFO]";
   return `${now} ${prefix} ${text}`;
 }

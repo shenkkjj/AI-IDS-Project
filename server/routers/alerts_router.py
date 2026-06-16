@@ -1,16 +1,23 @@
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from server.core.security import get_current_user, require_alert_ingest_token, require_auth_user
-from server.core.database import SessionLocal
+from server.core.database import SessionLocal, get_db
 from server.core.state import app_state
 from server.core.websocket import manager
 from server.models.schemas import AlertIn
 from server.models_db import User
 from server.services import alert_service
+from server.services.alert_service import DEMO_ATTACK_SCENARIOS
 
 router = APIRouter(prefix="/alerts", tags=["告警"])
+
+
+class DemoAttackIn(BaseModel):
+    scenario: Literal["sql_injection", "xss", "scanner"] = "sql_injection"
 
 
 @router.post("")
@@ -31,6 +38,24 @@ async def get_alerts(
     user: User = Depends(require_auth_user),
 ) -> dict[str, Any]:
     return await alert_service.get_alerts(user.id, limit)
+
+
+@router.post("/demo")
+async def trigger_demo_attack(
+    data: DemoAttackIn,
+    user: User = Depends(require_auth_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    if data.scenario not in DEMO_ATTACK_SCENARIOS:
+        raise HTTPException(status_code=422, detail="Unknown demo scenario")
+
+    payload = await alert_service.trigger_demo_attack(user_id=user.id, scenario=data.scenario)
+    return {
+        "status": "ok",
+        "scenario": data.scenario,
+        "alert": payload,
+        "copilot": alert_service.build_demo_copilot_state(user, db),
+    }
 
 
 @router.websocket("/ws/alerts")

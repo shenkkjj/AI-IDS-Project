@@ -10,7 +10,7 @@ import json
 import os
 import sys
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable, TextIO
 
 from loguru import logger
 
@@ -36,6 +36,20 @@ def _json_formatter(record: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str) + "\n"
 
 
+def _json_sink(stream: TextIO) -> Callable[[Any], None]:
+    """Build a loguru sink that writes pre-rendered JSON lines.
+
+    Passing `_json_formatter` as `format=` makes loguru parse JSON braces as
+    format placeholders. A sink callback avoids that second formatting pass.
+    """
+
+    def write(message: Any) -> None:
+        stream.write(_json_formatter(message.record))
+        stream.flush()
+
+    return write
+
+
 def configure_logging() -> None:
     """Idempotently install the loguru sinks.
 
@@ -46,7 +60,7 @@ def configure_logging() -> None:
         return
     logger.remove()
     if os.getenv("LOG_FORMAT", "").strip().lower() == "json":
-        logger.add(sys.stderr, format=_json_formatter, level=os.getenv("LOG_LEVEL", "INFO"))
+        logger.add(_json_sink(sys.stderr), level=os.getenv("LOG_LEVEL", "INFO"))
     else:
         logger.add(
             sys.stderr,

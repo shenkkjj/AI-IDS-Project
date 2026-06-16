@@ -1,1 +1,1 @@
-export type TerminalTone = "normal" | "warn" | "error";
+export type TerminalTone = "normal" | "warn" | "error" | "success";

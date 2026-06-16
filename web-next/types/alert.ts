@@ -26,3 +26,18 @@ export interface BackendAlertItem {
     summary?: string;
   };
 }
+
+export interface DemoCopilotState {
+  ready: boolean;
+  provider: string;
+  model: string;
+  fallback_reason?: string | null;
+  next_action: string;
+}
+
+export interface DemoAttackResponse {
+  status: "ok";
+  scenario: "sql_injection" | "xss" | "scanner";
+  alert: BackendAlertItem;
+  copilot: DemoCopilotState;
+}

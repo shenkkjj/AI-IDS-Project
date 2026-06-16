@@ -47,7 +47,7 @@ def test_login():
     print(f"状态码: {resp.status_code}")
     if resp.status_code == 200:
         result = resp.json()
-        print(f"登录成功! Token: {result.get('access_token', '')[:50]}...")
+        print(f"登录成功! Token length: {len(result.get('access_token', ''))} chars")
         return result.get('access_token')
     else:
         print(f"响应: {resp.text[:500]}")

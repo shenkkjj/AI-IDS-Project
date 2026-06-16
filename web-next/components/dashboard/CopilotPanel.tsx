@@ -7,11 +7,21 @@ type CopilotPanelProps = {
   messages: CopilotMessage[];
   draft: string;
   loading: boolean;
+  contextLabel?: string;
   onDraftChange: (value: string) => void;
   onSend: () => void;
+  onAnalyzeAlert?: () => void;
 };
 
-export default function CopilotPanel({ messages, draft, loading, onDraftChange, onSend }: CopilotPanelProps) {
+export default function CopilotPanel({
+  messages,
+  draft,
+  loading,
+  contextLabel,
+  onDraftChange,
+  onSend,
+  onAnalyzeAlert,
+}: CopilotPanelProps) {
   return (
     <div className="h-full flex flex-col border-l border-accent">
       <div className="px-5 py-3 flex items-baseline justify-between border-b border-line">
@@ -22,6 +32,21 @@ export default function CopilotPanel({ messages, draft, loading, onDraftChange, 
         <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent">
           ON
         </span>
+      </div>
+      <div className="px-5 py-3 border-b border-line-subtle">
+        <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-ink-tertiary truncate">
+          {contextLabel || "通用咨询模式"}
+        </div>
+        {onAnalyzeAlert ? (
+          <button
+            type="button"
+            onClick={onAnalyzeAlert}
+            disabled={loading}
+            className="mt-2 text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover disabled:opacity-30 transition-colors"
+          >
+            分析当前告警
+          </button>
+        ) : null}
       </div>
 
       <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4 min-h-0">

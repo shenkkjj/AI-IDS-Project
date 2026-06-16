@@ -10,7 +10,7 @@
     "dev": "next dev -p 3000",
     "build": "next build",
     "start": "next start -p 3000",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "smoke:auth": "bash ./scripts/smoke-auth-flow.sh"
   },
   "dependencies": {

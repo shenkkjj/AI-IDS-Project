@@ -151,7 +151,6 @@ async function buildBackendRequest(method: ProxyMethod, request: NextRequest, ba
 
   const url = new URL(request.url);
   const targetUrl = `${BACKEND_BASE_URL}${backendPath}${url.search}`;
-  console.log("[proxy] targetUrl:", targetUrl, "headers:", Object.keys(headers));
 
   const contentType = request.headers.get("content-type");
   if (contentType) {
@@ -178,7 +177,6 @@ async function buildBackendRequest(method: ProxyMethod, request: NextRequest, ba
       signal: controller.signal,
     });
   } catch (error: unknown) {
-    console.error("[proxy] fetch failed:", targetUrl, error);
     if (error instanceof Error && error.name === "AbortError") {
       return NextResponse.json({ detail: "UPSTREAM_TIMEOUT" }, { status: 504 });
     }

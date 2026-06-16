@@ -172,6 +172,8 @@ AI-IDS-Project/
 | PR 描述 | `PR_DESCRIPTION.md` | 与本次 M1 配套 |
 | Owner 手册 | `OWNER_MANUAL.md` | 给人看的运营手册 |
 | 项目 README | `README.md` | 项目门面 |
+| 产品操作系统 | `PRODUCT.md` | 产品北极星、路线图、Agent 工单与审查模板 |
+| 无人值守长任务 | `docs/agent/UNATTENDED_LONG_TASKS.md` | 长任务预算、停止条件、运行日志与提示词模板 |
 
 **改动 plan 之前**:先在 `AGENTS.md` §4 同步实施状态,再改 plan.md(避免双向不一致)。
 

@@ -1,22 +1,32 @@
 import asyncio
-from playwright.async_api import async_playwright
+import os
+from importlib.util import find_spec
 
-BASE = "http://localhost:3000"
-BACKEND = "http://127.0.0.1:8000"
-ADMIN_EMAIL = "admin@cybersentinel.com"
-ADMIN_PASS = "Admin@123456"
+import pytest
+
+pytestmark = pytest.mark.e2e
+
+BASE = os.getenv("E2E_BASE_URL", "http://localhost:3000")
+ADMIN_EMAIL = os.getenv("E2E_ADMIN_EMAIL", "admin@cybersentinel.com")
+ADMIN_PASS = os.getenv("E2E_ADMIN_PASSWORD", "Admin@123456")
 
 
 async def run():
+    try:
+        from playwright.async_api import async_playwright
+    except ModuleNotFoundError:
+        print("SKIP: 未安装 playwright，运行 python -m playwright install chromium 后再执行 E2E。")
+        return None
+
     results = []
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            executable_path=r"C:\Users\27629\AppData\Local\ms-playwright"
-                            r"\chromium_headless_shell-1208\chrome-headless-shell-win64"
-                            r"\chrome-headless-shell.exe"
-        )
+        launch_options = {"headless": True}
+        executable_path = os.getenv("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
+        if executable_path:
+            launch_options["executable_path"] = executable_path
+
+        browser = await p.chromium.launch(**launch_options)
         page = await browser.new_page()
 
         def ok(name, detail=""):
@@ -145,6 +155,22 @@ async def run():
                 if not ok_val:
                     print(f"  失败: {n} — {m}")
         print(f"{'=' * 60}")
+        return passed, total
+
+
+@pytest.mark.asyncio
+async def test_playwright_e2e():
+    if find_spec("playwright") is None:
+        pytest.skip("未安装 playwright；E2E 为可选测试。")
+
+    result = await run()
+    assert result is not None
+    passed, total = result
+    assert passed == total
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    e2e_result = asyncio.run(run())
+    if e2e_result is None:
+        raise SystemExit(0)
+    e2e_passed, e2e_total = e2e_result
+    raise SystemExit(0 if e2e_passed == e2e_total else 1)

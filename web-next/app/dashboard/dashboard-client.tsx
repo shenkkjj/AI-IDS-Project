@@ -162,6 +162,29 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
 
   const currentRoute = NAV_ITEMS.find((item) => item.key === route);
 
+  async function handleTriggerDemoAttack() {
+    try {
+      const result = await alertsCtx.triggerDemoAttack("sql_injection");
+      const alert = result.alert;
+      terminalCtx.appendLogs([
+        `Demo 攻击已触发: ${alert.source} -> ${alert.target}`,
+        `告警 ${alert.alertId || alert.id} 已进入 Dashboard，可在 AI 助手中分析。`,
+        result.copilot?.ready
+          ? `Copilot 已就绪: ${result.copilot.provider || "custom"} ${result.copilot.model || ""}`.trim()
+          : `Copilot 降级态: ${result.copilot?.next_action || "请先配置 API Key 与 Base URL。"}`,
+      ], "success");
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      terminalCtx.appendLogs([`Demo 攻击触发失败: ${message}`], "error");
+      configCtx.setStatus(formatLoadError(message));
+    }
+  }
+
+  function handleAnalyzeSelectedAlert() {
+    if (!alertsCtx.selected) return;
+    void copilotCtx.sendMessage("请分析当前选中的安全告警，给出风险等级、证据、影响范围和三条立即处置建议。");
+  }
+
   return (
     <div className="min-h-screen bg-bg text-ink">
       {/* ---------- 顶栏 ---------- */}
@@ -330,6 +353,22 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                 action={
                   <div className="flex items-center gap-3">
                     <button
+                      onClick={() => void handleTriggerDemoAttack()}
+                      disabled={alertsCtx.demoState === "running"}
+                      className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover disabled:opacity-30 transition-colors"
+                    >
+                      {alertsCtx.demoState === "running"
+                        ? "触发中"
+                        : alertsCtx.demoState === "success"
+                          ? "Demo 已生成"
+                          : alertsCtx.demoState === "error"
+                            ? "重试 Demo"
+                            : "触发 Demo 攻击"}
+                    </button>
+                    <span className="hidden xl:inline max-w-[360px] truncate text-[10px] font-mono text-ink-tertiary">
+                      {alertsCtx.demoMessage}
+                    </span>
+                    <button
                       onClick={() => {
                         const link = document.createElement("a");
                         link.href = "/api/backend/export/alerts?limit=1000";
@@ -406,8 +445,10 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                     messages={copilotCtx.messages}
                     draft={copilotCtx.input}
                     loading={copilotCtx.sending}
+                    contextLabel={copilotCtx.hint}
                     onDraftChange={copilotCtx.setInput}
                     onSend={() => void copilotCtx.sendMessage(copilotCtx.input)}
+                    onAnalyzeAlert={alertsCtx.selected ? handleAnalyzeSelectedAlert : undefined}
                   />
                 </div>
               </div>

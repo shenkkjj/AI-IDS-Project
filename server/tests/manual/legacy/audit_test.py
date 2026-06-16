@@ -7,7 +7,7 @@ ADMIN_PASS = "Admin@123456"
 RAND_SUFFIX = random.randint(10000, 99999)
 TEST_EMAIL = f"audit_test_{RAND_SUFFIX}@example.com"
 TEST_PASS = "Test@1234"
-DEEPSEEK_KEY = "sk-faa18d6436c148da9255a160b5761c2f"
+DEEPSEEK_KEY = "sk-test-fake-deepseek-key-do-not-use"
 
 results = []
 
