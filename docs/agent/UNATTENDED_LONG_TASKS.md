@@ -284,7 +284,30 @@ cd web-next
 
 ---
 
-## 8. 推荐无人值守队列
+## 8. 可复用超长任务文档
+
+如果任务太长，不要在聊天框里复制完整提示词。把任务固化成 `docs/agent/*.md`，然后只发一个短启动口令。
+
+当前可用的超长任务：
+
+- `docs/agent/M2_SOC_OPERATIONS_BASELINE_TASK.md`：L5 级 M2 SOC 运营基线战役，覆盖 Demo Flow E2E、Copilot contract、审计时间线、生产安全配置检查、文档同步和提交准备。
+
+最近一次 L5 战役执行结果（`docs/runs/2026-06-16-m2-soc-operations-baseline.md`）：
+
+- 13 个阶段全部完成（基线 → E2E → Contract → Timeline → Security check → De-sloppify → 验证矩阵 → 安全审查 → 文档同步 → 最终报告）。
+- 239 passed, 2 skipped, 139 guardrails passed；前端 typecheck/build 通过；env security check 本地开发返回 0。
+- 新增 `test_demo_flow_e2e.py` / `test_copilot_contract.py` / `test_security_timeline.py`，共 19 个新测试。
+- 建议在下一个 owner 工单里 stage 工作树并拆分为 5 个 commit（参考 `docs/runs/...-m2-soc-operations-baseline.md` 阶段 13）。
+
+推荐启动口令：
+
+```text
+请执行 `docs/agent/M2_SOC_OPERATIONS_BASELINE_TASK.md` 中定义的 L5 超长任务。先完整阅读该文件和其中列出的必读上下文，创建运行日志，按阶段推进；不要问我小问题，不要 commit/push/reset/clean，不要使用 git add .。完成后按任务文档输出最终报告。
+```
+
+---
+
+## 9. 推荐无人值守队列
 
 当前项目最适合无人值守的顺序：
 

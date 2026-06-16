@@ -64,11 +64,14 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 ### 2.2 当前明显问题
 
 1. `README.md`、`PRODUCT.md`、`server/STRUCTURE.md` 和 `docs/agent/UNATTENDED_LONG_TASKS.md` 已作为当前入口文档；部分历史文档仍可能存在过时内容，需要按任务逐步清理。
-2. Playwright E2E 仍依赖本地浏览器和前后端服务，默认 pytest 只保留 skip；2026-06-16 已用 in-app Browser 跑通过“注册/登录 -> Dashboard -> 触发 Demo -> 告警可见 -> Copilot 降级态”真实路径。
+2. Playwright E2E 仍依赖本地浏览器和前后端服务，默认 pytest 只保留 skip；2026-06-16 已用 in-app Browser 跑通过”注册/登录 -> Dashboard -> 触发 Demo -> 告警可见 -> Copilot 降级态”真实路径。`server/tests/test_demo_flow_e2e.py` 已把这条路径固化为可重复 E2E。
 3. 当前没有独立 ESLint 配置；CI 已移除 `npx next lint`，前端默认验证为 `npm run typecheck` 和 `npm run build`。
 4. 后端 CI 覆盖率门槛已拆分为阶段性核心口径：全量测试继续运行，80% 覆盖率门槛只统计 LLM Guardrails、RBAC、安全工具和 ORM 模型；全 `server` 包覆盖率约 52% 仍作为后续债务。
 5. `web-next/app/page.tsx` 和 `web-next/app/dashboard/dashboard-client.tsx` 偏大，后续 UI 变更容易让 agent 误伤。
 6. 项目有很强的安全/测试规则，但缺少稳定的产品路线、验收标准和 agent 工单模板。
+7. Copilot 有 key 成功流式路径已通过 `server/tests/test_copilot_contract.py` + `FakeLLMProvider` 保护（默认 `_PROVIDERS` registry 不含 `fake_test`，生产不可达 fake）。
+8. `GET /logs/security-timeline` 端点 + Dashboard § 03.5 段已上线 SOC 时间线；schema 经 sentinel 脱敏，不外泄 regex / stack trace / API key / system prompt。
+9. `scripts/check_env_security.py` 覆盖生产必填 secret、placeholder、CORS、DEV_MODE、MCP 鉴权；本地开发不阻塞，生产模式有 BLOCK 项。
 
 ---
 
@@ -164,12 +167,12 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 
 任务：
 
-1. 建立 Demo Flow 自动化 E2E，保护“登录 -> Dashboard -> 触发 Demo -> 告警可见 -> Copilot 降级/分析”真实路径。
-2. 增加 Copilot fake provider / contract 测试，让有 key 的流式成功路径不依赖真实外部 LLM。
-3. 做审计时间线，把 demo attack、Copilot 请求、Guardrails 决策和关键操作日志变成可见运营证据。
+1. 已完成：建立 Demo Flow 自动化 E2E（`server/tests/test_demo_flow_e2e.py`），保护”登录 -> Dashboard -> 触发 Demo -> 告警可见 -> Copilot 降级/分析”真实路径；显式 `--run-e2e` 触发，默认 pytest 跳过。
+2. 已完成：增加 Copilot fake provider / contract 测试（`server/tests/test_copilot_contract.py` + `FakeLLMProvider`），让有 key 的流式成功路径不依赖真实外部 LLM；`_PROVIDERS` 默认不含 `fake_test`，生产不可达 fake。
+3. 已完成：审计时间线（`GET /logs/security-timeline` + Dashboard § 03.5 段 + `SecurityTimeline` 组件），把 demo attack、Copilot 请求、Guardrails 决策和关键操作日志变成可见运营证据；sentinel 脱敏，敏感字段不外泄。
 4. 统一数据库配置和 Alembic 迁移策略，替代启动时手写 ALTER TABLE。
 5. 给 `/metrics`、`/mcp`、审计清理、Guardrails 状态补运维文档和安全边界。
-6. 明确生产环境最小安全配置：secret、CORS、CSP、cookie、rate limit、nginx allowlist。
+6. 已完成：明确生产环境最小安全配置（`scripts/check_env_security.py`）：secret、CORS、DEV_MODE、metrics/MCP 鉴权、nginx allowlist；退出码 0/1 区分通过/阻塞。
 
 验收：
 
@@ -177,6 +180,8 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 - 安全相关改动必须跑 `server/tests/security/llm_guardrails/` 和安全审查。
 - 生产部署文档能说明失败时如何回滚。
 - 默认测试、Demo Flow、前端 typecheck/build 和至少一个浏览器级 Demo Flow 验收入口通过。
+- `pytest server/tests -q --tb=short` 通过；`pytest server/tests/security/llm_guardrails -q --tb=short` 通过；`pytest server/tests/test_demo_flow_e2e.py --run-e2e` 至少在 skip 模式下打印清晰指引。
+- `python scripts/check_env_security.py` 在本地开发返回 0；在生产模式 + 占位 secret 返回 1。
 
 ### M3：产品体验升级
 
