@@ -50,6 +50,20 @@ async def trigger_demo_attack(
         raise HTTPException(status_code=422, detail="Unknown demo scenario")
 
     payload = await alert_service.trigger_demo_attack(user_id=user.id, scenario=data.scenario)
+    # SOC 时间线事件：写 Log 让 ``/logs/security-timeline`` 能渲染 demo 攻击。
+    # 失败保护：主请求不能因为 Log 写入失败而失败。
+    try:
+        from server.core.database import create_log
+        create_log(
+            db,
+            user_id=user.id,
+            level="info",
+            action="demo_attack",
+            detail=f"scenario={data.scenario};alert_id={payload['alert_id']}",
+        )
+    except Exception:  # noqa: BLE001
+        # loguru 已经在内部 log 过；这里只保证主请求不被破坏。
+        pass
     return {
         "status": "ok",
         "scenario": data.scenario,
