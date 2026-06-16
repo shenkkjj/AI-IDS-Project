@@ -4,6 +4,14 @@ export { buildReportMarkdown, listToMarkdownLines, REPORT_LATEST_ALERTS_LIMIT } 
 export { runTerminalCommand, buildTerminalBootstrapLines, formatTerminalLine } from "./terminalUtils";
 export { mapSiteHealthToUptime, inferProxyPath } from "./siteUtils";
 export { routeDescription } from "./routeUtils";
+export {
+  riskLabel,
+  riskTone,
+  compareRisk,
+  deriveAlertDetail,
+  deriveBriefing,
+} from "./alertBriefingUtils";
+export type { AlertDetail } from "../types/alertBriefing";
 
 export async function fetchWithRetry(url: string, options?: RequestInit & { retries?: number }): Promise<Response> {
   const headers: Record<string, string> = {
