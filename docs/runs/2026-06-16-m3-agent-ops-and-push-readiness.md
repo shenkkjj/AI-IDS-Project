@@ -52,8 +52,8 @@
 - [x] Phase 1: 创建运行日志
 - [x] Phase 2: Git 提交栈审计
 - [x] Phase 3: 文档一致性审计
-- [ ] Phase 4: 精确 stage & commit agent 文档
-- [ ] Phase 5: 最终验证矩阵
+- [x] Phase 4: 精确 stage & commit agent 文档
+- [x] Phase 5: 最终验证矩阵
 - [ ] Phase 6: Push Gate
 
 ## 阶段记录
@@ -119,4 +119,75 @@ Phase 2 结果：通过。进入 Phase 3。
 
 Phase 3 结果：通过。三份 agent 文档互引一致、覆盖明确、禁止/允许边界清晰。无需修改 `UNATTENDED_LONG_TASKS.md`（已含引用）。
 
-### Phase 4 — 精确 stage & commit agent 文档（待补）
+### Phase 4 — 精确 stage & commit agent 文档
+
+执行：
+
+```text
+git add -- docs/agent/UNATTENDED_LONG_TASKS.md \
+         docs/agent/M3_DEMO_READY_SOC_WORKBENCH_CLOSING_TASK.md \
+         docs/agent/M3_AGENT_OPS_AND_PUSH_READINESS_TASK.md \
+         docs/runs/2026-06-16-m3-agent-ops-and-push-readiness.md
+git diff --cached --name-only
+```
+
+`git diff --cached --name-only` 输出（顺序无关）：
+
+```text
+docs/agent/M3_AGENT_OPS_AND_PUSH_READINESS_TASK.md
+docs/agent/M3_DEMO_READY_SOC_WORKBENCH_CLOSING_TASK.md
+docs/agent/UNATTENDED_LONG_TASKS.md
+docs/runs/2026-06-16-m3-agent-ops-and-push-readiness.md
+```
+
+（CRLF 警告为 Windows Git 默认换行策略，文件语义无影响。）
+
+暂存区核对：恰好 4 个文件，无 `.coverage` / `.claude/settings.local.json` / 真实 `.env` / 业务代码 ✓
+
+提交命令：
+
+```text
+git commit -m "docs(agent): 固化超长任务默认工作流"
+```
+
+结果：
+
+- commit `a644e4b` 在 `main` 上创建
+- 4 files changed, 653 insertions(+)
+- 新增 3 个文件：`M3_AGENT_OPS_AND_PUSH_READINESS_TASK.md` / `M3_DEMO_READY_SOC_WORKBENCH_CLOSING_TASK.md` / `docs/runs/2026-06-16-m3-agent-ops-and-push-readiness.md`
+- 修改 1 个文件：`docs/agent/UNATTENDED_LONG_TASKS.md`（owner 偏好追加段 + 新增可复用超长任务引用）
+- 当前分支 `main` 现在领先 `origin/main` 5 个 commit（4 M3 + 1 docs(agent)）
+- 工作树未 stage 文件：`.claude/settings.local.json` / `.coverage`（均为可接受本地噪音）
+
+`git log --name-only --format="commit %h %s" origin/main..HEAD -- .coverage .claude/settings.local.json` 输出：空（5 个 commit 仍不包含禁用文件 ✓）
+
+Phase 4 结果：通过。进入 Phase 5。
+
+### Phase 5 — 最终验证矩阵
+
+按任务文档 §6 Phase 5 顺序执行（**不并行** typecheck 与 build）：
+
+| # | 命令 | 结果 |
+|---|---|---|
+| 1 | `node docs/runs/2026-06-16-m3-verify-briefing-buckets.mjs` | ✅ `[OK] deriveBriefing 桶数验证通过`：24h → 24 桶 / 168h → 7 桶 / windowHours 24 & 168 全对（4/4 OK） |
+| 2 | `cd web-next && npm run typecheck` | ✅ `> next typegen && tsc --noEmit` 一次通过，0 错误；`✓ Route types generated successfully` |
+| 3 | `cd web-next && npm run build` | ✅ `✓ Compiled successfully in 7.2s`；`✓ Generating static pages (6/6)`；`/dashboard 33.5 kB / First Load JS 181 kB`（基线 25.4 kB → 33.5 kB） |
+| 4 | `pytest server/tests -q --tb=short` | ✅ `242 passed, 2 skipped, 17 warnings in 73.35s`（与 M3 收口任务日志一致；warnings 全为 nemoguardrails 内部 Pydantic V1 弃用提示，与本次改动无关） |
+| 5 | `pytest server/tests/test_demo_flow_e2e.py --run-e2e`（启动 uvicorn :8000 + next :3000 + Chrome = 200） | ✅ `1 passed in 13.74s`（注册 → /dashboard → 触发 Demo → 告警可见 → analyze → Copilot 降级态 → 无敏感 sentinel 命中 全通过） |
+| 6 | `git diff --check` | ✅ `exit=0`（无冲突标记） |
+
+真实浏览器 E2E 启动链路：
+
+```text
+uvicorn server.main:app --host 127.0.0.1 --port 8000  →  /docs=200
+npm run dev (web-next)                                  →  /=200
+curl /api/backend/health (next 代理)                    →  200
+PLAYWRIGHT_CHROMIUM_EXECUTABLE='C:\Program Files\Google\Chrome\Application\chrome.exe' \
+  pytest server/tests/test_demo_flow_e2e.py --run-e2e   →  1 passed in 13.74s
+```
+
+dev server 已在 Phase 5 完成后用 TaskStop 释放端口。
+
+Phase 5 结果：通过。所有命令均按任务文档要求顺序执行，typecheck 与 build 串行。
+
+### Phase 6 — Push Gate（待补）
