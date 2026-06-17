@@ -30,6 +30,41 @@ class AlertState:
         async with self.backlog_lock:
             return list(self.backlog)
 
+    async def update_backlog_triage(
+        self,
+        *,
+        user_id: int,
+        alert_id: str,
+        triage: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """在 lock 内按 alert_id 查找指定用户的告警并写入 triage。
+
+        所有权规则:必须 ``raw_alert.alert_user_id == user_id``,否则视为
+        "不存在"(返回 ``None``)。这保证后续路由层对非 owner / 不存在
+        两种情况统一返回 404,避免通过 403 暴露 alert_id 是否存在。
+
+        返回值:
+        - 写入成功时,返回包含更新后 triage 的 payload 浅拷贝。
+        - 未找到 / 不属于该用户时,返回 ``None``。
+        """
+        async with self.backlog_lock:
+            target_index: int | None = None
+            target_payload: dict[str, Any] | None = None
+            for index, item in enumerate(self.backlog):
+                if str(item.get("alert_id", "")) != alert_id:
+                    continue
+                raw_alert = item.get("raw_alert") or {}
+                if int(raw_alert.get("alert_user_id") or 0) == int(user_id):
+                    target_index = index
+                    target_payload = item
+                break
+            if target_payload is None or target_index is None:
+                return None
+            updated = dict(target_payload)
+            updated["triage"] = dict(triage)
+            self.backlog[target_index] = updated
+            return updated
+
     def enqueue_alert(self, alert: AlertIn) -> tuple[bool, bool]:
         try:
             self.queue.put_nowait(alert)

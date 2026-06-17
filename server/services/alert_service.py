@@ -14,9 +14,107 @@ from server.core.database import SessionLocal
 from server.services.llm_service import get_runtime_llm_config
 from server.core.state import app_state
 from server.mailer import send_alert_email
-from server.models.schemas import AlertIn
+from server.models.schemas import AlertIn, AlertTriageUpdateIn
 from server.models_db import User, UserConfig
 from server.core.websocket import manager
+
+
+# ---------------------------------------------------------------------------
+# 告警研判 (M3-02)
+# ---------------------------------------------------------------------------
+#
+# 设计要点(参考 docs/agent/M3_02_ALERT_TRIAGE_RESPONSE_WORKBENCH_TASK.md §3):
+# - 状态保存到当前进程的告警 backlog payload 中,跨重启不保留。
+# - 状态变更走 ``create_log`` 写审计,detail 仅含脱敏摘要(alert_id / status /
+#   disposition / note_length / source_ip 摘要),不写完整 payload / note / secret。
+# - 旧告警(没有 triage 字段)在 ``get_alerts`` 返回时映射为默认 ``new``。
+
+_TRIAGE_DEFAULT_STATUS = "new"
+_TRIAGE_AUDIT_ACTION = "alert_triage_update"
+
+
+def default_alert_triage() -> dict[str, Any]:
+    """新告警的默认 triage 字段。"""
+
+    return {
+        "status": _TRIAGE_DEFAULT_STATUS,
+        "disposition": None,
+        "analyst_note": None,
+        "updated_at": 0,
+        "updated_by": None,
+    }
+
+
+def _ensure_triage(payload: dict[str, Any]) -> dict[str, Any]:
+    """确保 payload 含 triage 字段(旧告警自动补默认)."""
+
+    if "triage" not in payload or not isinstance(payload.get("triage"), dict):
+        payload["triage"] = default_alert_triage()
+    return payload
+
+
+def _build_audit_detail(
+    *,
+    alert_id: str,
+    status: str,
+    disposition: str | None,
+    note_length: int,
+    source_ip: str | None,
+) -> str:
+    """构造脱敏的审计 detail(不写完整 payload / note / secret)."""
+
+    src = ""
+    if source_ip:
+        src = source_ip
+    parts = [
+        f"alert_id={alert_id}",
+        f"status={status}",
+        f"disposition={disposition or ''}",
+        f"note_length={note_length}",
+    ]
+    if src:
+        parts.append(f"source_ip={src}")
+    return ";".join(parts)
+
+
+async def update_alert_triage(
+    user_id: int,
+    alert_id: str,
+    data: AlertTriageUpdateIn,
+) -> dict[str, Any] | None:
+    """更新告警 triage;非 owner / 不存在返回 ``None``。"""
+
+    now = time.time()
+    triage_payload: dict[str, Any] = {
+        "status": data.status,
+        "disposition": data.disposition,
+        "analyst_note": data.analyst_note,
+        "updated_at": now,
+        "updated_by": int(user_id),
+    }
+    updated = await app_state.alert.update_backlog_triage(
+        user_id=int(user_id),
+        alert_id=alert_id,
+        triage=triage_payload,
+    )
+    if updated is None:
+        return None
+
+    return {
+        "triage": triage_payload,
+        "alert": updated,
+        "audit": {
+            "action": _TRIAGE_AUDIT_ACTION,
+            "detail": _build_audit_detail(
+                alert_id=alert_id,
+                status=data.status,
+                disposition=data.disposition,
+                note_length=len(data.analyst_note or ""),
+                source_ip=str((updated.get("raw_alert") or {}).get("source_ip") or ""),
+            ),
+            "user_id": int(user_id),
+        },
+    }
 
 
 def _feature_value(raw: dict[str, Any], key: str) -> Any:
@@ -106,13 +204,13 @@ async def process_alert(alert: AlertIn) -> dict[str, Any]:
         analysis_error = str(exc)
         logger.exception("LLM analysis failed: {}", exc)
 
-    return {
+    return _ensure_triage({
         "alert_id": uuid.uuid4().hex,
         "raw_alert": alert.model_dump(),
         "llm_analysis": analysis,
         "analysis_error": analysis_error,
         "processed_at": time.time(),
-    }
+    })
 
 
 async def _should_send_alert_email(user_id: int) -> bool:
@@ -189,7 +287,7 @@ async def alert_worker(worker_id: int) -> None:
 
 async def get_alerts(user_id: int, limit: int = 100) -> dict[str, Any]:
     backlog = await app_state.alert.get_backlog_snapshot()
-    user_items = [item for item in backlog if (item.get("raw_alert") or {}).get("alert_user_id") == user_id]
+    user_items = [_ensure_triage(item) for item in backlog if (item.get("raw_alert") or {}).get("alert_user_id") == user_id]
     bounded = max(1, min(limit, ALERT_BACKLOG_SIZE))
     return {
         "items": user_items[-bounded:],
@@ -278,7 +376,7 @@ async def trigger_demo_attack(*, user_id: int, scenario: str) -> dict[str, Any]:
         blocked=template["blocked"],
         block_expires_at=now + 1800 if template["blocked"] else None,
     )
-    payload = {
+    payload = _ensure_triage({
         "alert_id": uuid.uuid4().hex,
         "raw_alert": alert.model_dump(),
         "llm_analysis": {
@@ -293,7 +391,7 @@ async def trigger_demo_attack(*, user_id: int, scenario: str) -> dict[str, Any]:
             "scenario": scenario,
             "story": "模拟攻击 -> 告警入队 -> Dashboard 展示 -> Copilot 告警上下文",
         },
-    }
+    })
 
     await app_state.alert.append_backlog(payload)
     await manager.broadcast_json(user_id, payload)

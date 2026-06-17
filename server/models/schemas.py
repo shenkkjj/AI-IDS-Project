@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -11,6 +11,38 @@ def _validate_password_strength(password: str) -> str:
     if not (has_upper and has_lower and has_digit):
         raise ValueError("密码必须包含大写字母、小写字母和数字")
     return password
+
+
+# ---------------------------------------------------------------------------
+# 告警研判 (M3-02)
+# ---------------------------------------------------------------------------
+
+# 稳定的研判状态枚举,后端契约白名单。
+TRIAGE_STATUS_VALUES = ("new", "investigating", "contained", "false_positive", "resolved")
+AlertTriageStatus = Literal["new", "investigating", "contained", "false_positive", "resolved"]
+
+
+class AlertTriageUpdateIn(BaseModel):
+    """PATCH /alerts/{alert_id}/triage 请求体。
+
+    - ``status`` 必须落在 ``TRIAGE_STATUS_VALUES`` 内,否则由 Pydantic 返回 422。
+    - ``disposition`` 是可选的处置分类(自定义短码,如 ``blocked_at_waf``)。
+    - ``analyst_note`` 上限 800 字符,由 Pydantic 强制。
+    """
+
+    status: AlertTriageStatus
+    disposition: str | None = Field(default=None, max_length=64)
+    analyst_note: str | None = Field(default=None, max_length=800)
+
+
+class AlertTriageOut(BaseModel):
+    """GET /alerts 与 PATCH 响应中的 triage 字段。"""
+
+    status: AlertTriageStatus
+    disposition: str | None = None
+    analyst_note: str | None = None
+    updated_at: float
+    updated_by: int | None = None
 
 
 class AlertIn(BaseModel):

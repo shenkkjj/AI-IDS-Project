@@ -1,14 +1,15 @@
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from server.core.security import get_current_user, require_alert_ingest_token, require_auth_user
-from server.core.database import SessionLocal, get_db
+from server.core.database import SessionLocal, create_log, get_db
 from server.core.state import app_state
 from server.core.websocket import manager
-from server.models.schemas import AlertIn
+from server.models.schemas import AlertIn, AlertTriageUpdateIn
 from server.models_db import User
 from server.services import alert_service
 from server.services.alert_service import DEMO_ATTACK_SCENARIOS
@@ -38,6 +39,51 @@ async def get_alerts(
     user: User = Depends(require_auth_user),
 ) -> dict[str, Any]:
     return await alert_service.get_alerts(user.id, limit)
+
+
+@router.patch("/{alert_id}/triage")
+async def update_alert_triage(
+    alert_id: str,
+    data: AlertTriageUpdateIn,
+    user: User = Depends(require_auth_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """更新指定告警的研判状态。
+
+    - 仅告警所有者可更新;非 owner / 不存在统一返回 404,
+      避免通过 403 暴露 alert_id 是否存在。
+    - 无效 status / 超长 note 由 Pydantic 在进入 handler 前返回 422。
+    - 审计日志 ``Log(action="alert_triage_update")`` 记录脱敏摘要;
+      写入失败不得破坏主请求。
+    """
+
+    result = await alert_service.update_alert_triage(
+        user_id=user.id,
+        alert_id=alert_id,
+        data=data,
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    # 审计:写脱敏摘要。失败保护:仅 warn,不抛。
+    audit = result["audit"]
+    try:
+        create_log(
+            db,
+            user_id=audit["user_id"],
+            level="info",
+            action=audit["action"],
+            detail=audit["detail"],
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("alert_triage_update audit log failed alert_id={} err={}", alert_id, exc)
+
+    return {
+        "status": "ok",
+        "alert_id": alert_id,
+        "triage": result["triage"],
+        "alert": result["alert"],
+    }
 
 
 @router.post("/demo")
