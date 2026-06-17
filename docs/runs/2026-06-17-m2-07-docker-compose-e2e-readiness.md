@@ -215,7 +215,54 @@ Start-Service com.docker.service
 - [x] 阶段 6：Smoke — `scripts/compose_smoke.ps1` 一键 build/up/smoke 脚本 ✅
 - [x] 阶段 7：文档和脚本同步（`docs/deploy/COMPOSE_QUICKSTART.md`、`deploy.ps1 --env-file` 支持、`.env.example` 补 `ALLOWED_ORIGINS`、README 改写） ✅
 - [x] 阶段 8：安全和回滚审查（`git diff --check` 通过、0 secret 命中、暂存区空） ✅
-- [ ] 阶段 9：最终报告
+- [x] 阶段 9：初版最终报告（沙箱无 daemon 时）✅
+- [x] 阶段 10：修 smoke 脚本 PowerShell 5.1 兼容（UTF-8 BOM + 移除中文注释） ✅
+- [x] 阶段 11：实跑 smoke — Docker daemon 在用户操作后启动成功 ✅
+- [x] 阶段 12：修 smoke 失败（3 轮内）：Dockerfile 缺 alembic.ini / 密码不一致 / nginx 缺 http{} 块 ✅
+- [x] 阶段 13：commit + push（commit 5e4d158 落地；push 受本机 github.com SSL 限制阻塞） ✅
+
+---
+
+### 阶段 10-13：实跑收口与推送（已完成）
+
+#### 实跑发现的问题与修复（最多 3 轮，实际 3 轮）
+
+| 轮次 | 失败 | 根因 | 修复 |
+|---|---|---|---|
+| 1 | `migrate` 容器 `FAILED: No config file 'alembic.ini' found` | `server/Dockerfile` 只 `COPY server/`,没复制 repo 根的 `alembic.ini` 和 `migrations/` | `server/Dockerfile` 加 `COPY alembic.ini ./alembic.ini` + `COPY migrations/ ./migrations/` |
+| 2 | `sqlalchemy.exc.OperationalError: password authentication failed for user "cybersentinel"` | `.env.compose.local` 中 `POSTGRES_PASSWORD` 和 `DATABASE_URL` 嵌入密码用了**两次独立** `secrets.token_urlsafe(32)` 调用 | 重写 `.env.compose.local` 生成脚本，预先用单个 `pg_password` 变量同时填 `POSTGRES_PASSWORD` 和 `DATABASE_URL`；同时 `down -v` 清旧 `postgres-data` volume |
+| 3 | `nginx: [emerg] "upstream" directive is not allowed here in /etc/nginx/nginx.conf:9` | 我的 `nginx.conf` 缺 `http {}` 包装 — `upstream` 必须在 `http` 块内 | 把 `upstream` / `server` 块全部包进 `http { ... }`；加 `events { worker_connections 1024; }`；`location /api/` 改 `proxy_pass http://backend/;` 剥 `/api/` 前缀 |
+
+#### 5/5 端到端 smoke 验证（实跑结果）
+
+```powershell
+# migrate
+migrate logs: INFO  [alembic.runtime.migration] Running upgrade  -> d9af4388f20a, baseline schema
+# backend + frontend + nginx
+curl -sS -o /dev/null -w "HTTP=%{http_code}\n" http://127.0.0.1:8000/health      # 200
+curl -sS -o /dev/null -w "HTTP=%{http_code}\n" http://127.0.0.1:8000/ready      # 200
+curl -sS -o /dev/null -w "HTTP=%{http_code}\n" http://127.0.0.1/health         # 200 (nginx proxy)
+curl -sS -o /dev/null -w "HTTP=%{http_code}\n" -X OPTIONS \
+     http://127.0.0.1/api/auth/login/password                                     # 405 (route reaches backend)
+curl -sS -o /dev/null -w "HTTP=%{http_code}\n" http://127.0.0.1:3000           # 200
+```
+
+#### Commit 与 push
+
+- 精确 stage 14 个 M2-07 文件 + 1 个新 `M2_07_DOCKER_COMPOSE_E2E_READINESS_TASK.md` = 15 个文件 / +1391 / -152
+- 工作树未 staged 仅有 `.claude/settings.local.json` 和 `.coverage`（禁止文件，**正确未 stage**）
+- commit `5e4d158` 已落地（`feat(deploy): M2-07 docker compose e2e readiness`）
+- `git push origin main` 失败：`fatal: unable to access 'https://github.com/...': schannel: failed to receive handshake, SSL/TLS connection failed` — 本机 github.com 网络受限
+- 本地状态：`## main...origin/main [ahead 1]` — 领先 1 commit，等用户在能联网的环境里 `git push origin main`
+
+#### 阶段 10-13 结果
+
+- 5/5 端点实跑通过 ✅
+- 3 轮修复全部解决真实根因 ✅
+- 15 文件 commit 落地 ✅
+- push 受限已明确记录（待用户在能联网环境推送） ✅
+
+---
 
 ---
 
@@ -412,13 +459,117 @@ Start-Service com.docker.service
 
 ## 最终状态
 
-**完成状态：部分完成（代码 / 配置 / 文档 / 脚本全收口；端到端 build/up/smoke 实跑因沙箱无 Docker daemon 阻塞）**
+**完成状态：完成（commit 5e4d158 已落地，5/5 端点实跑通过；push 受本机 github.com SSL 限制阻塞）**
 
 - ✅ 静态 RED 证据（14 个问题代码行级定位）
 - ✅ 全部 GREEN 修复（数据库/迁移/入口/网络/healthcheck/origin/证书/文档）
-- ✅ 一键 smoke 脚本（`scripts/compose_smoke.ps1`）
+- ✅ 一键 smoke 脚本（`scripts/compose_smoke.ps1`，UTF-8 BOM 兼容 PowerShell 5.1）
 - ✅ 完整文档（`docs/deploy/COMPOSE_QUICKSTART.md` + `nginx/certs/README.md` + README 更新）
 - ✅ 安全审查通过（无 secret 泄漏 / 暂存区空 / 未触碰禁止文件 / `/mcp` 仍 fail-closed）
-- ❌ 沙箱内 Docker daemon 不可用，`docker compose up` 实跑阻塞（任务文档 §1 明确允许的"明确阻塞"路径）
+- ✅ 沙箱内实跑（Docker daemon 在用户操作后启动）：5/5 端点通过
+- ✅ 3 轮修复内解决所有真实失败根因（alembic.ini 缺失 / 密码不一致 / nginx http{} 包装）
+- ✅ commit `5e4d158 feat(deploy): M2-07 docker compose e2e readiness` 落地（15 files / +1391 / -152）
+- ⚠️ `git push origin main` 失败：`schannel: failed to receive handshake, SSL/TLS connection failed` — 本机 github.com 网络受限
+- 本地状态：`## main...origin/main [ahead 1]`
 
-下一条最小工单：在有 Docker daemon 的开发机跑 `.\scripts\compose_smoke.ps1 -EnvFile .env.compose.local`；若任一步骤失败，按脚本输出的服务名抓 `docker compose logs --tail=200 <service>` 排查。
+下一条最小工单：在能联网访问 github.com 的环境跑 `git push origin main`（commit 已在本地就绪）。
+
+---
+
+### 阶段 14：push 与运行日志最终收口
+
+> 任务文档：`docs/agent/M2_07_PUSH_AND_RUNLOG_FINALIZATION_TASK.md`（L5）
+> 启动时间：2026-06-17
+> 目标：把上一阶段已落地的 M2-07 commit 推到 `origin/main`，或把推送阻塞证据写清楚。
+
+#### 阶段 14.1：工作面复核
+
+- 当前分支：`main`（与 `origin/main` 对比：`ahead 1`）
+- 本地 HEAD：`5e4d1582bf589a39940cf7489871ac7449d183c4` = `5e4d158 feat(deploy): M2-07 docker compose e2e readiness`
+- `origin/main` HEAD：`349758f docs(db): sync database migration facts and run handbook`
+- staged 区（`git diff --cached --name-only`）：**空** ✅
+- 工作树 modified：
+  - `.coverage`（gitignore 第 35 行已排除，但**已被追踪**；M2-07 commit 之前历史里 add 过；本任务**不 stage**）✅
+  - `.claude/settings.local.json`（已被追踪；本任务**不 stage**）✅
+  - `docs/agent/UNATTENDED_LONG_TASKS.md`（新增 M2-07 push 收口任务索引 1 行，owner 提前补交）✅
+  - `docs/runs/2026-06-17-m2-07-docker-compose-e2e-readiness.md`（本运行日志阶段 10-13 后续补充）✅
+- 工作树 untracked：
+  - `docs/agent/M2_07_PUSH_AND_RUNLOG_FINALIZATION_TASK.md`（本任务文档）✅
+
+#### 阶段 14.2：M2-07 commit 复核
+
+`git show --stat --name-status HEAD` 输出 15 个文件：
+
+| 文件 | 状态 | 类型 |
+|---|---|---|
+| `.env.example` | M | env 样例（占位符）|
+| `.gitignore` | M | 加 `nginx/certs/*` + `.coverage` 已存在 |
+| `README.md` | M | Docker Compose 启动章节重写 |
+| `deploy.ps1` | M | v2.2 加 `-EnvFile` |
+| `docker-compose.yml` | M | 6 services，DATABASE_URL `postgresql+psycopg` |
+| `docs/agent/M2_07_DOCKER_COMPOSE_E2E_READINESS_TASK.md` | A | 任务文档 |
+| `docs/agent/UNATTENDED_LONG_TASKS.md` | M | 索引 1 行 |
+| `docs/deploy/COMPOSE_QUICKSTART.md` | A | 部署文档 |
+| `docs/runs/2026-06-17-m2-07-docker-compose-e2e-readiness.md` | A | 运行日志 |
+| `nginx/certs/README.md` | A | 证书策略 README |
+| `nginx/nginx.conf` | M | upstream 容器名 + http{} 包装 |
+| `scripts/compose_smoke.ps1` | A | 一键 smoke |
+| `server/Dockerfile` | M | 加 COPY alembic.ini + migrations/ |
+| `web-next/.env.example` | M | 加 ALLOWED_ORIGINS |
+| `web-next/Dockerfile` | M | healthcheck 改 `/` |
+
+8 类禁提交文件**均不在** M2-07 commit 中：
+
+- ❌ `.coverage`（不在 ✅）
+- ❌ `.claude/settings.local.json`（不在 ✅）
+- ❌ 真实 `.env`（不在；只有 `.env.example` ✅）
+- ❌ `.env.compose.local`（不在；`.gitignore:11` 已排除 ✅）
+- ❌ `*.db`（不在；`data/app.db` 未触碰 ✅）
+- ❌ `nginx/certs/*.pem`（不在；只有 `nginx/certs/README.md` ✅）
+- ❌ `nginx/certs/*.key`（不在 ✅）
+- ❌ `nginx/certs/*.crt`（不在 ✅）
+
+#### 阶段 14.3：禁提交文件 `gitignore` 复核
+
+| 文件 | 期望 | 实际 |
+|---|---|---|
+| `.env.compose.local` | ignored | `.gitignore:11:.env.*` ✅ |
+| `nginx/certs/fullchain.pem` | ignored | `.gitignore:18:nginx/certs/*` ✅ |
+| `nginx/certs/README.md` | tracked | `!nginx/certs/README.md` 显式 include ✅ |
+| `.coverage` | ignored | `.gitignore:35:.coverage` ✅（但文件被历史追踪，hook 已隐式过滤）|
+| `.claude/settings.local.json` | not in gitignore | n/a（历史已追踪，本任务不 stage）|
+
+#### 阶段 14.4：未提交内容精确 stage
+
+精确 `git add` 三个允许文件：
+
+```powershell
+git add docs/runs/2026-06-17-m2-07-docker-compose-e2e-readiness.md
+git add docs/agent/UNATTENDED_LONG_TASKS.md
+git add docs/agent/M2_07_PUSH_AND_RUNLOG_FINALIZATION_TASK.md
+```
+
+staged 后复核：
+
+```powershell
+git diff --cached --name-status
+# 期望: 3 个文件全在
+git diff --cached --check
+# 期望: 无错误
+```
+
+#### 阶段 14.5：远端状态与 push
+
+(待执行 — 见阶段 14.6 / 14.7)
+
+#### 阶段 14.6：push 结果
+
+(待执行)
+
+#### 阶段 14.7：失败处理（如有）
+
+(待执行)
+
+#### 阶段 14.8：最终复核与短报告
+
+(待执行)
