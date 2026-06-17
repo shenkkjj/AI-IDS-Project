@@ -83,6 +83,11 @@ if _auth_secret in _DEFAULT_SECRETS:
     sys.exit(1)
 
 validate_cookie_config()
+# M2-01 schema bootstrap: ``init_db()`` 仍负责"无 migration 状态时建空表"，对全新
+# 库或没被 Alembic stamp 的旧开发库作为快速回退；``ensure_user_config_columns()``
+# 是 legacy 兼容层，专门补旧 ``data/app.db`` 上 ``init_db()`` 创建时缺失的列。
+# 新 schema 变更必须通过 Alembic revision（``alembic upgrade head``），不要往
+# ``ensure_user_config_columns`` 加新 ALTER。详见 docs/ALEMBIC_MIGRATION.md。
 init_db()
 ensure_user_config_columns()
 
