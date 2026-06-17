@@ -1,4 +1,4 @@
-export type { AlertRisk, AlertItem, BackendAlertItem } from "./alert";
+export type { AlertRisk, AlertItem, BackendAlertItem, AlertTriage, AlertTriageStatus } from "./alert";
 export type { PersistedUserConfig, ConfigDraft } from "./config";
 export type { TerminalTone } from "./terminal";
 export type { CopilotMessage } from "./copilot";

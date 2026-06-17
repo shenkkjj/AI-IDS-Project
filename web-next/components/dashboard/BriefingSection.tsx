@@ -80,6 +80,34 @@ function BriefingBody({ briefing }: { briefing: AlertBriefing }) {
         />
       </div>
 
+      {/* 研判计数卡：待研判 / 研判中 / 已闭环 */}
+      <div
+        data-testid="briefing-triage-counts"
+        className="grid grid-cols-2 md:grid-cols-3 gap-px bg-line border border-line"
+      >
+        <MetricCell
+          label="待研判 / 研判中"
+          value={String(briefing.triageOpen)}
+          tone={briefing.triageOpen > 0 ? "warning" : "default"}
+        />
+        <MetricCell
+          label="已闭环"
+          value={String(briefing.triageClosed)}
+          tone={briefing.triageClosed > 0 ? "success" : "default"}
+        />
+        <MetricCell
+          label="研判状态分布"
+          value={
+            briefing.triageBreakdown.length === 0
+              ? "—"
+              : briefing.triageBreakdown
+                  .map((item) => `${item.label.slice(0, 2)} ${item.count}`)
+                  .join(" · ")
+          }
+          tone="default"
+        />
+      </div>
+
       {/* 风险分布 + 来源 TOP */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <SubBlock title="风险分布">

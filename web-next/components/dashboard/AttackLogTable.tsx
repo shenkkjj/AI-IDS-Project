@@ -1,7 +1,8 @@
 "use client";
 
 import { CheckCircle2 } from "lucide-react";
-import type { AlertRisk, AlertItem } from "@/types/alert";
+import type { AlertRisk, AlertItem, AlertTriageStatus } from "@/types/alert";
+import { TRIAGE_STATUS_OPTIONS } from "@/types/alert";
 
 type AttackLogTableProps = {
   logs: AlertItem[];
@@ -39,6 +40,28 @@ const toneColor: Record<"danger" | "warning" | "info" | "default", string> = {
   default: "text-ink-tertiary",
 };
 
+function TriageCell({ status }: { status: AlertTriageStatus }) {
+  const meta = TRIAGE_STATUS_OPTIONS.find((option) => option.value === status);
+  const tone = meta?.tone || "default";
+  const cellTone: Record<typeof tone, string> = {
+    danger: "text-danger border-danger",
+    warning: "text-warning border-warning",
+    info: "text-info border-info",
+    success: "text-success border-success",
+    default: "text-ink-tertiary border-line",
+  } as const;
+  return (
+    <span
+      data-testid="triage-row-badge"
+      data-status={status}
+      className={`inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-mono uppercase tracking-[0.1em] border ${cellTone[tone]}`}
+    >
+      <span aria-hidden>·</span>
+      {meta?.shortLabel || status}
+    </span>
+  );
+}
+
 export default function AttackLogTable({ logs, highlightId, selectedId, onSelect, newIds }: AttackLogTableProps) {
   return (
     <div className="h-full flex flex-col">
@@ -58,6 +81,7 @@ export default function AttackLogTable({ logs, highlightId, selectedId, onSelect
               <th className="py-2.5 pr-3 font-mono uppercase tracking-[0.1em] text-[10px] font-normal">目标</th>
               <th className="py-2.5 pr-3 font-mono uppercase tracking-[0.1em] text-[10px] font-normal">载荷</th>
               <th className="py-2.5 pr-3 font-mono uppercase tracking-[0.1em] text-[10px] font-normal">等级</th>
+              <th className="py-2.5 pr-3 font-mono uppercase tracking-[0.1em] text-[10px] font-normal">研判</th>
               <th className="py-2.5 font-mono uppercase tracking-[0.1em] text-[10px] font-normal">拦截</th>
             </tr>
           </thead>
@@ -72,6 +96,7 @@ export default function AttackLogTable({ logs, highlightId, selectedId, onSelect
                   data-testid="attack-log-row"
                   data-risk={log.risk}
                   data-alert-id={log.alertId || log.id}
+                  data-triage-status={log.triage?.status ?? "new"}
                   className={`border-b border-line-subtle transition-colors ${
                     isSelected ? "bg-accent-soft" : ""
                   } ${onSelect ? "cursor-pointer hover:bg-bg-sunken" : ""} ${
@@ -95,6 +120,9 @@ export default function AttackLogTable({ logs, highlightId, selectedId, onSelect
                     <span className={`font-mono text-[10px] uppercase tracking-wider ${toneColor[tone]}`}>
                       · {riskLabel(log.risk)}
                     </span>
+                  </td>
+                  <td className="py-2.5 pr-3">
+                    <TriageCell status={log.triage?.status ?? "new"} />
                   </td>
                   <td className="py-2.5">
                     <span

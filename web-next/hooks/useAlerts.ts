@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useDesktopNotify } from "@/hooks/useDesktopNotify";
-import type { AlertItem, BackendAlertItem, DemoAttackResponse } from "@/types/alert";
+import type {
+  AlertItem,
+  AlertTriage,
+  AlertTriageStatus,
+  BackendAlertItem,
+  DemoAttackResponse,
+} from "@/types/alert";
 import { mapBackendAlert } from "@/utils/alertUtils";
 
 // Polling cadence is now a single tunable. Keep this aligned with the
@@ -193,6 +199,70 @@ export function useAlerts() {
     return { alert: mapped, copilot: payload.copilot };
   }, [syncAlertsFromMap]);
 
+  /**
+   * 研判状态更新 (M3-02)。
+   *
+   * - 成功时,就地更新本地缓存 + 选中的告警 + 触发 React re-render;
+   * - 失败时返回 ``{ ok: false, error }``,调用方负责错误提示。
+   */
+  const updateTriage = useCallback(
+    async (input: {
+      alertId: string;
+      status: AlertTriageStatus;
+      disposition: string | null;
+      analyst_note: string | null;
+    }): Promise<{ ok: boolean; triage?: AlertTriage; alert?: AlertItem; error?: string }> => {
+      const target = alertById.current.get(input.alertId);
+      if (!target) {
+        return { ok: false, error: "未在当前告警列表中找到该告警" };
+      }
+      try {
+        const response = await fetch(
+          `/api/backend/alerts/${encodeURIComponent(input.alertId)}/triage`,
+          {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              status: input.status,
+              disposition: input.disposition,
+              analyst_note: input.analyst_note,
+            }),
+            cache: "no-store",
+          }
+        );
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+          return { ok: false, error: payload.detail || `HTTP ${response.status}` };
+        }
+        const body = (await response.json().catch(() => ({}))) as {
+          status?: string;
+          alert_id?: string;
+          triage?: AlertTriage;
+          alert?: BackendAlertItem;
+        };
+        if (body.status !== "ok" || !body.triage) {
+          return { ok: false, error: "保存成功但响应缺少 triage" };
+        }
+        let updated: AlertItem;
+        if (body.alert) {
+          const refreshed = mapBackendAlert(body.alert, alertById.current.size);
+          updated = { ...refreshed, triage: body.triage };
+        } else {
+          updated = { ...target, triage: body.triage };
+        }
+        alertById.current.set(updated.id, updated);
+        syncAlertsFromMap();
+        setSelected((prev) => (prev && prev.id === updated.id ? updated : prev));
+        return { ok: true, triage: body.triage, alert: updated };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: message };
+      }
+    },
+    [syncAlertsFromMap]
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -232,6 +302,7 @@ export function useAlerts() {
     setSelected,
     loadAlerts,
     triggerDemoAttack,
+    updateTriage,
     demoState,
     demoMessage,
     paginatedAlerts,

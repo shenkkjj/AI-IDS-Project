@@ -3,13 +3,16 @@
 import { useState, useCallback } from "react";
 import { Clipboard, ClipboardCheck, ShieldAlert } from "lucide-react";
 import type { AlertDetail } from "@/types/alertBriefing";
+import type { AlertTriage, AlertTriageStatus } from "@/types/alert";
 import StatusView from "./StatusView";
+import AlertTriagePanel from "./AlertTriagePanel";
 
 /**
  * 告警详情面板。
  *
  * - 数据来自 `deriveAlertDetail(alert)`,不在组件内做风险判定。
  * - 包含风险等级 / 攻击类别 / 证据 / 影响 / 建议动作 / 可复制报告。
+ * - M3-02 阶段在底部接入 ``AlertTriagePanel``,支持状态切换 / 备注保存。
  * - 空态：未选中告警时使用 StatusView.tone="empty"。
  * - 错误态：本组件不直接发请求,错误由 `AlertSection` 拦截后传入。
  */
@@ -21,6 +24,14 @@ export interface AlertDetailPanelProps {
   onCopyReport?: (report: string) => Promise<boolean> | boolean;
   /** 触发"分析当前告警"回调,触发后由 Copilot 接管 */
   onAnalyzeInCopilot?: () => void;
+  /** 触发"保存研判"回调 (M3-02) */
+  onTriageSubmit?: (input: {
+    status: AlertTriageStatus;
+    disposition: string | null;
+    analyst_note: string | null;
+  }) => Promise<boolean>;
+  /** 离线(WS 断开)时禁用保存按钮 */
+  offline?: boolean;
 }
 
 const TONE_CLASS: Record<AlertDetail["riskTone"], string> = {
@@ -42,6 +53,8 @@ export default function AlertDetailPanel({
   alertId,
   onCopyReport,
   onAnalyzeInCopilot,
+  onTriageSubmit,
+  offline = false,
 }: AlertDetailPanelProps) {
   const [copied, setCopied] = useState<"none" | "report" | "summary">("none");
 
@@ -132,6 +145,26 @@ export default function AlertDetailPanel({
           </button>
         ) : null}
       </div>
+
+      {/* 研判与处置面板 (M3-02) */}
+      {onTriageSubmit ? (
+        <AlertTriagePanel
+          alertId={alertId}
+          triage={
+            detail
+              ? ({
+                  status: detail.triageStatus,
+                  disposition: detail.triageDisposition,
+                  analyst_note: detail.triageNote,
+                  updated_at: detail.triageUpdatedAt,
+                  updated_by: detail.triageUpdatedBy,
+                } as AlertTriage)
+              : null
+          }
+          onSubmit={onTriageSubmit}
+          offline={offline}
+        />
+      ) : null}
 
       {/* 底部：可复制报告 */}
       <div className="px-5 py-3 border-t border-line flex items-center justify-between gap-2">

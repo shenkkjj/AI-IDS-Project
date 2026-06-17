@@ -203,6 +203,27 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
     );
   }
 
+  const handleTriageSubmit = async (input: {
+    status: import("@/types/alert").AlertTriageStatus;
+    disposition: string | null;
+    analyst_note: string | null;
+  }): Promise<boolean> => {
+    const alertId = alertsCtx.selected?.alertId || alertsCtx.selected?.id;
+    if (!alertId) return false;
+    const result = await alertsCtx.updateTriage({
+      alertId,
+      status: input.status,
+      disposition: input.disposition,
+      analyst_note: input.analyst_note,
+    });
+    if (!result.ok) {
+      configCtx.setStatus(`研判保存失败: ${result.error || "未知错误"}`);
+      return false;
+    }
+    configCtx.setStatus("研判已保存");
+    return true;
+  };
+
   return (
     <div className="min-h-screen bg-bg text-ink">
       <SystemStatusBar
@@ -288,6 +309,8 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                     detail={alertDetail}
                     alertId={alertsCtx.selected?.alertId || alertsCtx.selected?.id}
                     onAnalyzeInCopilot={handleAnalyzeSelectedAlert}
+                    onTriageSubmit={handleTriageSubmit}
+                    offline={!alertsCtx.wsConnected && alertsCtx.loadState === "error"}
                   />
                 }
                 onPrevPage={() => alertsCtx.setPage(Math.max(0, alertsCtx.page - 1))}

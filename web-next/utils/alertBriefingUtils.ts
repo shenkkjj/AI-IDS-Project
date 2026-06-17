@@ -1,5 +1,10 @@
 import type { AlertDetail, AlertBriefing } from "@/types/alertBriefing";
-import type { AlertItem, AlertRisk } from "@/types/alert";
+import type { AlertItem, AlertRisk, AlertTriageStatus } from "@/types/alert";
+import {
+  TRIAGE_CLOSED_STATUSES,
+  TRIAGE_OPEN_STATUSES,
+  TRIAGE_STATUS_OPTIONS,
+} from "@/types/alert";
 import { classifyAttack, formatTimestamp } from "./alertUtils";
 
 /* ---------- 风险标签 / tone ---------- */
@@ -10,6 +15,23 @@ const RISK_LABEL: Record<AlertRisk, string> = {
   medium: "中危",
   low: "低危",
 };
+
+export function triageStatusLabel(status: AlertTriageStatus): string {
+  const found = TRIAGE_STATUS_OPTIONS.find((option) => option.value === status);
+  return found?.label || status;
+}
+
+export function triageStatusTone(
+  status: AlertTriageStatus
+): "default" | "info" | "warning" | "danger" | "success" {
+  const found = TRIAGE_STATUS_OPTIONS.find((option) => option.value === status);
+  return found?.tone || "default";
+}
+
+export function triageShortLabel(status: AlertTriageStatus): string {
+  const found = TRIAGE_STATUS_OPTIONS.find((option) => option.value === status);
+  return found?.shortLabel || status.toUpperCase().slice(0, 4);
+}
 
 const RISK_TONE: Record<AlertRisk, "danger" | "warning" | "info" | "default"> = {
   critical: "danger",
@@ -120,6 +142,12 @@ function buildReport(alert: AlertItem, detail: Omit<AlertDetail, "report">): str
   lines.push(`- 来源: ${alert.source || "未知"}`);
   lines.push(`- 目标: ${alert.target || "未知"}`);
   lines.push(`- 拦截: ${alert.blocked ? "是" : "否"}`);
+  lines.push(`- 研判状态: ${detail.triageStatusLabel}${detail.triageDisposition ? `（${detail.triageDisposition}）` : ""}`);
+  if (detail.triageUpdatedAt > 0) {
+    lines.push(`- 研判更新: ${formatTimestamp(detail.triageUpdatedAt)}${
+      detail.triageUpdatedBy !== null ? ` · 操作员 #${detail.triageUpdatedBy}` : ""
+    }`);
+  }
   if (alert.payload) {
     lines.push(`- 载荷: \`${alert.payload}\``);
   }
@@ -127,6 +155,11 @@ function buildReport(alert: AlertItem, detail: Omit<AlertDetail, "report">): str
     lines.push("");
     lines.push("## 模型摘要");
     lines.push(alert.summary);
+  }
+  if (detail.triageNote) {
+    lines.push("");
+    lines.push("## 处置备注");
+    lines.push(detail.triageNote);
   }
   lines.push("");
   lines.push("## 影响");
@@ -151,6 +184,7 @@ export function deriveAlertDetail(alert: AlertItem | null): AlertDetail | null {
   if (!alert) return null;
   const risk = alert.risk;
   const attackClass = classifyAttack(alert.payload);
+  const triage = alert.triage;
   const partial: Omit<AlertDetail, "report"> = {
     riskLevel: risk,
     riskLabel: RISK_LABEL[risk] || risk,
@@ -161,6 +195,13 @@ export function deriveAlertDetail(alert: AlertItem | null): AlertDetail | null {
     recommendedActions: buildRecommendedActions(alert),
     blocked: Boolean(alert.blocked),
     timestampLabel: formatTimestamp(alert.timestamp),
+    triageStatus: triage.status,
+    triageStatusLabel: triageStatusLabel(triage.status),
+    triageStatusTone: triageStatusTone(triage.status),
+    triageDisposition: triage.disposition,
+    triageNote: triage.analyst_note,
+    triageUpdatedAt: triage.updated_at,
+    triageUpdatedBy: triage.updated_by,
   };
   return {
     ...partial,
@@ -194,6 +235,26 @@ export function deriveBriefing(
   const highRisk = inWindow.filter((item) => item.risk === "high" || item.risk === "critical").length;
   const blocked = inWindow.filter((item) => item.blocked).length;
   const blockRate = total > 0 ? blocked / total : 0;
+
+  // 研判状态分布
+  const triageCounter = new Map<AlertTriageStatus, number>();
+  for (const item of inWindow) {
+    const status = item.triage?.status ?? "new";
+    triageCounter.set(status, (triageCounter.get(status) || 0) + 1);
+  }
+  const triageBreakdown = TRIAGE_STATUS_OPTIONS
+    .map((option) => ({
+      status: option.value,
+      label: option.label,
+      count: triageCounter.get(option.value) || 0,
+    }))
+    .filter((item) => item.count > 0);
+  const triageOpen = inWindow.filter(
+    (item) => item.triage && TRIAGE_OPEN_STATUSES.has(item.triage.status)
+  ).length;
+  const triageClosed = inWindow.filter(
+    (item) => item.triage && TRIAGE_CLOSED_STATUSES.has(item.triage.status)
+  ).length;
 
   // 风险分布
   const riskCounter = new Map<AlertRisk, number>();
@@ -274,6 +335,9 @@ export function deriveBriefing(
     topAttackClass,
     buckets,
     latestAlerts,
+    triageBreakdown,
+    triageOpen,
+    triageClosed,
     note,
   };
 }

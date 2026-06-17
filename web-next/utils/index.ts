@@ -8,6 +8,9 @@ export {
   riskLabel,
   riskTone,
   compareRisk,
+  triageStatusLabel,
+  triageStatusTone,
+  triageShortLabel,
   deriveAlertDetail,
   deriveBriefing,
 } from "./alertBriefingUtils";

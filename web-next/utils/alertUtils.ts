@@ -1,4 +1,10 @@
-import type { AlertRisk, AlertItem, BackendAlertItem } from "@/types/alert";
+import type {
+  AlertRisk,
+  AlertItem,
+  AlertTriage,
+  AlertTriageStatus,
+  BackendAlertItem,
+} from "@/types/alert";
 
 export function parseRisk(riskLevel: string | undefined): AlertRisk {
   const value = String(riskLevel || "").trim().toLowerCase();
@@ -6,6 +12,45 @@ export function parseRisk(riskLevel: string | undefined): AlertRisk {
     return value;
   }
   return "medium";
+}
+
+const TRIAGE_VALID: ReadonlySet<AlertTriageStatus> = new Set([
+  "new",
+  "investigating",
+  "contained",
+  "false_positive",
+  "resolved",
+]);
+
+export function parseTriageStatus(value: unknown): AlertTriageStatus {
+  const text = String(value || "").trim().toLowerCase();
+  if (TRIAGE_VALID.has(text as AlertTriageStatus)) {
+    return text as AlertTriageStatus;
+  }
+  return "new";
+}
+
+export function defaultTriage(): AlertTriage {
+  return {
+    status: "new",
+    disposition: null,
+    analyst_note: null,
+    updated_at: 0,
+    updated_by: null,
+  };
+}
+
+export function mapTriage(raw: Partial<AlertTriage> | null | undefined): AlertTriage {
+  if (!raw || typeof raw !== "object") {
+    return defaultTriage();
+  }
+  return {
+    status: parseTriageStatus(raw.status),
+    disposition: raw.disposition ?? null,
+    analyst_note: raw.analyst_note ?? null,
+    updated_at: Number.isFinite(raw.updated_at) ? Number(raw.updated_at) : 0,
+    updated_by: Number.isFinite(raw.updated_by) ? Number(raw.updated_by) : null,
+  };
 }
 
 export function mapBackendAlert(item: BackendAlertItem, index: number): AlertItem {
@@ -26,6 +71,7 @@ export function mapBackendAlert(item: BackendAlertItem, index: number): AlertIte
     summary,
     timestamp: Number.isFinite(item.raw_alert?.timestamp) ? Number(item.raw_alert?.timestamp) : null,
     blocked: Boolean(item.raw_alert?.blocked),
+    triage: mapTriage(item.triage),
   };
 }
 
