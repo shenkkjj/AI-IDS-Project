@@ -291,6 +291,14 @@ cd web-next
 当前可用的超长任务：
 
 - `docs/agent/M2_SOC_OPERATIONS_BASELINE_TASK.md`：L5 级 M2 SOC 运营基线战役，覆盖 Demo Flow E2E、Copilot contract、审计时间线、生产安全配置检查、文档同步和提交准备。
+- `docs/agent/M3_DEMO_READY_SOC_WORKBENCH_CLOSING_TASK.md`：L4 级 M3 Demo-Ready SOC 工作台收口战役，覆盖 M3 UI 改造审计、真实浏览器 E2E、验证矩阵、运行日志同步和精确拆分提交。
+- `docs/agent/M3_AGENT_OPS_AND_PUSH_READINESS_TASK.md`：L5 级 M3 Agent Ops 与 push 前总审查战役，覆盖超长任务文档固化、提交栈复核、最终验证矩阵和通过后推送 `origin/main`。
+
+当前 owner 偏好：
+
+- 后续每次布置给 agent 的任务都默认写成 L4/L5 超长任务。
+- 即使目标看起来像“小修复”或“提交收口”，也要包装成阶段化长任务：上下文读取、运行日志、验证矩阵、停止条件、提交/不提交边界。
+- 聊天框里只发送短启动口令，详细任务放在 `docs/agent/*.md`。
 
 最近一次 L5 战役执行结果（`docs/runs/2026-06-16-m2-soc-operations-baseline.md`）：
 
