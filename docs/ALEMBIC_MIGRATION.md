@@ -1,167 +1,114 @@
-# Alembic 迁移计划
+# Alembic 迁移手册
 
-本文记录数据库迁移从“启动时手写 ALTER TABLE”切换到 Alembic 的计划。当前只是计划文档，尚未实施。
+> 状态：2026-06-17，M2-01 已建立 baseline revision。
+> 本文档以前是"计划"，现在记录：M2-01 落地的实际行为、当前实现细节、保留的 legacy 兼容点、downgrade 策略和后续工单。
 
-## 当前状态
+## 当前状态（M2-01 实测后）
 
-后端数据库入口在 `server/core/database.py`。
+- `server/core/database.py` 现在通过 helper 读 `DATABASE_URL`：
+  - `load_database_url()` — 优先返回 `os.getenv("DATABASE_URL")`，未设置时回退到 `default_database_url()`；
+  - `normalize_database_url()` — 把 `sqlite+aiosqlite:///` 自动归一化为 `sqlite:///`，避免同步 engine 收到 async driver 报错；
+  - `build_engine_kwargs()` — 只对 SQLite 注入 `connect_args={"check_same_thread": False}`，对 PostgreSQL 等不加；
+  - `create_app_engine()` — 综合上述 helper 构造 engine；不在 SQLAlchemy 出错时做掩盖降级。
+- `engine` / `SessionLocal` 仍保持模块级导出（向后兼容），但底层 URL 由 `DATABASE_URL` 决定。
+- Alembic baseline 已建立：
+  - `alembic.ini` 位于 repo 根，`script_location = migrations`；
+  - `migrations/env.py` 显式 import `server.core.database.Base` 并 `import server.models_db`；
+  - `migrations/env.py` 的 `run_migrations_online()` 通过 `_resolve_url()` 走与 app 同一套 `load_database_url()` / `normalize_database_url()`，避免 app 与 migration 用两套配置；
+  - baseline revision：`d9af4388f20a_baseline_schema.py`，autogenerate 覆盖全部 6 张表（`users` / `user_configs` / `logs` / `audit_logs` / `auth_challenges` / `refresh_tokens`）和全部索引（含 SC-22 的 `ix_audit_logs_action_status_created` 和 `ix_audit_logs_user_action_created`）。
+- 启动路径仍保留 `init_db()` + `ensure_user_config_columns()`：
+  - `init_db()` 作为新空库的快速回退；新环境更推荐 `alembic upgrade head`；
+  - `ensure_user_config_columns()` 已被显式标记为 **legacy 兼容层**（见 `server/core/database.py` 注释），专门补旧 `data/app.db` 上 `init_db()` 创建时缺失的列；新 schema 变更必须走 Alembic revision，**不要往 `ensure_user_config_columns` 加新 ALTER**。
+- `server/migrations/sql/sc22_audit_indexes.sql`（legacy manual SQL）已被 baseline revision 自动覆盖（两个 SC-22 复合索引都进了 `d9af4388f20a`），但文件保留不删；任何新环境都不需要再 `psql ... -f` 应用它。如要清理，参见 §"清理"小节。
 
-已确认事实：
-
-- 当前 engine 使用硬编码 SQLite 文件：`data/app.db`。
-- 当前 `DATABASE_URL` 环境变量尚未被 `server/core/database.py` 读取。
-- `init_db()` 会执行 `Base.metadata.create_all(bind=engine)`。
-- `ensure_user_config_columns()` 会在启动时执行一组幂等 `ALTER TABLE`。
-- `server/migrations/sql/sc22_audit_indexes.sql` 是现有手写 SQL 索引脚本，不是 Alembic revision。
-
-这意味着：
-
-- 本地开发实际跑的是 SQLite。
-- Docker Compose 中声明的 PostgreSQL 接线待确认。
-- 新增列目前需要同步改 ORM / Schema / 手写 ALTER TABLE，无法自动回滚。
-
-## 为什么要迁移
-
-手写 `ALTER TABLE` 适合早期小步补列，但它有几个问题：
-
-- 迁移历史不清晰，难以知道某个环境应用到了哪一步。
-- 回滚没有标准流程。
-- SQLite 与 PostgreSQL 差异容易被隐藏。
-- 容器部署、测试库、开发库之间容易漂移。
-
-Alembic 迁移后，希望达到：
-
-- schema 变更有 revision 文件。
-- 本地和部署环境使用同一套迁移流程。
-- 能执行 `upgrade` 和 `downgrade` 验证。
-- 新 Agent 修改数据库时有明确边界。
-
-## 推荐实施步骤
-
-### 1. 先统一数据库 URL 来源
-
-在引入 Alembic 前，先让 `server/core/database.py` 从环境变量读取数据库 URL，并保留 SQLite 作为本地默认值。
-
-计划目标：
-
-```python
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    f"sqlite:///{(DATA_DIR / 'app.db').as_posix()}",
-)
-```
-
-注意：这是计划示例，不是当前已实施代码。
-
-### 2. 安装并初始化 Alembic
+## 当前验证（2026-06-17）
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install alembic
-.\.venv\Scripts\python.exe -m alembic init migrations
+$env:APP_SECRET='test-local-secret-key-for-baseline-32chars'
+$env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
+
+# 临时空 SQLite
+$env:DATABASE_URL='sqlite:///' + ($env:TEMP + '\alembic_test.db').Replace('\','/')
+.venv\Scripts\python.exe -m alembic upgrade head
+.venv\Scripts\python.exe -m alembic current
 ```
 
-是否把 `alembic` 加入 `requirements.txt`：待确认。实施时必须同步依赖。
+实测结果：
 
-### 3. 配置 `alembic/env.py`
+- `alembic upgrade head` 在空 SQLite 上 0 错误，建出 6 张表 + 全部索引；
+- `alembic current` 输出 `d9af4388f20a (head)`；
+- `pytest server/tests/test_database_config.py` 13 passed；
+- `pytest server/tests/test_migrations.py` 8 passed。
 
-需要导入同一份 `Base.metadata`，并确保 ORM 模型被 import：
+## 已确认事实
 
-```python
-from server.core.database import Base
-from server import models_db
+1. **本地开发路径**（默认）：`DATABASE_URL` 未设置 → `data/app.db` SQLite。
+2. **Docker / 部署路径**：`DATABASE_URL=postgresql+psycopg://cybersentinel:cybersentinel@postgres:5432/cybersentinel`（与 `docker-compose.yml` 对齐）；driver 由 `psycopg[binary]==3.2.3` 提供。
+3. **测试路径**：`server/tests/conftest.py` 仍 `os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///data/test.db")`；同步 engine 在初始化时会把 `sqlite+aiosqlite:///` 归一化为 `sqlite:///`，所以测试库仍是同步 SQLite。
+4. **旧本地开发库**：`data/app.db` 如果只跑过 `init_db()` 而没 `alembic stamp head`，可以保留 `ensure_user_config_columns()` 兜底补列；新环境请直接 `alembic upgrade head`。
 
-target_metadata = Base.metadata
+## 行为契约
+
+### `DATABASE_URL` 解析
+
+- 读取顺序：`os.getenv("DATABASE_URL")` → `default_database_url()`；
+- 默认 URL：`sqlite:///{repo}/data/app.db`，使用 `pathlib` 解析，不依赖 CWD；
+- 归一化：仅处理 `sqlite+aiosqlite:///` → `sqlite:///`，其他 driver 不动。
+
+### engine 行为
+
+- SQLite：`connect_args={"check_same_thread": False}`，池参数保持 `pool_size=5` / `max_overflow=10` / `pool_timeout=30` / `pool_recycle=1800`；
+- PostgreSQL：不加 `check_same_thread`，池参数同上；
+- 错误时：直接抛 SQLAlchemy 异常，不静默降级到 SQLite 之类的掩盖行为。
+
+### 启动路径
+
+```text
+load_dotenv(.env) → init_db() → ensure_user_config_columns() → FastAPI 启动
 ```
 
-数据库 URL 应从同一套配置读取，避免 app 和 migration 使用不同数据库。
+- `init_db()` 仍调用 `Base.metadata.create_all(bind=engine)`（幂等）；
+- `ensure_user_config_columns()` 仅对 `users` / `user_configs` 跑一组幂等 ALTER；任一语句失败只记 `loguru warning`（"already exists" / "duplicate" 不算失败），不阻断启动。
 
-### 4. 建立首次基线
-
-由于当前环境可能已有 `data/app.db`，建议采用“基线迁移 + stamp”的方式。
-
-计划步骤：
+## 新 schema 变更工作流
 
 ```powershell
-.\.venv\Scripts\python.exe -m alembic revision --autogenerate -m "baseline"
-.\.venv\Scripts\python.exe -m alembic stamp head
+$env:APP_SECRET='test-local-secret-key-for-baseline-32chars'
+$env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
+
+# 1. 改 ORM（server/models_db.py）
+# 2. autogenerate
+.venv\Scripts\python.exe -m alembic revision --autogenerate -m "<change>"
+
+# 3. 人工 review 生成文件，去掉误判
+# 4. 临时库验证
+$env:DATABASE_URL='sqlite:///' + ($env:TEMP + '\alembic_review.db').Replace('\','/')
+.venv\Scripts\python.exe -m alembic upgrade head
+.venv\Scripts\python.exe -m alembic downgrade -1
+.venv\Scripts\python.exe -m alembic upgrade head
+
+# 5. 跑回归
+.venv\Scripts\python.exe -m pytest server/tests/test_database_config.py server/tests/test_migrations.py -q --tb=short
 ```
 
-对全新环境，需要确认是：
+## 旧库升级路径
 
-- 继续由 `init_db()` 创建空库，再 `stamp head`。
-- 还是完全交给 `alembic upgrade head` 创建 schema。
+- 已有 `data/app.db` 且无 `alembic_version` 表：先 `alembic stamp head`（标记为已 baseline），再 `alembic upgrade head`（其实无变化），后续新变更走标准流程。
+- 已有 `data/app.db` 且跑过旧 `init_db() + ensure_user_config_columns()`：保留兼容层即可，新环境用 `alembic upgrade head` 起新库；建议在新机器上重新建库后再迁移数据，避免 baseline revision 与手工补列的时序差。
 
-该选择待确认，不能在没有回滚方案时直接替换启动逻辑。
+## downgrade 策略
 
-### 5. 替换 `ensure_user_config_columns()`
+- baseline revision 的 `downgrade()` 会按依赖反序 drop 表和索引；这是可逆的。
+- baseline 之后新增的 revision 必须自行写 `downgrade()`；不可逆操作（破坏性 rename / drop column）需在 commit message 显式标注。
+- `alembic downgrade base` 会回到无表空库；不要在生产环境直接 `downgrade base`，必须先做数据备份。
 
-目标是把 `ensure_user_config_columns()` 中的列变更迁入 revision 文件，然后从启动路径移除它。
+## 清理
 
-最终启动路径可能变成：
+- `server/migrations/sql/sc22_audit_indexes.sql` 已被 baseline 覆盖；后续如要清理，建议把 `server/migrations/sql/` 整个目录删掉，并把 `server/STRUCTURE.md` 对应描述从"手写 SQL 迁移"改为"Alembic baseline + versions/"。
+- 当前保留是为了不破坏 git blame 与"兼容旧 README/PRODUCT"事实；不在 M2-01 删除。
 
-```python
-from alembic.config import Config
-from alembic import command
+## 后续工单
 
-cfg = Config("alembic.ini")
-command.upgrade(cfg, "head")
-```
-
-是否在应用启动时自动跑迁移：待确认。生产环境通常更推荐发布流程显式执行迁移，而不是 Web 进程自行迁移。
-
-## 持续工作流
-
-修改 ORM 后：
-
-```powershell
-.\.venv\Scripts\python.exe -m alembic revision --autogenerate -m "add foo column"
-```
-
-人工检查生成文件，然后本地验证：
-
-```powershell
-.\.venv\Scripts\python.exe -m alembic upgrade head
-.\.venv\Scripts\python.exe -m alembic downgrade -1
-.\.venv\Scripts\python.exe -m alembic upgrade head
-```
-
-## 与共享常量的关系
-
-`server/models/constants.py` 已抽取字段长度常量和枚举值。新增字段时，ORM 和 Pydantic schema 应尽量共享这些常量，减少漂移。
-
-示例：
-
-```python
-# models_db.py
-from server.models.constants import MAX_TOTP_SECRET_LEN
-
-totp_secret: Mapped[str | None] = mapped_column(
-    String(MAX_TOTP_SECRET_LEN),
-    nullable=True,
-)
-```
-
-```python
-# models/schemas.py
-from server.models.constants import MIN_TOTP_CODE_LEN, MAX_TOTP_CODE_LEN
-
-totp_code: str | None = Field(
-    default=None,
-    min_length=MIN_TOTP_CODE_LEN,
-    max_length=MAX_TOTP_CODE_LEN,
-)
-```
-
-## 验收标准
-
-迁移完成后，至少应验证：
-
-- 新空库能通过 `alembic upgrade head` 创建完整 schema。
-- 旧 SQLite 开发库能安全升级。
-- 若支持 PostgreSQL，Docker Compose 环境能连到 PostgreSQL 并完成迁移。
-- `pytest server/tests -q --tb=short --ignore=server/tests/test_e2e.py` 通过。
-- 迁移文档和 `.env.example` 与实际配置一致。
-
-## 时间线
-
-预计工作量：1 人/天起。当前 M0-01 不实施迁移，只修正文档事实口径。建议作为后续 M2 数据库工单处理。
+- M2-07 Compose 端到端验收：把 `docker-compose.yml` 中的 PostgreSQL 接线端到端跑通。
+- 把 `server/tests/conftest.py` 的 `setdefault` 从 `sqlite+aiosqlite:///` 改为 `sqlite:///`，与生产同步 engine 路径一致（低风险，留给下一轮清理）。
+- `ensure_user_config_columns()` 退出路径：所有旧 `data/app.db` 都迁出后，从 `server/main.py` 启动路径移除。

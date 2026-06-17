@@ -79,13 +79,11 @@ server/
 
 ## 数据库现状
 
-当前 `server/core/database.py` 使用硬编码 SQLite：
-
-```text
-data/app.db
-```
-
-`.env.example` 中的 `DATABASE_URL` 目前不是后端数据库 engine 的事实来源。PostgreSQL / Docker Compose 数据库接线待确认，迁移计划见 `docs/ALEMBIC_MIGRATION.md`。
+- `server/core/database.py` 现在按 `DATABASE_URL` 选择数据库；未设置时回退到默认 SQLite。
+- 本地默认 SQLite 路径：`data/app.db`。
+- Docker / 部署可显式传入 `DATABASE_URL=postgresql+psycopg://...`；driver 由 `psycopg[binary]` 提供。
+- 启动路径仍保留 `init_db()` + `ensure_user_config_columns()`（legacy 兼容层）作为旧本地开发库的快速回退。
+- schema 变更主路径是 Alembic（`migrations/`、`alembic.ini`），baseline revision 已建立。
 
 ## 为什么部分文件仍在 `server/` 根目录
 

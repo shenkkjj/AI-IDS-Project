@@ -93,7 +93,7 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 - 不要直接使用 `.env.example` 里的 `change-me-*` 示例值，后端会拒绝弱默认密钥。
 - 本地开发要把 `APP_ENV` 改成 `development`。模板默认是 `production`，生产模式下如果 CORS 仍允许 localhost，后端会拒绝启动。
-- 当前后端数据库实际使用 `data/app.db` SQLite 文件；`.env` 里的 `DATABASE_URL` 暂未被 `server/core/database.py` 读取，PostgreSQL 路径待确认。
+- 当前后端数据库实际使用 `data/app.db` SQLite 文件；`.env` 里的 `DATABASE_URL` 现在由 `server/core/database.py` 读取（见 `load_database_url`），未设置时回退到默认 SQLite；Docker / 部署可通过 `DATABASE_URL=postgresql+psycopg://...` 切换到 PostgreSQL。Alembic baseline 已建立（`alembic upgrade head`），未来 schema 变更走 Alembic revision。
 
 启动后端：
 
@@ -171,7 +171,7 @@ npm run dev
 - `deploy.ps1` 第一次运行时，如果没有 `.env`，会复制 `.env.example` 为 `.env` 并退出，要求你先编辑密钥。
 - `docker-compose.yml` 会启动 backend、frontend、nginx、postgres、redis。
 - `docker-compose.yml` 当前给 backend 传入 `APP_SECRET`，但没有显式传入 `AUTH_SECRET`；而 `server/main.py` 启动时要求 `AUTH_SECRET` 非默认。
-- `server/core/database.py` 当前硬编码 SQLite `data/app.db`，没有读取 `DATABASE_URL`，所以 Compose 中的 PostgreSQL 接线仍待确认。
+- `server/core/database.py` 现在按 `DATABASE_URL` 选择数据库；未设置时使用 repo 内 `data/app.db` SQLite。Docker / 部署可显式传入 `postgresql+psycopg://...`。Compose 端到端验收仍属 M2-07，未在本任务内确认；PostgreSQL driver 已通过 `psycopg[binary]` 提供。
 
 如果你仍要尝试 Docker 路径：
 
@@ -345,7 +345,7 @@ npm run build
 
 ## 当前已知限制
 
-- Docker Compose 数据库路径待确认：Compose 声明 PostgreSQL，但后端当前实际使用 SQLite。
+- Docker Compose 数据库路径已统一通过 `DATABASE_URL` 接线（`server/core/database.py` 读取，PostgreSQL driver 由 `psycopg[binary]` 提供）；但 Compose 端到端验收仍属 M2-07，本任务未在本环境跑 Compose 验证。
 - Docker Compose backend 的 `AUTH_SECRET` 传入待确认。
 - Playwright E2E 是可选验证，默认 pytest 会跳过；显式运行时需要安装 Playwright 浏览器。
 - LLM / 邮件 / OAuth / 威胁情报等外部服务需要真实凭证；没有凭证时应按降级或待确认处理。

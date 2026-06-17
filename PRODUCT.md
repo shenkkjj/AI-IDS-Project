@@ -67,6 +67,7 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 2. Playwright E2E 仍依赖本地浏览器和前后端服务，默认 pytest 只保留 skip；2026-06-16 已用 in-app Browser 跑通过”注册/登录 -> Dashboard -> 触发 Demo -> 告警可见 -> Copilot 降级态”真实路径。`server/tests/test_demo_flow_e2e.py` 已把这条路径固化为可重复 E2E。M3-02 阶段在 E2E 中扩展了"研判状态切换 -> 保存备注 -> 攻击日志行更新"步骤。
 3. 当前没有独立 ESLint 配置；CI 已移除 `npx next lint`，前端默认验证为 `npm run typecheck` 和 `npm run build`。
 4. 后端 CI 覆盖率门槛已拆分为阶段性核心口径：全量测试继续运行，80% 覆盖率门槛只统计 LLM Guardrails、RBAC、安全工具和 ORM 模型；全 `server` 包覆盖率约 52% 仍作为后续债务。
+5. **M2-01 已交付**：`server/core/database.py` 现在按 `DATABASE_URL` 选数据库（`load_database_url` / `normalize_database_url` / `build_engine_kwargs` / `create_app_engine`），未设置时回退到默认 SQLite；Alembic baseline revision `d9af4388f20a_baseline_schema.py` 已建立；新增 `test_database_config.py`（13 通过）和 `test_migrations.py`（8 通过）；`docs/ALEMBIC_MIGRATION.md` 已从"计划"转为"已建立 baseline"。PostgreSQL 端到端验收仍属 M2-07。
 5. `web-next/app/page.tsx` 和 `web-next/app/dashboard/dashboard-client.tsx` 偏大，后续 UI 变更容易让 agent 误伤。
 6. 项目有很强的安全/测试规则，但缺少稳定的产品路线、验收标准和 agent 工单模板。
 7. Copilot 有 key 成功流式路径已通过 `server/tests/test_copilot_contract.py` + `FakeLLMProvider` 保护（默认 `_PROVIDERS` registry 不含 `fake_test`，生产不可达 fake）。
@@ -171,7 +172,7 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 1. 已完成：建立 Demo Flow 自动化 E2E（`server/tests/test_demo_flow_e2e.py`），保护”登录 -> Dashboard -> 触发 Demo -> 告警可见 -> Copilot 降级/分析”真实路径；显式 `--run-e2e` 触发，默认 pytest 跳过。
 2. 已完成：增加 Copilot fake provider / contract 测试（`server/tests/test_copilot_contract.py` + `FakeLLMProvider`），让有 key 的流式成功路径不依赖真实外部 LLM；`_PROVIDERS` 默认不含 `fake_test`，生产不可达 fake。
 3. 已完成：审计时间线（`GET /logs/security-timeline` + Dashboard § 03.5 段 + `SecurityTimeline` 组件），把 demo attack、Copilot 请求、Guardrails 决策和关键操作日志变成可见运营证据；sentinel 脱敏，敏感字段不外泄。
-4. 统一数据库配置和 Alembic 迁移策略，替代启动时手写 ALTER TABLE。
+4. 已完成：统一数据库配置和 Alembic 迁移策略，替代启动时手写 ALTER TABLE。M2-01 已建立 Alembic baseline（`d9af4388f20a_baseline_schema.py`），`DATABASE_URL` 真正成为 engine 事实来源；旧 `ensure_user_config_columns()` 保留为 legacy 兼容层并被显式标注。PostgreSQL 端到端验收留给 M2-07。
 5. 给 `/metrics`、`/mcp`、审计清理、Guardrails 状态补运维文档和安全边界。
 6. 已完成：明确生产环境最小安全配置（`scripts/check_env_security.py`）：secret、CORS、DEV_MODE、metrics/MCP 鉴权、nginx allowlist；退出码 0/1 区分通过/阻塞。
 
