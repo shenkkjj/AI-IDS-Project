@@ -110,24 +110,44 @@ def _register_unique_user() -> tuple[str, str]:
 async def _register_via_ui(page, email: str, password: str) -> None:
     """在前端 UI 上注册并等待自动跳转 /dashboard。"""
     await page.goto(f"{BASE}/", wait_until="domcontentloaded", timeout=15000)
-    await page.wait_for_load_state("networkidle", timeout=15000)
+    # Next.js dev server 会持续 HMR / WS,不能依赖 networkidle
+    await page.wait_for_load_state("domcontentloaded", timeout=10000)
+
+    # 等 React hydration:page.tsx 是 client component,SSR 输出只是
+    # fallback,真正的 form 节点在 client 挂载后才出现。
+    # 这里用 wait_for_function 而不是 wait_for_selector,避开 RSC streaming
+    # 期间 React unmount 重挂载导致的不可见窗口。
+    try:
+        await page.wait_for_function(
+            "() => document.querySelector('[data-testid=\"login-email\"]') !== null",
+            timeout=30000,
+        )
+    except Exception as exc:  # noqa: BLE001
+        # 实在找不到时打印当前 DOM 摘要,方便排查
+        body_text = await page.evaluate(
+            "() => document.body ? document.body.innerText.slice(0, 500) : ''"
+        )
+        pytest.fail(
+            f"无法等到 login-email hydration 完成（{exc}）。"
+            f"body 文本: {body_text!r}"
+        )
 
     # 切到注册模式
     register_toggle = page.get_by_test_id("register-toggle")
     if await register_toggle.count() > 0:
         await register_toggle.first.click()
-        await page.wait_for_timeout(300)
+        await page.wait_for_timeout(500)
 
     # 注册 + 自动登录后会自动跳到 /dashboard，最多等 12s
-    await page.get_by_test_id("login-email").fill(email)
-    await page.get_by_test_id("login-password").fill(password)
+    await page.get_by_test_id("login-email").first.fill(email)
+    await page.get_by_test_id("login-password").first.fill(password)
     confirm_password = page.get_by_test_id("register-confirm-password")
     if await confirm_password.count() > 0:
         await confirm_password.first.fill(password)
 
     async with page.expect_navigation(
         url=re.compile(r"/dashboard(\?.*)?$"),
-        timeout=12000,
+        timeout=20000,
         wait_until="domcontentloaded",
     ):
         await page.get_by_test_id("login-submit").click()
@@ -151,7 +171,7 @@ async def _run_demo_flow() -> dict:
 
     from playwright.async_api import async_playwright
 
-    diag: dict = {"registered": False, "demo": False, "copilot": False, "forbidden": None}
+    diag: dict = {"registered": False, "demo": False, "copilot": False, "triage": False, "forbidden": None}
     email, password = _register_unique_user()
 
     async with async_playwright() as p:
@@ -221,6 +241,43 @@ async def _run_demo_flow() -> dict:
             assert (
                 "API Key" in assistant_text or "Base URL" in assistant_text
             ), f"Copilot 降级态文案异常：{assistant_text!r}"
+
+            # 5.5) M3-02 研判状态切换: 选中最新告警 → 切为 investigating → 保存备注
+            #      → 验证 attack-log-row 与 triage-status-badge 都更新。
+            triage_panel = page.locator('[data-testid="alert-triage-panel"]').first
+            if await triage_panel.count() > 0:
+                rows = await page.query_selector_all('[data-testid="attack-log-row"]')
+                if rows:
+                    await rows[0].click()
+                    await page.wait_for_timeout(400)
+                inv_btn = page.locator('[data-testid="triage-status-investigating"]').first
+                if await inv_btn.count() > 0:
+                    await inv_btn.click()
+                note_input = page.locator('[data-testid="triage-note-input"]').first
+                if await note_input.count() > 0:
+                    await note_input.fill("E2E 自动研判:已确认 WAF 拦截。")
+                save_btn = page.locator('[data-testid="triage-save"]').first
+                if await save_btn.count() > 0:
+                    await save_btn.click()
+                    for _ in range(15):
+                        badges = await page.query_selector_all(
+                            '[data-testid="triage-status-badge"]'
+                        )
+                        for badge in badges:
+                            status = await badge.get_attribute("data-status")
+                            if status == "investigating":
+                                diag["triage"] = True
+                                break
+                        if diag["triage"]:
+                            break
+                        await page.wait_for_timeout(500)
+                # 攻击日志行的 data-triage-status 也必须更新
+                row_with_triage = await page.query_selector(
+                    '[data-testid="attack-log-row"][data-triage-status="investigating"]'
+                )
+                assert row_with_triage is not None, (
+                    "保存研判后 attack-log-row 的 data-triage-status 未更新为 investigating"
+                )
 
             # 6) 整页扫描，禁止出现敏感字面量
             body_text = await _collect_visible_text(page)
