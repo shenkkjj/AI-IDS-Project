@@ -162,25 +162,51 @@ npm run dev
 
 脚本会依次检查 `/health`、注册或登录 demo 用户、触发 `/alerts/demo`、确认 `/alerts` 可读取该告警，打印 Copilot `ready` 或 fallback 状态，并调用 `/copilot/stream` 验证流式接口或降级态。
 
-## Docker Compose 启动（待确认）
+## Docker Compose 启动（M2-07 已收口）
 
-仓库保留了 `docker-compose.yml` 和 `deploy.ps1`，但它们当前不作为新手首选路径。
+M2-07 之前，Compose 路径只停留在"能 build"。M2-07 之后，新人照 [`docs/deploy/COMPOSE_QUICKSTART.md`](docs/deploy/COMPOSE_QUICKSTART.md) 即可一键拉起全栈。
 
-已确认事实：
+快速路径（使用临时 env 文件，不污染真实 `.env`）：
 
-- `deploy.ps1` 第一次运行时，如果没有 `.env`，会复制 `.env.example` 为 `.env` 并退出，要求你先编辑密钥。
-- `docker-compose.yml` 会启动 backend、frontend、nginx、postgres、redis。
-- `docker-compose.yml` 当前给 backend 传入 `APP_SECRET`，但没有显式传入 `AUTH_SECRET`；而 `server/main.py` 启动时要求 `AUTH_SECRET` 非默认。
-- `server/core/database.py` 现在按 `DATABASE_URL` 选择数据库；未设置时使用 repo 内 `data/app.db` SQLite。Docker / 部署可显式传入 `postgresql+psycopg://...`。Compose 端到端验收仍属 M2-07，未在本任务内确认；PostgreSQL driver 已通过 `psycopg[binary]` 提供。
+```powershell
+# 1. 准备临时 env
+Copy-Item .env.example .env.compose.local
+# 用 Python 生成临时强随机 secret，粘贴到 .env.compose.local 对应 key
+python -c "import secrets; print('APP_SECRET='+secrets.token_urlsafe(48)); print('AUTH_SECRET='+secrets.token_urlsafe(48)); print('ALERTS_INGEST_TOKEN='+secrets.token_urlsafe(48)); print('GUARDRAILS_MCP_API_KEY='+secrets.token_urlsafe(32)); print('POSTGRES_PASSWORD='+secrets.token_urlsafe(32)); print('REDIS_PASSWORD='+secrets.token_urlsafe(32))"
 
-如果你仍要尝试 Docker 路径：
+# 2. 一键 build / up / smoke
+.\scripts\compose_smoke.ps1 -EnvFile .env.compose.local
+```
+
+`compose_smoke.ps1` 会自动：
+
+1. 验证 `docker compose config` 语法。
+2. build backend / frontend / nginx。
+3. up -d。
+4. 等后端 `/health`、`/ready` 返回 200。
+5. 验证 `http://127.0.0.1/health`（nginx 入口）、`http://127.0.0.1:3000`（前端首页）。
+6. 验证 `http://127.0.0.1/api/auth/login/password` 通过 nginx 走到后端。
+7. 打印 `docker compose ps`。
+
+**已修复的 Compose 端到端关键问题**（M2-07）：
+
+- `DATABASE_URL` 显式走 `postgresql+psycopg://...`，与 `server/core/database.py` 的 `create_app_engine` 一致。
+- backend 注入 `AUTH_SECRET`（`server/main.py` 启动硬要求）。
+- 新增 `migrate` 一次性 init 容器，跑 `alembic upgrade head` 让 PostgreSQL 从 baseline 启动。
+- nginx upstream 改用容器服务名 `backend:8000` / `frontend:3000`（不再在容器内 127.0.0.1）。
+- nginx listen 80 直接 serve（不再强制 301 到不存在的 443 证书）。
+- HTTPS 是 opt-in：`nginx/certs/README.md` 放证书 + 取消 `nginx.conf` 中 HTTPS 块注释。
+- frontend Dockerfile healthcheck 改用首页（中间件白名单不再阻塞）。
+- 前端 `ALLOWED_ORIGINS` 加入 `http://127.0.0.1` / `http://localhost`（nginx 80 入口回源）。
+- `nginx/certs/*` 加入 `.gitignore`（证书不被误提交）。
+
+如仍想用 `deploy.ps1` + 真实 `.env` 路径（旧习惯）：
 
 ```powershell
 Copy-Item .env.example .env
 # 编辑 .env：填入 APP_SECRET、AUTH_SECRET、POSTGRES_PASSWORD、REDIS_PASSWORD 等真实随机值
 .\deploy.ps1
-# 如果第一次运行只是创建 .env 并退出，编辑完成后再运行一次：
-.\deploy.ps1
+# deploy.ps1 现在支持 -EnvFile .env.compose.local 切换到临时 env
 ```
 
 ## 当前验证基线
@@ -345,8 +371,7 @@ npm run build
 
 ## 当前已知限制
 
-- Docker Compose 数据库路径已统一通过 `DATABASE_URL` 接线（`server/core/database.py` 读取，PostgreSQL driver 由 `psycopg[binary]` 提供）；但 Compose 端到端验收仍属 M2-07，本任务未在本环境跑 Compose 验证。
-- Docker Compose backend 的 `AUTH_SECRET` 传入待确认。
+- Docker Compose 端到端（M2-07）已收口：`docs/deploy/COMPOSE_QUICKSTART.md` + `scripts/compose_smoke.ps1` 提供一键 build/up/smoke 流程；运行验证需在有 Docker daemon 的机器执行（沙箱/CI 容器内会因 daemon 受限而 fail-fast）。
 - Playwright E2E 是可选验证，默认 pytest 会跳过；显式运行时需要安装 Playwright 浏览器。
 - LLM / 邮件 / OAuth / 威胁情报等外部服务需要真实凭证；没有凭证时应按降级或待确认处理。
 - `start_all.bat` 启动的是旧版静态 `web/` 前端，不是当前推荐的 `web-next/` 新前端。

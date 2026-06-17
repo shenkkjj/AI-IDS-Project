@@ -14,6 +14,10 @@ web-next/.env.local
 web-next/.env.*
 !web-next/.env.example
 
+# HTTPS opt-in certificates (tracked README only; certs/*.pem are private)
+nginx/certs/*
+!nginx/certs/README.md
+
 # Runtime data
 data/app.db
 *.db

@@ -27,6 +27,6 @@ ENV HOSTNAME=0.0.0.0
 ENV NEXT_TELEMETRY_DISABLED=1
 
 HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
-    CMD wget -qO- http://127.0.0.1:3000/api/backend/health || exit 1
+    CMD wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1 || exit 1
 
 CMD ["node", "server.js"]
