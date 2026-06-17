@@ -54,7 +54,7 @@
 - [x] Phase 3: 文档一致性审计
 - [x] Phase 4: 精确 stage & commit agent 文档
 - [x] Phase 5: 最终验证矩阵
-- [ ] Phase 6: Push Gate
+- [x] Phase 6: Push Gate
 
 ## 阶段记录
 
@@ -190,4 +190,61 @@ dev server 已在 Phase 5 完成后用 TaskStop 释放端口。
 
 Phase 5 结果：通过。所有命令均按任务文档要求顺序执行，typecheck 与 build 串行。
 
-### Phase 6 — Push Gate（待补）
+### Phase 6 — Push Gate
+
+Push Gate 五项硬条件核对（任务文档 §6 Phase 6）：
+
+| 条件 | 实测 | 结果 |
+|---|---|---|
+| 验证矩阵通过（或浏览器 E2E 因缺本地浏览器明确 skip） | Phase 5 全部 6 项通过；真实浏览器 E2E `1 passed in 13.74s`（Chrome `C:\Program Files\Google\Chrome\Application\chrome.exe`） | ✓ |
+| 暂存区为空 | `git diff --cached --name-only` 输出空 | ✓ |
+| `.coverage` 和 `.claude/settings.local.json` 不在任何本地 commit 中 | `git log --name-only --format="commit %h %s" origin/main..HEAD -- .coverage .claude/settings.local.json` 输出空 | ✓ |
+| 未提交文件只剩可接受本地噪音 | 仅 `.claude/settings.local.json`（个人配置）与 `.coverage`（pytest 缓存）；运行日志已在第二次 docs(agent) commit 中固化 | ✓ |
+| `origin/main..HEAD` 包含 4 个 M3 commit + docs(agent) commit | 实际 6 个 commit：3c349bd / da5be88 / 1ffeab4 / 3415825 / a644e4b / eca4f9c；前 5 个为任务文档预期 | ✓ |
+
+预 push 命令汇总：
+
+```text
+git diff --cached --name-only
+  → 空
+
+git log --oneline origin/main..HEAD
+  → eca4f9c docs(agent): 记录 M3 推送前验证矩阵结果
+  → a644e4b docs(agent): 固化超长任务默认工作流
+  → 3415825 docs: 记录 M3 Demo-Ready SOC 工作台收口
+  → 1ffeab4 feat(dashboard): 拆分 SOC 工作台组件并增强告警体验
+  → da5be88 chore(dashboard): 增加简报派生类型与状态壳
+  → 3c349bd test(e2e): 修复 Demo Flow 浏览器验收链路
+
+git log --name-only --format="commit %h %s" origin/main..HEAD -- .coverage .claude/settings.local.json
+  → 空
+```
+
+执行 push：
+
+```text
+git push origin main
+  → To https://github.com/shenkkjj/AI-IDS-Project.git
+     f710494..eca4f9c  main -> main
+```
+
+Push 后核对（任务文档 §6 Phase 6 末尾命令）：
+
+```text
+git status --short --branch
+  → ## main...origin/main
+     M .claude/settings.local.json
+     M .coverage
+
+git rev-parse HEAD
+  → eca4f9c7dfd704835d962bf1c00458defe1a0ce4
+
+git ls-remote origin refs/heads/main
+  → eca4f9c7dfd704835d962bf1c00458defe1a0ce4	refs/heads/main
+
+本地 HEAD == origin/main ✓
+```
+
+Phase 6 结果：通过。本地 main 与 origin/main 完全同步；工作树只剩可接受本地噪音 `.coverage` 与 `.claude/settings.local.json`（任务文档 §4 明确禁止 stage 这两个文件，按预期保留为未提交）。
+
+> 说明：任务文档 §6 Phase 4 把运行日志列入 stage 列表，但 §6 Phase 5 验证矩阵会持续更新运行日志，因此本任务实际产生 2 个 docs(agent) commit（a644e4b 固化默认工作流 / eca4f9c 记录验证矩阵结果），共同把 4 个 M3 commit 推送到 origin/main。push gate 条件"contains the four M3 commits plus the docs-agent commit"按包容性解读（"contains" 而非 "equals"）仍满足。
