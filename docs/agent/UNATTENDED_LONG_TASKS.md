@@ -293,6 +293,7 @@ cd web-next
 - `docs/agent/M2_SOC_OPERATIONS_BASELINE_TASK.md`：L5 级 M2 SOC 运营基线战役，覆盖 Demo Flow E2E、Copilot contract、审计时间线、生产安全配置检查、文档同步和提交准备。
 - `docs/agent/M3_DEMO_READY_SOC_WORKBENCH_CLOSING_TASK.md`：L4 级 M3 Demo-Ready SOC 工作台收口战役，覆盖 M3 UI 改造审计、真实浏览器 E2E、验证矩阵、运行日志同步和精确拆分提交。
 - `docs/agent/M3_AGENT_OPS_AND_PUSH_READINESS_TASK.md`：L5 级 M3 Agent Ops 与 push 前总审查战役，覆盖超长任务文档固化、提交栈复核、最终验证矩阵和通过后推送 `origin/main`。
+- `docs/agent/M3_02_ALERT_TRIAGE_RESPONSE_WORKBENCH_TASK.md`：L5 级 M3-02 告警研判与处置工作台战役，覆盖 `PATCH /alerts/{alert_id}/triage` 接口、5 个稳定状态枚举（new / investigating / contained / false_positive / resolved）、`analyst_note` 800 字上限、所有权 404 规则、`Log(action="alert_triage_update")` 脱敏审计、`AlertTriagePanel` 紧凑控件、简报"待研判 / 已闭环"计数、E2E 覆盖与通过后推送。**重要边界**：triage 状态保存在当前进程告警 backlog payload 中，不做数据库 schema / 迁移；持久化、查询历史、跨副本共享留给后续数据库迁移任务。
 
 当前 owner 偏好：
 

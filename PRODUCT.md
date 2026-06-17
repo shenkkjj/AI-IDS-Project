@@ -64,7 +64,7 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 ### 2.2 当前明显问题
 
 1. `README.md`、`PRODUCT.md`、`server/STRUCTURE.md` 和 `docs/agent/UNATTENDED_LONG_TASKS.md` 已作为当前入口文档；部分历史文档仍可能存在过时内容，需要按任务逐步清理。
-2. Playwright E2E 仍依赖本地浏览器和前后端服务，默认 pytest 只保留 skip；2026-06-16 已用 in-app Browser 跑通过”注册/登录 -> Dashboard -> 触发 Demo -> 告警可见 -> Copilot 降级态”真实路径。`server/tests/test_demo_flow_e2e.py` 已把这条路径固化为可重复 E2E。
+2. Playwright E2E 仍依赖本地浏览器和前后端服务，默认 pytest 只保留 skip；2026-06-16 已用 in-app Browser 跑通过”注册/登录 -> Dashboard -> 触发 Demo -> 告警可见 -> Copilot 降级态”真实路径。`server/tests/test_demo_flow_e2e.py` 已把这条路径固化为可重复 E2E。M3-02 阶段在 E2E 中扩展了"研判状态切换 -> 保存备注 -> 攻击日志行更新"步骤。
 3. 当前没有独立 ESLint 配置；CI 已移除 `npx next lint`，前端默认验证为 `npm run typecheck` 和 `npm run build`。
 4. 后端 CI 覆盖率门槛已拆分为阶段性核心口径：全量测试继续运行，80% 覆盖率门槛只统计 LLM Guardrails、RBAC、安全工具和 ORM 模型；全 `server` 包覆盖率约 52% 仍作为后续债务。
 5. `web-next/app/page.tsx` 和 `web-next/app/dashboard/dashboard-client.tsx` 偏大，后续 UI 变更容易让 agent 误伤。
@@ -72,6 +72,7 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 7. Copilot 有 key 成功流式路径已通过 `server/tests/test_copilot_contract.py` + `FakeLLMProvider` 保护（默认 `_PROVIDERS` registry 不含 `fake_test`，生产不可达 fake）。
 8. `GET /logs/security-timeline` 端点 + Dashboard § 03.5 段已上线 SOC 时间线；schema 经 sentinel 脱敏，不外泄 regex / stack trace / API key / system prompt。
 9. `scripts/check_env_security.py` 覆盖生产必填 secret、placeholder、CORS、DEV_MODE、MCP 鉴权；本地开发不阻塞，生产模式有 BLOCK 项。
+10. **M3-02 告警研判状态**保存在当前进程告警 backlog payload 中，跨重启不保留；持久化、查询历史、跨副本共享留给后续数据库迁移任务。审计日志通过 `Log(action="alert_triage_update")` 写入脱敏摘要。
 
 ---
 
@@ -193,12 +194,21 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 2. 增强告警解释：风险等级、证据、影响范围、建议动作、复制报告。
 3. 增加“日/周安全简报”，但必须可追溯到真实告警数据。
 4. 统一空状态、加载态、错误态和离线态。
+5. **M3-02 告警研判与处置工作台**：在 Dashboard 中选中告警后可推进到“研判中 / 已遏制 / 误报 / 已解决”状态，记录处置备注，复制含研判状态的事件报告，并为每次状态变化留下可审计记录。
 
 验收：
 
 - 关键路径在桌面和移动端无布局错乱。
 - UI 改动必须经过浏览器截图或手动验证说明。
 - 不把营销落地页当作产品首页，第一屏必须可操作。
+- M3-02 验收：`PATCH /alerts/{alert_id}/triage` 必须使用 `require_auth_user`；非 owner / 不存在统一返回 404；`analyst_note` 上限 800 字符；`Log(action="alert_triage_update")` 写入脱敏摘要；前端 `alert-triage-panel` / `triage-status-*` / `triage-save` / `triage-status-badge` / `triage-row-badge` 全部可用；简报“待研判 / 已闭环”计数必须从真实 alert triage 派生。
+
+M3-02 当前实现边界（重要）：
+
+- 研判状态保存在当前进程的告警 backlog payload 中，不是数据库持久化。
+- 跨重启不保留，跨进程实例不共享，跨多副本部署不共享。
+- 持久化、查询历史、跨重启恢复、SLA 升级留给后续数据库迁移任务。
+- 当前 `Log` 审计只覆盖状态变化，不保留历史版本（每个 alert 只有一个最新 triage 字段）。
 
 ---
 
