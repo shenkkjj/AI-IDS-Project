@@ -367,3 +367,164 @@ def test_alembic_downgrade_drops_alert_records_tables(project_root, tmp_path) ->
     assert not rows, (
         f"downgrade base 后新表未 drop: {[r[0] for r in rows]}"
     )
+
+
+# ---------------------------------------------------------------------------
+# M3-04 安全事件案件迁移契约
+# ---------------------------------------------------------------------------
+
+
+def test_alembic_upgrade_head_creates_incident_tables(project_root, tmp_path) -> None:
+    """``alembic upgrade head`` 必须建出 M3-04 的 incidents / incident_alert_links / incident_events 表。"""
+    venv_python = project_root / ".venv" / "Scripts" / "python.exe"
+    if not venv_python.exists():
+        pytest.skip(".venv 不存在，跳过 upgrade head 验证")
+    if not (project_root / "alembic.ini").exists():
+        pytest.skip("alembic.ini 不存在，跳过 upgrade head 验证")
+
+    db_file = tmp_path / "alembic_m3_04.db"
+    db_url = f"sqlite:///{db_file.as_posix()}"
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = db_url
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env.setdefault("APP_SECRET", "test-local-secret-key-for-baseline-32chars")
+    env.setdefault("AUTH_SECRET", "test-local-auth-secret-for-baseline-32chars")
+
+    result = subprocess.run(
+        [str(venv_python), "-m", "alembic", "upgrade", "head"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert result.returncode == 0, (
+        f"alembic upgrade head 失败:\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
+
+    import sqlite3
+
+    con = sqlite3.connect(str(db_file))
+    try:
+        rows = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name IN ('incidents', 'incident_alert_links', 'incident_events') ORDER BY name"
+        ).fetchall()
+    finally:
+        con.close()
+    table_names = {row[0] for row in rows}
+    assert "incidents" in table_names, "incidents 表未通过 migration 创建"
+    assert "incident_alert_links" in table_names, "incident_alert_links 表未通过 migration 创建"
+    assert "incident_events" in table_names, "incident_events 表未通过 migration 创建"
+
+
+def test_alembic_upgrade_head_creates_incident_indexes(project_root, tmp_path) -> None:
+    """M3-04 migration 必须建出关键索引。"""
+    venv_python = project_root / ".venv" / "Scripts" / "python.exe"
+    if not venv_python.exists():
+        pytest.skip(".venv 不存在，跳过 upgrade head 验证")
+    if not (project_root / "alembic.ini").exists():
+        pytest.skip("alembic.ini 不存在，跳过 upgrade head 验证")
+
+    db_file = tmp_path / "alembic_m3_04_idx.db"
+    db_url = f"sqlite:///{db_file.as_posix()}"
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = db_url
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env.setdefault("APP_SECRET", "test-local-secret-key-for-baseline-32chars")
+    env.setdefault("AUTH_SECRET", "test-local-auth-secret-for-baseline-32chars")
+
+    up = subprocess.run(
+        [str(venv_python), "-m", "alembic", "upgrade", "head"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert up.returncode == 0, f"alembic upgrade head 失败: {up.stderr}"
+
+    expected_indexes = {
+        "ix_incidents_user_updated",
+        "ix_incidents_user_status_updated",
+        "ix_incidents_created_from_alert",
+        "ix_incident_alert_links_incident_active",
+        "ix_incident_alert_links_user_alert",
+        "ix_incident_alert_links_alert_record",
+        "ix_incident_events_incident_created",
+        "ix_incident_events_user_created",
+    }
+
+    import sqlite3
+
+    con = sqlite3.connect(str(db_file))
+    try:
+        rows = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND (tbl_name='incidents' OR tbl_name='incident_alert_links' OR tbl_name='incident_events')"
+        ).fetchall()
+    finally:
+        con.close()
+    found_indexes = {row[0] for row in rows}
+
+    missing = expected_indexes - found_indexes
+    assert not missing, (
+        f"M3-04 migration 缺少关键索引: {missing}; 实际: {found_indexes}"
+    )
+
+
+def test_alembic_downgrade_drops_incident_tables(project_root, tmp_path) -> None:
+    """``alembic downgrade base`` 必须能完整 drop M3-04 的新表(可回滚)。"""
+    venv_python = project_root / ".venv" / "Scripts" / "python.exe"
+    if not venv_python.exists():
+        pytest.skip(".venv 不存在，跳过 downgrade 验证")
+    if not (project_root / "alembic.ini").exists():
+        pytest.skip("alembic.ini 不存在，跳过 downgrade 验证")
+
+    db_file = tmp_path / "alembic_m3_04_down.db"
+    db_url = f"sqlite:///{db_file.as_posix()}"
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = db_url
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env.setdefault("APP_SECRET", "test-local-secret-key-for-baseline-32chars")
+    env.setdefault("AUTH_SECRET", "test-local-auth-secret-for-baseline-32chars")
+
+    up = subprocess.run(
+        [str(venv_python), "-m", "alembic", "upgrade", "head"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert up.returncode == 0, f"alembic upgrade head 失败: {up.stderr}"
+
+    down = subprocess.run(
+        [str(venv_python), "-m", "alembic", "downgrade", "base"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert down.returncode == 0, f"alembic downgrade base 失败: {down.stderr}"
+
+    import sqlite3
+
+    con = sqlite3.connect(str(db_file))
+    try:
+        rows = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name IN ('incidents', 'incident_alert_links', 'incident_events')"
+        ).fetchall()
+    finally:
+        con.close()
+    assert not rows, (
+        f"downgrade base 后 M3-04 新表未 drop: {[r[0] for r in rows]}"
+    )
