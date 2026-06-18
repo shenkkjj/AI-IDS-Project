@@ -117,6 +117,8 @@ function SelectInput(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
 
 export default function DashboardClient({ userEmail }: DashboardClientProps) {
   const [route, setRoute] = useState<RouteKey>("overview");
+  // M3-03: 自增触发 AlertTriageHistory 重新拉取(保存成功 / 切换告警)
+  const [triageHistoryRefreshKey, setTriageHistoryRefreshKey] = useState(0);
 
   const alertsCtx = useAlerts();
   const configCtx = useConfig();
@@ -133,6 +135,11 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
     terminalCtx.appendLogs,
     configCtx.refreshConfig
   );
+
+  // 切换告警时让 history 重新拉取
+  useEffect(() => {
+    setTriageHistoryRefreshKey((prev) => prev + 1);
+  }, [alertsCtx.selected?.id]);
 
   useEffect(() => {
     configCtx.loadConfig().catch((error: unknown) => {
@@ -220,6 +227,8 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
       configCtx.setStatus(`研判保存失败: ${result.error || "未知错误"}`);
       return false;
     }
+    // M3-03: 触发研判历史重新拉取
+    setTriageHistoryRefreshKey((prev) => prev + 1);
     configCtx.setStatus("研判已保存");
     return true;
   };
@@ -311,6 +320,9 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                     onAnalyzeInCopilot={handleAnalyzeSelectedAlert}
                     onTriageSubmit={handleTriageSubmit}
                     offline={!alertsCtx.wsConnected && alertsCtx.loadState === "error"}
+                    loadHistory={alertsCtx.loadTriageHistory}
+                    historyRefreshKey={triageHistoryRefreshKey}
+                    historyLimit={5}
                   />
                 }
                 onPrevPage={() => alertsCtx.setPage(Math.max(0, alertsCtx.page - 1))}

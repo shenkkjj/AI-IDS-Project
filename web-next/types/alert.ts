@@ -67,6 +67,35 @@ export interface DemoAttackResponse {
 }
 
 /**
+ * 研判历史事件（M3-03）。
+ *
+ * 与后端 ``server/services/alert_service.get_alert_triage_history`` 返回的
+ * ``items`` 元素一一对应；前端不要随意重命名,后端契约稳定。
+ */
+export interface AlertTriageEvent {
+  id: number;
+  from_status: AlertTriageStatus | null;
+  to_status: AlertTriageStatus;
+  disposition: string | null;
+  analyst_note: string | null;
+  updated_by: number | null;
+  created_at: number;
+}
+
+/**
+ * 研判历史端点响应。
+ *
+ * ``limit`` 是请求时使用的有效 limit（默认 50,范围 1-100）。
+ */
+export interface AlertTriageHistoryResponse {
+  status: "ok";
+  alert_id: string;
+  items: AlertTriageEvent[];
+  count: number;
+  limit: number;
+}
+
+/**
  * 研判面板的展示派生。
  *
  * 内部使用,与 backend AlertTriageStatus 一一对应。

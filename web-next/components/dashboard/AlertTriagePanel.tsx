@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { Check, Loader2 } from "lucide-react";
-import type { AlertTriageStatus, AlertTriage } from "@/types/alert";
+import type { AlertTriageStatus, AlertTriage, AlertTriageEvent } from "@/types/alert";
 import { TRIAGE_STATUS_OPTIONS } from "@/types/alert";
+import AlertTriageHistory from "./AlertTriageHistory";
 
 /**
  * 告警研判与处置面板。
@@ -14,6 +15,8 @@ import { TRIAGE_STATUS_OPTIONS } from "@/types/alert";
  * - loading / success / error 三态在保存按钮附近显示。
  * - 仅在 ``alertId`` 存在时渲染。
  * - 移动端 flex-wrap,不重叠不溢出。
+ * - M3-03: 末尾集成 ``AlertTriageHistory``,展示最近 5 条 triage 历史;
+ *   保存成功后由 ``refreshKey`` 触发自动重新拉取。
  */
 export interface AlertTriagePanelProps {
   alertId: string | null | undefined;
@@ -25,6 +28,15 @@ export interface AlertTriagePanelProps {
   }) => Promise<boolean>;
   /** 当前是否离线（WS 断开 + 轮询失败时为 true） */
   offline?: boolean;
+  /** M3-03: 加载研判历史;不传则不展示历史。 */
+  loadHistory?: (
+    alertId: string,
+    options?: { limit?: number; signal?: AbortSignal }
+  ) => Promise<{ ok: boolean; items?: AlertTriageEvent[]; error?: string }>;
+  /** M3-03: 变更即重新拉取历史(由 dashboard 端在保存成功后自增)。 */
+  refreshKey?: number;
+  /** M3-03: 历史展示条数,默认 5。 */
+  historyLimit?: number;
 }
 
 const NOTE_MAX_LENGTH = 800;
@@ -70,6 +82,9 @@ export default function AlertTriagePanel({
   triage,
   onSubmit,
   offline = false,
+  loadHistory,
+  refreshKey,
+  historyLimit = 5,
 }: AlertTriagePanelProps) {
   const initialStatus: AlertTriageStatus = triage?.status ?? "new";
   const [status, setStatus] = useState<AlertTriageStatus>(initialStatus);
@@ -258,6 +273,16 @@ export default function AlertTriagePanel({
           </button>
         </div>
       </div>
+
+      {/* M3-03: 研判历史(可选,父组件传 loadHistory 才展示) */}
+      {loadHistory ? (
+        <AlertTriageHistory
+          alertId={alertId}
+          loadHistory={loadHistory}
+          refreshKey={refreshKey}
+          limit={historyLimit}
+        />
+      ) : null}
     </section>
   );
 }

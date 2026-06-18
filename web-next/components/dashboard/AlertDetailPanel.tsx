@@ -3,7 +3,7 @@
 import { useState, useCallback } from "react";
 import { Clipboard, ClipboardCheck, ShieldAlert } from "lucide-react";
 import type { AlertDetail } from "@/types/alertBriefing";
-import type { AlertTriage, AlertTriageStatus } from "@/types/alert";
+import type { AlertTriage, AlertTriageEvent, AlertTriageStatus } from "@/types/alert";
 import StatusView from "./StatusView";
 import AlertTriagePanel from "./AlertTriagePanel";
 
@@ -13,6 +13,8 @@ import AlertTriagePanel from "./AlertTriagePanel";
  * - 数据来自 `deriveAlertDetail(alert)`,不在组件内做风险判定。
  * - 包含风险等级 / 攻击类别 / 证据 / 影响 / 建议动作 / 可复制报告。
  * - M3-02 阶段在底部接入 ``AlertTriagePanel``,支持状态切换 / 备注保存。
+ * - M3-03 阶段透传 ``loadHistory`` / ``refreshKey`` 给 ``AlertTriagePanel``,
+ *   触发研判历史自动展示与保存后自动刷新。
  * - 空态：未选中告警时使用 StatusView.tone="empty"。
  * - 错误态：本组件不直接发请求,错误由 `AlertSection` 拦截后传入。
  */
@@ -32,6 +34,15 @@ export interface AlertDetailPanelProps {
   }) => Promise<boolean>;
   /** 离线(WS 断开)时禁用保存按钮 */
   offline?: boolean;
+  /** M3-03: 加载研判历史,透传给 AlertTriagePanel */
+  loadHistory?: (
+    alertId: string,
+    options?: { limit?: number; signal?: AbortSignal }
+  ) => Promise<{ ok: boolean; items?: AlertTriageEvent[]; error?: string }>;
+  /** M3-03: 保存成功后由 dashboard 端自增,触发历史重新拉取 */
+  historyRefreshKey?: number;
+  /** M3-03: 历史展示条数,默认 5 */
+  historyLimit?: number;
 }
 
 const TONE_CLASS: Record<AlertDetail["riskTone"], string> = {
@@ -55,6 +66,9 @@ export default function AlertDetailPanel({
   onAnalyzeInCopilot,
   onTriageSubmit,
   offline = false,
+  loadHistory,
+  historyRefreshKey,
+  historyLimit,
 }: AlertDetailPanelProps) {
   const [copied, setCopied] = useState<"none" | "report" | "summary">("none");
 
@@ -146,7 +160,7 @@ export default function AlertDetailPanel({
         ) : null}
       </div>
 
-      {/* 研判与处置面板 (M3-02) */}
+      {/* 研判与处置面板 (M3-02 + M3-03) */}
       {onTriageSubmit ? (
         <AlertTriagePanel
           alertId={alertId}
@@ -163,6 +177,9 @@ export default function AlertDetailPanel({
           }
           onSubmit={onTriageSubmit}
           offline={offline}
+          loadHistory={loadHistory}
+          refreshKey={historyRefreshKey}
+          historyLimit={historyLimit}
         />
       ) : null}
 

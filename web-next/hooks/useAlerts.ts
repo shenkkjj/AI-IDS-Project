@@ -6,7 +6,9 @@ import { useDesktopNotify } from "@/hooks/useDesktopNotify";
 import type {
   AlertItem,
   AlertTriage,
+  AlertTriageEvent,
   AlertTriageStatus,
+  AlertTriageHistoryResponse,
   BackendAlertItem,
   DemoAttackResponse,
 } from "@/types/alert";
@@ -200,6 +202,48 @@ export function useAlerts() {
   }, [syncAlertsFromMap]);
 
   /**
+   * 加载指定告警的研判历史 (M3-03)。
+   *
+   * - 返回 ``{ ok: true, items }`` 或 ``{ ok: false, error }``;
+   * - 404(非 owner / 不存在)按失败处理,展示低调错误态,不阻断保存。
+   * - 默认 limit = 5(只展示最近的几条;完整历史可用更大 limit 二次查询)。
+   */
+  const loadTriageHistory = useCallback(
+    async (
+      alertId: string,
+      options?: { limit?: number; signal?: AbortSignal }
+    ): Promise<{ ok: boolean; items?: AlertTriageEvent[]; error?: string }> => {
+      const limit = options?.limit ?? 5;
+      try {
+        const response = await fetch(
+          `/api/backend/alerts/${encodeURIComponent(alertId)}/triage/history?limit=${limit}`,
+          {
+            credentials: "include",
+            cache: "no-store",
+            signal: options?.signal,
+          }
+        );
+        if (response.status === 404) {
+          return { ok: false, error: "未找到该告警的研判历史" };
+        }
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { detail?: string };
+          return { ok: false, error: payload.detail || `HTTP ${response.status}` };
+        }
+        const body = (await response.json().catch(() => ({}))) as Partial<AlertTriageHistoryResponse>;
+        if (body.status !== "ok" || !Array.isArray(body.items)) {
+          return { ok: false, error: "历史响应缺少 items 字段" };
+        }
+        return { ok: true, items: body.items };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: message };
+      }
+    },
+    []
+  );
+
+  /**
    * 研判状态更新 (M3-02)。
    *
    * - 成功时,就地更新本地缓存 + 选中的告警 + 触发 React re-render;
@@ -303,6 +347,7 @@ export function useAlerts() {
     loadAlerts,
     triggerDemoAttack,
     updateTriage,
+    loadTriageHistory,
     demoState,
     demoMessage,
     paginatedAlerts,
