@@ -382,3 +382,47 @@ M2 完成时，项目应满足：
 - 后端 `pytest` 9/9 新测试通过；既有 incident / copilot contract / alert triage / demo flow 0 回归（`test_demo_alert_can_drive_copilot_fallback` 仍为 M3-04 baseline 预存 NeMo Guardrails `moderation_unavailable` 失败，与本任务无关）。
 - **当前不做**：跨用户案件共享 / SOC 协作会话 / Copilot 案件对话历史持久化 / LLM 端 incident 子文档检索。
 - 运行日志：`docs/runs/2026-06-18-m3-05-incident-aware-copilot-contract.md`。
+
+### M3-06 测试与安全质量门收口（2026-06-18 已交付）
+
+> 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
+
+**3 大失败面全部清零**：
+
+1. **Demo Flow fallback（1 个）** — `test_demo_alert_can_drive_copilot_fallback` 因 L4 moderation `moderation_unavailable` fail-closed 阻断（无真实 OpenAI key）。**修复**：在 `test_demo_flow.py` 内 stub `GuardrailEngine.instance().check_input` 为 allow（与 `test_copilot_contract._stub_guardrails` 同模式）。该测试只验证 demo alert → copilot → no-key fallback 路径，不验证 Guardrails 决策。
+
+2. **Guardrails Colang corpus（9 个 benign 失败）** — `test_colang_flows.py::test_benign_not_blocked[sample0..8]` 因 L4 moderation client 真实发请求 → httpx `ConnectError` / `LocalProtocolError` → fail-closed `moderation_unavailable` → benign 被错误阻断。**修复**：在 `server/tests/security/llm_guardrails/conftest.py` 新增 `_safe_moderation_for_colang` autouse fixture（仅对 `test_colang_flows.py` 生效），把 `OpenAIModerationClient.check` 替换为 pass-through fake（用 `staticmethod` 包装规避 self 绑定 TypeError，否则 fail-closed 会包装 `TypeError` → `moderation_unavailable (L4: fail-closed, exc=TypeError)`）。同步修复同 bug 的 `mock_openai_moderation_pass/block/fail` fixtures。生产 `core.GuardrailEngine._run_rails` fail-closed **不变** —— 这里只动测试夹具。
+
+3. **SSRF 防护** — M3-04 记录有 3 个 SSRF 预存失败；实测 `server/tests/test_ssrf.py` 13/13 已稳定通过（M3-04 记录已过时，monkeypatch 命中 `_is_ssrf_safe` → `_is_url_pointing_to_internal` 内部导入路径）。**无修复需要**。
+
+**安全边界（保持不降级）**：
+
+- `GuardrailEngine._run_rails` L1 → L4 → L2/L3 顺序与 fail-closed 策略不变。
+- `check_output` P2-D 工具调用白名单 / `unauthorised_tool_call` 阻断不变。
+- `_l1_check` SSE error 净化（只暴露 category，不暴露 regex / stack trace）不变。
+- `audit log` 脱敏（`Log(action=...)` 不写 secret / API key / 完整 note / payload / system prompt）不变。
+- `analyzer._is_ssrf_safe` 阻断列表（loopback / RFC1918 / link-local / metadata / multicast / reserved）不变。
+- `build_chat_completions_url` 仍对 base URL 做 SSRF 检查不变。
+- 所有测试 stub 仅存在于 `server/tests/`，未触碰 `server/security/**` 任何生产代码。
+
+**验证矩阵（最终）**：
+
+- `pytest server/tests` 默认基线：**318 passed, 2 skipped**（0 失败，83.68s）。
+- `pytest server/tests/security/llm_guardrails` 专项：**139 passed**。
+- `pytest server/tests/test_demo_flow.py`：**5 passed**。
+- `pytest server/tests/test_ssrf.py`：**13 passed**。
+- M3-03 / M3-04 / M3-05 回归矩阵（copilot_contract + copilot_incident_contract + incidents + incident_persistence + alert_triage + alert_triage_persistence + demo_flow + ssrf）：**72 passed**。
+- 前端 `web-next`：`npm run typecheck` 0 错误；`npm run build` 通过（`/dashboard` 42.9 kB / First Load JS 190 kB）。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_demo_flow.py`（GuardrailEngine.instance stub）
+- `server/tests/security/llm_guardrails/conftest.py`（autouse `_safe_moderation_for_colang` + 修 `mock_openai_moderation_*` self-bug）
+- `PRODUCT.md` §2.2 第 13 项 M3-06 说明
+- `docs/agent/UNATTENDED_LONG_TASKS.md` M3-06 索引更新为"已交付 + 2026-06-18 落点"
+- `docs/runs/2026-06-18-m3-06-test-and-security-quality-gate-closure.md`（本任务 run log）
+
+**未解决问题**：无。
+
+**当前不做**：CI 自动化 fail-closed 复测、Provider 多区域 key 故障演练、SSRF 真实公网域名 mock 库扩充。
+- 运行日志：`docs/runs/2026-06-18-m3-06-test-and-security-quality-gate-closure.md`。
