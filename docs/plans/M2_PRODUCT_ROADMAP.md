@@ -363,3 +363,22 @@ M2 完成时，项目应满足：
 - **审计边界**：`Log(action=incident_create / incident_update / incident_alert_link / incident_alert_unlink)` 仍只写脱敏摘要（`incident_id=...` / `changed=...` / `status=A->B` / `severity=A->B` / `note_length=...` / `alert_id=...`），不写完整 note / payload / secret / stack trace；`IncidentEvent.note` 在 DB 中以全文保存（1000 字上限），但只通过 owner API 私有返回给 owner。
 - **当前不做**：多租户分派、SLA 计时、Jira/Slack 集成、批量选择 / 拖拽 / 多选表格、通知升级、负责人协作权限（`assignee_user_id` 仅作 owner 自身默认值预留）。
 - 运行日志：`docs/runs/2026-06-18-m3-04-incident-case-workbench.md`。
+
+### M3-05 案件感知 Copilot 合约（2026-06-18 已交付）
+
+- `server/models/schemas.py::CopilotStreamIn` 新增 `incident_id: str | None = Field(default=None, max_length=64)`；与 `alert_id` 可独立使用，二者同时存在时 **incident 优先**，`alert_id` 仅作 `selected_alert_id` 行写入 context_block，不重复读 alert payload。
+- `server/services/copilot_service.py` 新增受控 context builder：
+  - `_load_incident_context(db, user, incident_id)` 走 `incident_service.get_incident_detail(db, user.id, incident_id, event_limit=5)`（M3-04 owner 隔离路径）；非 owner / 不存在统一返回 `None`，**不**区分。
+  - `_build_context_from_incident(detail, *, selected_alert_id=None)` 构造受控 context_block：最多 5 条 linked_alerts + 5 条 events；incident summary 截断 500 字符，alert summary 截断 160 字符，event detail 截断 160 字符；event note **不**进 context（只放 `note_length`），alert payload **不**进 context（只放 `payload_length`），不放 secret / system prompt / stack trace / 完整 title。
+  - context block 头部固定为 `[当前安全案件上下文]` + `incident_id:` / `title:` / `severity:` / `status:` / `alert_count:` / `selected_alert_id:`（仅 incident 路径写入）/ `summary:`；关联告警段 `[关联告警摘要]`，事件段 `[案件事件摘要]`。
+- `copilot_stream` 顺序调整为：rate limit → user config → context lookup → Guardrails input → create_log → provider stream。incident 路径不能绕过 Guardrails；Guardrails block 后 provider 不被调用；incident 不存在 / 非 owner 走 SSE error（**不**走 Guardrails 路径）。
+- SSE 错误净化：incident 不存在 → `案件上下文不可用或不存在`（不暴露 owner / 不存在区分，不暴露 incident_id）；Guardrails block → `请求被安全护栏拦截(类别: <category>)`（不暴露 full reason / regex / stack trace）。两条独立。
+- audit 脱敏扩展：`Log(action="copilot_stream")` detail 现包含 `provider=...;model=...;alert_id=...;incident_id=...`（incident_id 仅在提供时出现）。`test_copilot_audit_log_includes_incident_id_without_note` 锁定 detail 不写 title / summary / note / fake key / stack trace。
+- fake provider 合约测试 `server/tests/test_copilot_incident_contract.py` 9 通过：schema 三测（接受 / 拒长 / 可选）+ happy path 注入（context_block 含案件头部 + 关联告警段 + 事件段）+ incident 缺失（fake.call_count==0 + SSE error 文本）+ Guardrails block with valid incident（fake.call_count==0 + 不暴露 reason/regex）+ audit 脱敏 + 截断（10 alerts + 10 events → 仅前 5；note / payload 全文不进 context）+ alert_id + incident_id 同传时 incident 优先。
+- `web-next/hooks/useCopilot.ts` 新增 `SendMessageOptions = { incidentId?: string | null; alertId?: string | null }` 第二参数；显式传 `incidentId` 时 hint 锁定为 `案件上下文: inc_xxx`，body 加 `incident_id` 字段；`alertId` 仍按旧逻辑回退到 `selected?.alertId`。
+- `web-next/components/dashboard/IncidentDetailPanel.tsx` 不再调用 `buildCopilotPrompt(detail)`，只发短意图 `请分析当前安全案件,给出风险、证据、影响和下一步处置。` + `incidentId`；删除 `buildCopilotPrompt` 函数与 `sessionStorage` 中间态写入。
+- `web-next/app/dashboard/dashboard-client.tsx` 监听 `incident:copilot` 事件，提取 `incidentId` 后调用 `copilotCtx.sendMessage(prompt, { incidentId })`。
+- 前端 `npm run typecheck` 0 错误；`npm run build` 通过（`/dashboard` 42.9 kB / First Load JS 190 kB）。
+- 后端 `pytest` 9/9 新测试通过；既有 incident / copilot contract / alert triage / demo flow 0 回归（`test_demo_alert_can_drive_copilot_fallback` 仍为 M3-04 baseline 预存 NeMo Guardrails `moderation_unavailable` 失败，与本任务无关）。
+- **当前不做**：跨用户案件共享 / SOC 协作会话 / Copilot 案件对话历史持久化 / LLM 端 incident 子文档检索。
+- 运行日志：`docs/runs/2026-06-18-m3-05-incident-aware-copilot-contract.md`。
