@@ -426,3 +426,74 @@ M2 完成时，项目应满足：
 
 **当前不做**：CI 自动化 fail-closed 复测、Provider 多区域 key 故障演练、SSRF 真实公网域名 mock 库扩充。
 - 运行日志：`docs/runs/2026-06-18-m3-06-test-and-security-quality-gate-closure.md`。
+
+### M3-07 案件证据报告导出（2026-06-18 已交付）
+
+> 核心目的：把 M3-04 / M3-05 已建立的"案件 + 告警 + 时间线 + Copilot 上下文"能力，收束成可复制、可下载、可审计、可脱敏的 SOC 案件证据报告；不依赖 PDF / DOCX / 外部渲染，不调用 LLM，不导出完整 payload / note / secret / system prompt / stack trace。
+
+**新端点契约**：
+
+- `GET /incidents/{incident_id}/report?format=json`（默认）：返回 `{status, incident_id, filename, markdown, meta}` envelope，meta 含 `generated_at` / `alert_count` / `included_alerts` / `event_count` / `included_events` / `redaction_count` / `truncated`。
+- `GET /incidents/{incident_id}/report?format=markdown`：返回 `text/markdown; charset=utf-8` body + `Content-Disposition: attachment; filename=incident-<incident_id>-report.md`。
+- 错误：401 未登录 / 404 非 owner 或不存在（不区分）/ 422 invalid format / 503 DB 失败。
+- filename 只由 `incident_id` 派生（防注入 + 防 title 泄密），非法字符降级为 `_`。
+
+**报告内容规范**：
+
+- 固定结构：`# 案件证据报告` + 4 段（案件摘要 / 关联告警 / 案件时间线 / 安全与脱敏说明）。
+- 截断限制：summary 1000 / alert summary 240 / payload preview 180 / event detail 240 / event note preview 160 / linked_alerts ≤ 20 / events ≤ 50（newest-first）。
+- 脱敏 sentinel：复用 `server.routers.logs_router._SENTINEL_PATTERNS`（sk- / sk-proj- / AKIA / ghp_ / xox[baprs]- / PRIVATE KEY / Traceback / ignore previous instructions / disregard system prompt / forget instructions / system:）并新增 `developer:` 触发。
+- 报告正文**禁止**包含：完整 raw payload（只放 `payload_length` + preview）、完整 `IncidentEvent.note`（只放 `note_length` + preview）、fake secret、system prompt、stack trace、Guardrails regex。
+
+**后端实现要点**：
+
+- `server/services/incident_report_service.py`（新增）：纯函数 `sanitize_report_text` / `build_incident_report`；不依赖 ORM / DB；`build_incident_report` 接收 `incident_service.get_incident_detail` 返回的 dict 派生 `{filename, markdown, meta}`。
+- `server/routers/incidents_router.py` 增加 `GET /incidents/{incident_id}/report?format=json|markdown`：复用 owner 隔离（`get_incident_detail`），非 owner / 不存在统一 404；format 校验走白名单 `{"json", "markdown"}`；audit `Log(action="incident_report_export")` 仅在成功生成时写，detail 只含 `incident_id / format / alert_count / included_alerts / event_count / included_events / redaction_count`，**不**含 title / summary / payload / note / markdown 全文。
+- 审计写入失败仅 `logger.warning`，不阻断主请求；非 owner / 不存在 / invalid format / DB 失败均**不**写 success Log。
+- `event_limit` 默认 100（让 detail 拉全量事件以满足 `event_count >= 60` 的大案件场景，再由 report service 截断到 50）。
+
+**前端实现要点**：
+
+- `web-next/types/incident.ts` 新增 `IncidentReportMeta` / `IncidentReportResponse` 类型。
+- `web-next/hooks/useIncidents.ts` 新增 `loadIncidentReport(incidentId)` helper：不保存 markdown 到 React 长期 state，按按钮请求；返回 `{ok, incidentId, filename, markdown, meta, error}`。
+- `web-next/components/dashboard/IncidentDetailPanel.tsx` 在事件时间线工具区增加 `复制报告` / `下载报告` 两个紧凑按钮（`Clipboard` / `ClipboardCheck` / `Download` / `Loader2` 图标；`data-testid="incident-copy-report"` / `incident-download-report"` / `incident-report-status"`），短小状态文案 `生成中 / 已复制 / 已下载 / 报告生成失败`。
+- 复制：`navigator.clipboard.writeText(markdown)`；不可用时降级提示 `复制失败`，不崩溃。
+- 下载：`Blob([markdown], { type: "text/markdown;charset=utf-8" })` + `URL.createObjectURL` + `anchor.click()` + `URL.revokeObjectURL`，文件名用后端 `filename`。
+- `web-next/components/dashboard/IncidentSection.tsx` 注入 `onLoadReport={(id) => incidents.loadIncidentReport(id)}` 到 `IncidentDetailPanel`。
+- 视觉：与现有 `用 AI 分析案件` 按钮并排；不挤压时间线标题；不新增大卡片；按钮内文字不溢出。
+- **不在前端拼报告 / 不读 payload / note 全文**：前端只消费后端脱敏后的 markdown。
+
+**安全边界（保持不降级）**：
+
+- `server/security/**` 未触碰；Guardrails / LLM provider / MCP 路径全部未修改。
+- audit `Log(action="incident_report_export")` 不含 title / summary / payload / note / markdown 全文（已用 regex + 反向断言锁定）。
+- filename 只由 incident_id 派生，含非法字符（`; / " \n`）时降级为 `_`；测试 `test_report_filename_derived_only_from_incident_id` 锁定。
+- 失败错误不含 stack trace；用户可见 detail 走中文。
+- 复用 `logs_router._SENTINEL_PATTERNS` 脱敏集合 + `developer:` 触发，未引入新 sentinel 漂移。
+- 不调用 LLM 生成报告，不依赖真实 API key；不新增数据库表 / Alembic migration / env var。
+
+**验证矩阵（最终）**：
+
+- `pytest server/tests/test_incident_report_export.py`：**14 passed**（含 401 / 404 / 422 / json envelope / markdown body / payload 截断 / note 截断 / 脱敏 sentinel / audit 脱敏 / 大案件截断 / filename 派生）。
+- `pytest server/tests/test_incidents.py test_incident_persistence.py test_security_timeline.py`：0 回归。
+- `pytest server/tests` 全量基线：**332 passed, 2 skipped**（M3-06 baseline 318 + M3-07 新增 14；0 失败）。
+- `pytest server/tests/security/llm_guardrails` 专项：**139 passed**（与 M3-06 一致，0 回归）。
+- 前端 `web-next`：`npm run typecheck` 0 错误；`npm run build` 通过（`/dashboard` 43.7 kB / First Load JS 191 kB）。
+
+**改动文件（精确 stage）**：
+
+- `server/services/incident_report_service.py`（新增纯函数 service）
+- `server/routers/incidents_router.py`（新增 `GET /incidents/{id}/report` 端点 + audit helper）
+- `server/tests/test_incident_report_export.py`（新增 14 个 RED→GREEN 测试）
+- `web-next/types/incident.ts`（新增 `IncidentReportMeta` / `IncidentReportResponse`）
+- `web-next/hooks/useIncidents.ts`（新增 `loadIncidentReport` helper）
+- `web-next/components/dashboard/IncidentDetailPanel.tsx`（事件时间线工具区加 `复制报告` / `下载报告` 按钮 + `onLoadReport` prop + 状态机）
+- `web-next/components/dashboard/IncidentSection.tsx`（注入 `onLoadReport` 到 `IncidentDetailPanel`）
+- `PRODUCT.md` §2.2 第 14 项 M3-07 说明 + §5 M3-07 验收
+- `docs/agent/UNATTENDED_LONG_TASKS.md` M3-07 索引更新为"已交付 + 2026-06-18 落点"
+- `docs/runs/2026-06-18-m3-07-incident-evidence-report-export.md`（本任务 run log）
+
+**未解决问题**：无。
+
+**当前不做**：PDF / DOCX / HTML 渲染、批量案件导出、跨用户共享、签名审批、SLA、工单系统、Jira / Slack 集成、报告文件持久化、外部存储、报告正文 LLM 摘要、案件模板。
+- 运行日志：`docs/runs/2026-06-18-m3-07-incident-evidence-report-export.md`。
