@@ -7,6 +7,7 @@ import type {
   IncidentEvent,
   IncidentLinkResponse,
   IncidentListResponse,
+  IncidentReportMeta,
   IncidentSeverity,
   IncidentStatus,
   IncidentSummary,
@@ -406,6 +407,75 @@ export function useIncidents() {
     []
   );
 
+  /**
+   * M3-07: 拉取案件证据报告(Markdown),不保存到本地长期 state。
+   * 不消费 payload / note 全文,只把后端脱敏后的 markdown 字符串交给调用方
+   * (复制 / 下载);按按钮触发,避免大字符串滞留。
+   */
+  const loadIncidentReport = useCallback(
+    async (
+      incidentId: string,
+      options?: { signal?: AbortSignal }
+    ): Promise<{
+      ok: boolean;
+      incidentId?: string;
+      filename?: string;
+      markdown?: string;
+      meta?: IncidentReportMeta;
+      error?: string;
+    }> => {
+      try {
+        const response = await fetch(
+          `/api/backend/incidents/${encodeURIComponent(incidentId)}/report?format=json`,
+          {
+            credentials: "include",
+            cache: "no-store",
+            signal: options?.signal,
+          }
+        );
+        if (response.status === 404) {
+          return { ok: false, error: "案件不存在" };
+        }
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as {
+            detail?: string;
+          };
+          const message = payload.detail || `HTTP ${response.status}`;
+          return { ok: false, error: message };
+        }
+        const body = (await response.json().catch(() => ({}))) as {
+          status?: string;
+          incident_id?: string;
+          filename?: string;
+          markdown?: string;
+          meta?: IncidentReportMeta;
+        };
+        if (
+          body.status !== "ok" ||
+          typeof body.markdown !== "string" ||
+          typeof body.filename !== "string" ||
+          !body.meta
+        ) {
+          return { ok: false, error: "响应缺少报告字段" };
+        }
+        return {
+          ok: true,
+          incidentId: body.incident_id,
+          filename: body.filename,
+          markdown: body.markdown,
+          meta: body.meta,
+        };
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return { ok: false, error: "已取消" };
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return { ok: false, error: message };
+      }
+    },
+    []
+  );
+
   return {
     // 状态
     incidentItems,
@@ -422,6 +492,7 @@ export function useIncidents() {
     updateIncident,
     linkAlert,
     unlinkAlert,
+    loadIncidentReport,
     setSelectedIncident,
   };
 }

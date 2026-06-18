@@ -1,12 +1,22 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { Check, Loader2, Sparkles, RefreshCw, Unlink } from "lucide-react";
+import {
+  Check,
+  Clipboard,
+  ClipboardCheck,
+  Download,
+  Loader2,
+  Sparkles,
+  RefreshCw,
+  Unlink,
+} from "lucide-react";
 import {
   INCIDENT_SEVERITY_OPTIONS,
   INCIDENT_STATUS_OPTIONS,
   type IncidentDetailResponse,
   type IncidentEvent,
+  type IncidentReportMeta,
   type IncidentSeverity,
   type IncidentStatus,
   type IncidentLinkedAlert,
@@ -43,6 +53,18 @@ export interface IncidentDetailPanelProps {
     error?: string;
   }>;
   onRefresh: () => void;
+  /**
+   * M3-07: 拉取案件证据报告(Markdown 字符串 + filename),由父组件注入。
+   * 不消费 payload / note 全文,只接后端脱敏后的 markdown。
+   */
+  onLoadReport: (incidentId: string) => Promise<{
+    ok: boolean;
+    incidentId?: string;
+    filename?: string;
+    markdown?: string;
+    meta?: IncidentReportMeta;
+    error?: string;
+  }>;
 }
 
 export default function IncidentDetailPanel({
@@ -53,6 +75,7 @@ export default function IncidentDetailPanel({
   onLinkAlert,
   onUnlinkAlert,
   onRefresh,
+  onLoadReport,
 }: IncidentDetailPanelProps) {
   const [status, setStatus] = useState<IncidentStatus>(detail.incident.status);
   const [severity, setSeverity] = useState<IncidentSeverity>(
@@ -134,7 +157,81 @@ export default function IncidentDetailPanel({
     );
   }, [detail.incident.incident_id]);
 
+  // M3-07: 案件证据报告导出(复制 / 下载)。
+  // - 不保存 markdown 到 React 长期 state;按按钮请求即可,避免大字符串滞留。
+  // - 不在前端拼报告 / 不读 payload / note 全文,完全消费后端脱敏后的 markdown。
+  // - navigator.clipboard 不可用时复制按钮失败但不崩溃。
+  type ReportAction = "idle" | "loading" | "copied" | "downloaded" | "error";
+  const [reportAction, setReportAction] = useState<ReportAction>("idle");
+  const [reportMessage, setReportMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (reportAction === "copied" || reportAction === "downloaded") {
+      const timer = window.setTimeout(() => {
+        setReportAction("idle");
+        setReportMessage(null);
+      }, 2400);
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [reportAction]);
+
+  const handleReport = useCallback(
+    async (action: "copy" | "download") => {
+      if (reportAction === "loading") return;
+      setReportAction("loading");
+      setReportMessage("生成中");
+      const result = await onLoadReport(detail.incident.incident_id);
+      if (!result.ok || !result.markdown || !result.filename) {
+        setReportAction("error");
+        setReportMessage(result.error || "报告生成失败");
+        return;
+      }
+      if (action === "copy") {
+        if (
+          typeof navigator !== "undefined" &&
+          navigator.clipboard &&
+          typeof navigator.clipboard.writeText === "function"
+        ) {
+          try {
+            await navigator.clipboard.writeText(result.markdown);
+            setReportAction("copied");
+            setReportMessage("已复制");
+            return;
+          } catch {
+            // 落到下面统一错误处理
+          }
+        }
+        setReportAction("error");
+        setReportMessage("复制失败");
+        return;
+      }
+      // download:Blob + URL.createObjectURL
+      try {
+        const blob = new Blob([result.markdown], {
+          type: "text/markdown;charset=utf-8",
+        });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = result.filename;
+        anchor.rel = "noopener";
+        document.body.appendChild(anchor);
+        anchor.click();
+        document.body.removeChild(anchor);
+        URL.revokeObjectURL(url);
+        setReportAction("downloaded");
+        setReportMessage("已下载");
+      } catch {
+        setReportAction("error");
+        setReportMessage("下载失败");
+      }
+    },
+    [onLoadReport, detail.incident.incident_id, reportAction]
+  );
+
   const saving = actionState === "saving";
+  const reportLoading = reportAction === "loading";
 
   return (
     <div
@@ -353,19 +450,62 @@ export default function IncidentDetailPanel({
 
       {/* 事件时间线 */}
       <div className="px-5 py-4">
-        <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex items-center justify-between gap-2 mb-2 flex-wrap">
           <div className="text-[10px] font-mono uppercase tracking-[0.15em] text-ink-tertiary">
             事件时间线
           </div>
-          <button
-            type="button"
-            data-testid="incident-copilot"
-            onClick={handleCopilot}
-            className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1"
-          >
-            <Sparkles className="w-3 h-3" />
-            用 AI 分析案件
-          </button>
+          <div className="flex items-center gap-3 flex-wrap">
+            {/* M3-07: 报告导出状态文案(短小,可重试) */}
+            <span
+              data-testid="incident-report-status"
+              className="text-[10px] font-mono text-ink-tertiary"
+              role="status"
+              aria-live="polite"
+            >
+              {reportMessage || ""}
+            </span>
+            <button
+              type="button"
+              data-testid="incident-copy-report"
+              onClick={() => void handleReport("copy")}
+              disabled={reportLoading}
+              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="复制案件报告"
+            >
+              {reportLoading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : reportAction === "copied" ? (
+                <ClipboardCheck className="w-3 h-3" />
+              ) : (
+                <Clipboard className="w-3 h-3" />
+              )}
+              复制报告
+            </button>
+            <button
+              type="button"
+              data-testid="incident-download-report"
+              onClick={() => void handleReport("download")}
+              disabled={reportLoading}
+              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="下载案件报告"
+            >
+              {reportLoading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Download className="w-3 h-3" />
+              )}
+              下载报告
+            </button>
+            <button
+              type="button"
+              data-testid="incident-copilot"
+              onClick={handleCopilot}
+              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1"
+            >
+              <Sparkles className="w-3 h-3" />
+              用 AI 分析案件
+            </button>
+          </div>
         </div>
         <IncidentTimeline events={detail.events} />
       </div>

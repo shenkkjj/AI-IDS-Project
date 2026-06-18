@@ -140,6 +140,9 @@ export default function IncidentSection({
                 { eventLimit: 20 }
               )
             }
+            onLoadReport={(incidentId) =>
+              incidents.loadIncidentReport(incidentId)
+            }
           />
         ) : (
           <StatusView

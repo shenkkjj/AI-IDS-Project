@@ -119,6 +119,30 @@ export interface IncidentUnlinkResponse {
   alert_count: number;
 }
 
+// ---------------------------------------------------------------------------
+// 案件证据报告导出 (M3-07)
+// ---------------------------------------------------------------------------
+
+/** 报告元信息(只含计数与生成时间,不含敏感正文)。 */
+export interface IncidentReportMeta {
+  generated_at: number;
+  alert_count: number;
+  included_alerts: number;
+  event_count: number;
+  included_events: number;
+  redaction_count: number;
+  truncated: boolean;
+}
+
+/** ``GET /incidents/{id}/report?format=json`` 响应 envelope。 */
+export interface IncidentReportResponse {
+  status: "ok";
+  incident_id: string;
+  filename: string;
+  markdown: string;
+  meta: IncidentReportMeta;
+}
+
 /** 前端展示用常量。 */
 export const INCIDENT_STATUS_OPTIONS: ReadonlyArray<{
   value: IncidentStatus;
