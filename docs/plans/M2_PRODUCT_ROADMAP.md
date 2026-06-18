@@ -348,3 +348,18 @@ M2 完成时，项目应满足：
 - **审计边界**：`Log(action="alert_triage_update")` 仍只写脱敏摘要（`status=...` / `disposition=...` / `note_length=...` / `source_ip=...`），不写完整 note / payload / secret。
 - **当前不做**：完整工单系统、SLA、负责人分派、批量处置、通知升级、Jira/Slack 集成。
 - 运行日志：`docs/runs/2026-06-18-m3-03-alert-triage-persistence-and-history.md`。
+
+### M3-04 安全事件 / 案件工作台（2026-06-18 已交付）
+
+- 新增 `incidents` / `incident_alert_links` / `incident_events` 表 + Alembic migration `4f3c9a1d8b7e`（在 M3-03 `d33d40488e0f` 之上）。
+- `GET /incidents?limit=50&status=...` 返回 owner 隔离的 incident 列表；`GET /incidents/{id}?event_limit=20` 返回 incident + linked_alerts + newest-first 事件时间线。
+- `POST /incidents` 从 owner alert 创建案件并自动 link；`alert_id` 不属于当前 user / 不存在 → 404，不通过 403 暴露存在性。
+- `PATCH /incidents/{id}` 推进 status / severity / title / summary 并写对应 `IncidentEvent`；`resolved / false_positive` 自动设置 `closed_at`、改回打开态清空；`note` 附在同事务事件上。
+- `POST /incidents/{id}/alerts` 重复 link 幂等（不重复写 active link / `IncidentEvent` / Log）。
+- `DELETE /incidents/{id}/alerts/{alert_id}` 软删除 link（`removed_at`），不删 `alert_records`。
+- 重启恢复：清空 `app_state.alert.backlog` + 全新 SQLAlchemy engine + 同一 DB 文件，仍能从 DB 读出 incident / linked_alerts / events。
+- 前端 `useIncidents` hook + `IncidentSection / IncidentList / IncidentDetailPanel / IncidentTimeline / IncidentLinkedAlerts` 5 个新组件 + `RouteKey="incidents"` + `AlertDetailPanel` 增加"从此告警创建案件"按钮（按 `riskLevel` 映射 incident severity）。
+- Copilot 案件摘要走前端拼接消息模板（`buildCopilotPrompt`），不走后端 incident-aware contract；模板只含 incident id / title / severity / status / 关联告警数 / 最多 5 条告警摘要 + 四段式输出要求（风险 / 证据 / 影响 / 下一步处置），不含 secret / system prompt / stack trace。
+- **审计边界**：`Log(action=incident_create / incident_update / incident_alert_link / incident_alert_unlink)` 仍只写脱敏摘要（`incident_id=...` / `changed=...` / `status=A->B` / `severity=A->B` / `note_length=...` / `alert_id=...`），不写完整 note / payload / secret / stack trace；`IncidentEvent.note` 在 DB 中以全文保存（1000 字上限），但只通过 owner API 私有返回给 owner。
+- **当前不做**：多租户分派、SLA 计时、Jira/Slack 集成、批量选择 / 拖拽 / 多选表格、通知升级、负责人协作权限（`assignee_user_id` 仅作 owner 自身默认值预留）。
+- 运行日志：`docs/runs/2026-06-18-m3-04-incident-case-workbench.md`。

@@ -137,4 +137,34 @@ $env:DATABASE_URL='sqlite:///' + ($env:TEMP + '\alembic_review.db').Replace('\',
 - `POST /alerts/demo` 写 `alert_records` 失败时，主请求返回 503（用户期待"重启可恢复"，不静默成功）。
 - `PATCH /alerts/{alert_id}/triage` 写 `alert_records` + `alert_triage_events` 失败时同样返回 503；审计 `Log` 写失败仅 warning，不阻断主请求。
 - worker ingest (`alert_worker`) 写 DB 失败时记录 warning，不广播未持久化 alert（避免前端误以为已可恢复）。
+
+---
+
+## M3-04 安全事件 / 案件工作台（revision `4f3c9a1d8b7e`）
+
+`docs/agent/M3_04_INCIDENT_CASE_WORKBENCH_TASK.md` 在 2026-06-18 落地。
+
+- `d33d40488e0f` 之上追加新 revision `4f3c9a1d8b7e`（`alembic upgrade head` 在 M3-03 库上 0 错误继续推进）。
+- 新增三张表：
+  - `incidents` — 案件事实来源；`(user_id, incident_id)` 唯一；保存 title / summary / severity / status / assignee_user_id / created_from_alert_id / closed_at / created_at / updated_at。
+  - `incident_alert_links` — 告警 ↔ 案件关联事实来源；按 `incident_record_id` 关联；保存 alert_record_id / alert_id 字符串冗余 / linked_by / linked_at / **removed_at**（软删除）；重复 link 的幂等检查放在 service 层。
+  - `incident_events` — 事件时间线事实来源；按 `incident_record_id` 关联；保存 event_type（`created` / `status_changed` / `alert_linked` / `alert_unlinked` / `note_added` / `summary_updated` / `severity_changed` / `title_changed`）/ from_status / to_status / detail（脱敏摘要）/ note（owner API 私有返回）/ actor_user_id / created_at。
+- 关键索引：
+  - `ix_incidents_user_updated` / `ix_incidents_user_status_updated` — 服务 `GET /incidents` 的常规分页与按状态过滤。
+  - `ix_incidents_created_from_alert` — 服务从首条告警反查 incident。
+  - `ix_incident_alert_links_incident_active` — 服务 incident 详情中 active link 的快速查询（配合 `removed_at IS NULL`）。
+  - `ix_incident_alert_links_user_alert` / `ix_incident_alert_links_alert_record` — 服务 user/alert_record 维度反查。
+  - `ix_incident_events_incident_created` / `ix_incident_events_user_created` — 服务事件时间线的 user/record 维度时间排序。
+- 存储策略：`detail` / `note` 用 `Text`；不依赖 PostgreSQL JSONB。`created_at` / `updated_at` / `closed_at` / `linked_at` / `removed_at` 用 `DateTime`（naive UTC，与 M3-03 一致）。
+- `downgrade()` 按依赖反序 drop indexes / tables，可 `alembic downgrade base` 完整回滚。
+- 验证：见 `server/tests/test_migrations.py::test_alembic_upgrade_head_creates_incident_tables` / `test_alembic_upgrade_head_creates_incident_indexes` / `test_alembic_downgrade_drops_incident_tables`。
+
+### 启动期行为变化
+
+- `GET /incidents` 走 DB（`incidents` + active link 计数）；`GET /incidents/{id}` 返回 incident + linked_alerts + events。
+- `POST /incidents` 写失败 → 路由返回 503（用户期待"重启可恢复"）。
+- `POST /incidents/{id}/alerts` 写失败 → 503；重复 link 幂等返回 200 + `idempotent: true`。
+- `DELETE /incidents/{id}/alerts/{alert_id}` 软删除 link，不删 `alert_records`；写失败 → 503。
+- `PATCH /incidents/{id}` 与 status / severity / title / summary 变化同事务写 `IncidentEvent`；`closed_at` 由 service 自动维护；写失败 → 503。
+- 审计 `Log(action=incident_create / incident_update / incident_alert_link / incident_alert_unlink)` 写失败仅 warning，不阻断主请求。
 - `app_state.alert.backlog` 仍存在，但仅用于 WebSocket 实时推送与短期缓存；新事实来源是 `alert_records`。

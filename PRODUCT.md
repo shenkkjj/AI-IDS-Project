@@ -74,6 +74,7 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 8. `GET /logs/security-timeline` 端点 + Dashboard § 03.5 段已上线 SOC 时间线；schema 经 sentinel 脱敏，不外泄 regex / stack trace / API key / system prompt。
 9. `scripts/check_env_security.py` 覆盖生产必填 secret、placeholder、CORS、DEV_MODE、MCP 鉴权；本地开发不阻塞，生产模式有 BLOCK 项。
 10. **M3-03 告警研判持久化与历史**已交付：`alert_records` / `alert_triage_events` 两张表 + Alembic migration `d33d40488e0f` 已建出；`PATCH /alerts/{alert_id}/triage` 现在写最新 triage 到 `alert_records` + 写一条 `alert_triage_events`；`GET /alerts/{alert_id}/triage/history?limit=50` 返回 owner 隔离的 newest-first 历史；`GET /alerts` 重启后从 DB 恢复；内存 `app_state.alert.backlog` 仍用于 WebSocket 实时推送与 worker 短期缓存。`M3-02` 的内存边界已升级为 DB 持久化边界；`Log(action="alert_triage_update")` 继续只写脱敏摘要。
+11. **M3-04 安全事件 / 案件工作台**已交付：`incidents` / `incident_alert_links` / `incident_events` 三表 + Alembic migration `4f3c9a1d8b7e`（基于 `d33d40488e0f`）落地；`GET / POST / PATCH /incidents` + `POST /incidents/{id}/alerts` + `DELETE /incidents/{id}/alerts/{alert_id}` 全套端点 + 5 状态白名单 (`open / investigating / contained / resolved / false_positive`) + `closed_at` 进入关闭态自动设置 / 改回打开态清空 + 重复 link 幂等 (不重复写 active link / `IncidentEvent` / Log) + owner 404 统一；`Log(action=incident_create / incident_update / incident_alert_link / incident_alert_unlink)` 只写脱敏摘要；前端 `useIncidents` + `IncidentSection / IncidentList / IncidentDetailPanel / IncidentTimeline / IncidentLinkedAlerts` 5 个新组件 + `RouteKey="incidents"` + 案件 Copilot 前端拼接消息（incident id / title / severity / status / 告警数 / 最多 5 条告警摘要 + 风险/证据/影响/下一步处置四段式要求,不含 secret / system prompt / stack trace）。
 
 ---
 
@@ -205,6 +206,7 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 - 不把营销落地页当作产品首页，第一屏必须可操作。
 - M3-02 验收：`PATCH /alerts/{alert_id}/triage` 必须使用 `require_auth_user`；非 owner / 不存在统一返回 404；`analyst_note` 上限 800 字符；`Log(action="alert_triage_update")` 写入脱敏摘要；前端 `alert-triage-panel` / `triage-status-*` / `triage-save` / `triage-status-badge` / `triage-row-badge` 全部可用；简报“待研判 / 已闭环”计数必须从真实 alert triage 派生。
 - M3-03 验收：必须在临时 SQLite + 新 SQLAlchemy engine（同一 DB 文件）下验证 `GET /alerts` 在清空 `app_state.alert.backlog` 后仍能恢复；`alert_records.triage_status` 与 `alert_triage_events` 由 `PATCH /alerts/{alert_id}/triage` 写入；`GET /alerts/{alert_id}/triage/history?limit=50` 仅 owner 可见，非 owner 404；`analyst_note` 仍 800 字符上限；`Log` 仍只写脱敏摘要；Alembic migration `d33d40488e0f` 必须能 `upgrade head` 与 `downgrade base`；前端 `AlertTriageHistory` 在保存成功后自动刷新（`historyRefreshKey` 自增）。
+- M3-04 验收：所有 incident 端点必须 `require_auth_user`；非 owner / 不存在统一 404，不通过 403 暴露存在性；`POST /incidents` 携带 `alert_id` 时自动 link 该 alert 并写 `created` + `alert_linked` 事件；`resolved / false_positive` 自动设 `closed_at`、改回打开态清空；`POST /incidents/{id}/alerts` 重复 link 幂等(不重复写 active link / `IncidentEvent` / Log);`DELETE /incidents/{id}/alerts/{alert_id}` 软删除 link 不删 `alert_records`;`Log(action=incident_*)` 全部脱敏;`IncidentEvent.note` 可由 owner API 看到但 `Log.detail` 不含完整 note;Al embic migration `4f3c9a1d8b7e` 必须能 `upgrade head` / `downgrade base`;案件在清空 `app_state.alert.backlog` + 新建 engine 后仍能从 DB 恢复;前端 `IncidentSection` / `IncidentList` / `IncidentDetailPanel` / `IncidentTimeline` / `IncidentLinkedAlerts` + `RouteKey="incidents"` 全部可用;Copilot 案件摘要走前端拼接消息模板,只含 incident id / title / severity / status / 关联告警数 / 最多 5 条告警摘要 + 四段式输出要求,不含 secret / system prompt / stack trace。
 
 M3-03 当前实现边界（重要）：
 
@@ -213,6 +215,15 @@ M3-03 当前实现边界（重要）：
 - alert payload / LLM analysis JSON 存 `Text` 列（`json.dumps(..., ensure_ascii=False)`），不依赖 PostgreSQL JSONB；SQLite 测试库与 Compose PostgreSQL 走同一份代码。
 - `analyst_note` 在 DB 中保留全文（800 字上限），但通过认证 API 私有返回给 owner；`Log` 审计与时间线仍只记录脱敏摘要（`status=...` / `disposition=...` / `note_length=...` / `source_ip=...`），不写完整 note / payload / secret。
 - 当前不做：完整工单系统、SLA、负责人分派、批量处置、通知升级、Jira/Slack 集成；M3-02 的简报分桶语义不变。
+
+M3-04 当前实现边界（重要）：
+
+- `incidents` / `incident_alert_links` / `incident_events` 是案件事实来源；`Log(action=incident_create / incident_update / incident_alert_link / incident_alert_unlink)` 仍只写脱敏摘要（`incident_id=...` / `changed=...` / `status=A->B` / `severity=A->B` / `note_length=...` / `alert_id=...`），不写完整 note / payload / secret / stack trace。
+- `IncidentEvent.note` 在 DB 中以全文保存（1000 字上限），但只通过 owner API 私有返回给 owner；`Log` 审计与时间线仍不写完整 note。
+- `closed_at` 行为：进入 `resolved / false_positive` 时自动设置；从这两态改回 `open / investigating / contained` 时清空；两个关闭态之间互转保持 `closed_at`（不重置）。
+- 重复 link 幂等：同一 `(incident_record_id, alert_record_id)` 已有 active link 时不重复写 active link、不写新 `IncidentEvent(alert_linked)`、不写新 Log；这是任务文档 §4 推荐行为，由 `test_post_incident_alert_idempotent_for_duplicate_link` 锁定。
+- 前端 `AlertDetailPanel` 提供"从此告警创建案件"按钮，按 `riskLevel` 映射到 incident severity；Copilot 案件摘要走前端拼接（`buildCopilotPrompt`），不走后端 incident-aware contract；后续 M3-05 再做后端 incident-aware Copilot 上下文。
+- 当前不做：多租户分派、SLA 计时、Jira/Slack 集成、批量选择 / 拖拽 / 多选表格、通知升级、负责人协作权限（`assignee_user_id` 仅作 owner 自身默认值预留）。
 
 ---
 
