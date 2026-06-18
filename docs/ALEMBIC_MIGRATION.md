@@ -112,3 +112,29 @@ $env:DATABASE_URL='sqlite:///' + ($env:TEMP + '\alembic_review.db').Replace('\',
 - M2-07 Compose 端到端验收：把 `docker-compose.yml` 中的 PostgreSQL 接线端到端跑通。
 - 把 `server/tests/conftest.py` 的 `setdefault` 从 `sqlite+aiosqlite:///` 改为 `sqlite:///`，与生产同步 engine 路径一致（低风险，留给下一轮清理）。
 - `ensure_user_config_columns()` 退出路径：所有旧 `data/app.db` 都迁出后，从 `server/main.py` 启动路径移除。
+
+---
+
+## M3-03 告警研判持久化（revision `d33d40488e0f`）
+
+`docs/agent/M3_03_ALERT_TRIAGE_PERSISTENCE_AND_HISTORY_TASK.md` 在 2026-06-18 落地。
+
+- baseline revision `d9af4388f20a` 之上追加新 revision `d33d40488e0f`（`alembic upgrade head` 在 baseline 库上 0 错误继续推进）。
+- 新增两张表：
+  - `alert_records` — 告警快照事实来源；`(user_id, alert_id)` 唯一；保存 raw alert JSON、LLM analysis JSON、analysis error、processed_at、**最新 triage 字段**。
+  - `alert_triage_events` — triage 历史事实来源；按 `alert_record_id` 关联；保存 from/to、disposition、analyst_note、updated_by、created_at。
+- 关键索引：
+  - `ix_alert_records_user_processed` / `ix_alert_records_user_status_processed` — 服务 `GET /alerts` 的常规分页与按状态过滤。
+  - `ix_alert_records_alert_id` — 服务 history 端点先按 `alert_id` 定位 record。
+  - `ix_alert_triage_events_user_alert_created` / `ix_alert_triage_events_record_created` — 服务 history 端点的 user/record 维度时间排序。
+- JSON 存储策略：`raw_alert_json` / `llm_analysis_json` 用 `Text` 列 + `json.dumps(..., ensure_ascii=False)`。不依赖 PostgreSQL JSONB，让 SQLite 测试库与 Compose PostgreSQL 走同一份代码；后续若要 JSONB 索引搜索，需另开 RFC。
+- `downgrade()` 按依赖反序 drop indexes / tables，可 `alembic downgrade base` 完整回滚。
+- 验证：见 `server/tests/test_migrations.py::test_alembic_upgrade_head_creates_alert_records_tables` / `test_alembic_upgrade_head_creates_alert_records_indexes` / `test_alembic_downgrade_drops_alert_records_tables`。
+
+### 启动期行为变化
+
+- `GET /alerts` 现在走 DB（`alert_records`）；读失败回退内存 `app_state.alert.backlog` 并写 warning，不让主请求 5xx。
+- `POST /alerts/demo` 写 `alert_records` 失败时，主请求返回 503（用户期待"重启可恢复"，不静默成功）。
+- `PATCH /alerts/{alert_id}/triage` 写 `alert_records` + `alert_triage_events` 失败时同样返回 503；审计 `Log` 写失败仅 warning，不阻断主请求。
+- worker ingest (`alert_worker`) 写 DB 失败时记录 warning，不广播未持久化 alert（避免前端误以为已可恢复）。
+- `app_state.alert.backlog` 仍存在，但仅用于 WebSocket 实时推送与短期缓存；新事实来源是 `alert_records`。

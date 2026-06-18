@@ -324,3 +324,27 @@ M2 完成时，项目应满足：
 - 数据库配置和迁移策略不再自相矛盾。
 - 生产最小安全配置文档与启动检查一致。
 - 当前工作树能明确区分提交候选、本地产物和后续债务。
+
+---
+
+## 8. M3 路线图（产品体验升级）
+
+> 详细任务在 `docs/agent/M3_*.md`；本节只记录交付状态与边界。
+
+### M3-02 告警研判与处置工作台（已交付）
+
+- `PATCH /alerts/{alert_id}/triage`（5 个稳定状态 / 800 字 note 上限 / 非 owner 404 / 脱敏审计）。
+- Dashboard `AlertTriagePanel` 紧凑控件 + 简报“待研判 / 已闭环”计数。
+- **边界（已被 M3-03 升级）**：triage 状态保存到当前进程告警 backlog payload，跨重启不保留，跨进程实例不共享。
+
+### M3-03 告警研判持久化与历史（2026-06-18 已交付）
+
+- 新增 `alert_records` / `alert_triage_events` 表 + Alembic migration `d33d40488e0f`（在 baseline `d9af4388f20a` 之上）。
+- `GET /alerts` 重启后从 `alert_records` 恢复；DB 读失败回退内存 backlog。
+- `PATCH /alerts/{alert_id}/triage` 同步写 `alert_records.triage_*` 与一条 `alert_triage_events`。
+- `GET /alerts/{alert_id}/triage/history?limit=50` 返回 owner 隔离的 newest-first 历史。
+- 前端 `AlertTriageHistory` 集成到 `AlertTriagePanel` 末尾，保存成功后由 `historyRefreshKey` 自增自动刷新。
+- **存储策略**：raw alert / LLM analysis 用 `Text` 列 + `json.dumps(..., ensure_ascii=False)`，不依赖 PostgreSQL JSONB；SQLite 测试库与 Compose PostgreSQL 走同一份代码。
+- **审计边界**：`Log(action="alert_triage_update")` 仍只写脱敏摘要（`status=...` / `disposition=...` / `note_length=...` / `source_ip=...`），不写完整 note / payload / secret。
+- **当前不做**：完整工单系统、SLA、负责人分派、批量处置、通知升级、Jira/Slack 集成。
+- 运行日志：`docs/runs/2026-06-18-m3-03-alert-triage-persistence-and-history.md`。

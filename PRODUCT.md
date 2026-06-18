@@ -73,7 +73,7 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 7. Copilot 有 key 成功流式路径已通过 `server/tests/test_copilot_contract.py` + `FakeLLMProvider` 保护（默认 `_PROVIDERS` registry 不含 `fake_test`，生产不可达 fake）。
 8. `GET /logs/security-timeline` 端点 + Dashboard § 03.5 段已上线 SOC 时间线；schema 经 sentinel 脱敏，不外泄 regex / stack trace / API key / system prompt。
 9. `scripts/check_env_security.py` 覆盖生产必填 secret、placeholder、CORS、DEV_MODE、MCP 鉴权；本地开发不阻塞，生产模式有 BLOCK 项。
-10. **M3-02 告警研判状态**保存在当前进程告警 backlog payload 中，跨重启不保留；持久化、查询历史、跨副本共享留给后续数据库迁移任务。审计日志通过 `Log(action="alert_triage_update")` 写入脱敏摘要。
+10. **M3-03 告警研判持久化与历史**已交付：`alert_records` / `alert_triage_events` 两张表 + Alembic migration `d33d40488e0f` 已建出；`PATCH /alerts/{alert_id}/triage` 现在写最新 triage 到 `alert_records` + 写一条 `alert_triage_events`；`GET /alerts/{alert_id}/triage/history?limit=50` 返回 owner 隔离的 newest-first 历史；`GET /alerts` 重启后从 DB 恢复；内存 `app_state.alert.backlog` 仍用于 WebSocket 实时推送与 worker 短期缓存。`M3-02` 的内存边界已升级为 DB 持久化边界；`Log(action="alert_triage_update")` 继续只写脱敏摘要。
 
 ---
 
@@ -196,6 +196,7 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 3. 增加“日/周安全简报”，但必须可追溯到真实告警数据。
 4. 统一空状态、加载态、错误态和离线态。
 5. **M3-02 告警研判与处置工作台**：在 Dashboard 中选中告警后可推进到“研判中 / 已遏制 / 误报 / 已解决”状态，记录处置备注，复制含研判状态的事件报告，并为每次状态变化留下可审计记录。
+6. **M3-03 告警研判持久化与历史**：把 M3-02 的内存状态升级为数据库持久化 + 可查询历史 + 重启恢复；`GET /alerts` 在清空进程 backlog 后仍可从 `alert_records` 恢复；`GET /alerts/{alert_id}/triage/history` 返回 owner 隔离的 newest-first 变更事件。
 
 验收：
 
@@ -203,13 +204,15 @@ $env:AUTH_SECRET='test-local-auth-secret-for-baseline-32chars'
 - UI 改动必须经过浏览器截图或手动验证说明。
 - 不把营销落地页当作产品首页，第一屏必须可操作。
 - M3-02 验收：`PATCH /alerts/{alert_id}/triage` 必须使用 `require_auth_user`；非 owner / 不存在统一返回 404；`analyst_note` 上限 800 字符；`Log(action="alert_triage_update")` 写入脱敏摘要；前端 `alert-triage-panel` / `triage-status-*` / `triage-save` / `triage-status-badge` / `triage-row-badge` 全部可用；简报“待研判 / 已闭环”计数必须从真实 alert triage 派生。
+- M3-03 验收：必须在临时 SQLite + 新 SQLAlchemy engine（同一 DB 文件）下验证 `GET /alerts` 在清空 `app_state.alert.backlog` 后仍能恢复；`alert_records.triage_status` 与 `alert_triage_events` 由 `PATCH /alerts/{alert_id}/triage` 写入；`GET /alerts/{alert_id}/triage/history?limit=50` 仅 owner 可见，非 owner 404；`analyst_note` 仍 800 字符上限；`Log` 仍只写脱敏摘要；Alembic migration `d33d40488e0f` 必须能 `upgrade head` 与 `downgrade base`；前端 `AlertTriageHistory` 在保存成功后自动刷新（`historyRefreshKey` 自增）。
 
-M3-02 当前实现边界（重要）：
+M3-03 当前实现边界（重要）：
 
-- 研判状态保存在当前进程的告警 backlog payload 中，不是数据库持久化。
-- 跨重启不保留，跨进程实例不共享，跨多副本部署不共享。
-- 持久化、查询历史、跨重启恢复、SLA 升级留给后续数据库迁移任务。
-- 当前 `Log` 审计只覆盖状态变化，不保留历史版本（每个 alert 只有一个最新 triage 字段）。
+- 研判状态以 `alert_records` 为事实来源；内存 `app_state.alert.backlog` 仍作为 WebSocket 实时推送缓存与 worker 短期缓存。
+- 跨进程实例与跨多副本部署已可共享（共用同一 DB 即可），跨重启完全恢复。
+- alert payload / LLM analysis JSON 存 `Text` 列（`json.dumps(..., ensure_ascii=False)`），不依赖 PostgreSQL JSONB；SQLite 测试库与 Compose PostgreSQL 走同一份代码。
+- `analyst_note` 在 DB 中保留全文（800 字上限），但通过认证 API 私有返回给 owner；`Log` 审计与时间线仍只记录脱敏摘要（`status=...` / `disposition=...` / `note_length=...` / `source_ip=...`），不写完整 note / payload / secret。
+- 当前不做：完整工单系统、SLA、负责人分派、批量处置、通知升级、Jira/Slack 集成；M3-02 的简报分桶语义不变。
 
 ---
 
@@ -325,6 +328,7 @@ M3-02 当前实现边界（重要）：
 | 前端大组件难维护 | 中 | M3 拆分，但不要在 M0 急着重构 |
 | 安全边界复杂 | 高 | 任何相关改动必须按 `AGENTS.md` 路由审查 |
 | 产品范围膨胀 | 高 | 每个功能必须映射 Protect / Explain / Operate |
+| M3-03 alert JSON 存储策略 | 中 | 当前 raw alert / LLM analysis 走 `Text` + `json.dumps`，不依赖 PostgreSQL JSONB；后续若升级到 JSONB 索引搜索，必须先做 RFC 评估 |
 
 ---
 
