@@ -16,6 +16,7 @@ import SystemStatusBar from "@/components/dashboard/SystemStatusBar";
 import SystemStatusSection from "@/components/dashboard/SystemStatusSection";
 import DemoFlowControls from "@/components/dashboard/DemoFlowControls";
 import BriefingSection from "@/components/dashboard/BriefingSection";
+import IncidentSection from "@/components/dashboard/IncidentSection";
 import { Button } from "@/components/ui/button";
 
 // Heavy components are code-split. Recharts (~45KB gzip) only loads when
@@ -38,18 +39,21 @@ import { useReport } from "@/hooks/useReport";
 import { useSiteHealth } from "@/hooks/useSiteHealth";
 import { useSecurityTimeline } from "@/hooks/useSecurityTimeline";
 import { useThreatConfirm } from "@/hooks/useThreatConfirm";
+import { useIncidents } from "@/hooks/useIncidents";
 import { routeDescription } from "@/utils/routeUtils";
 import { formatLoadError } from "@/utils/alertUtils";
 import { deriveAlertDetail } from "@/utils/alertBriefingUtils";
+import type { IncidentSeverity } from "@/types/incident";
 
 import type { RouteKey } from "@/types/route";
 
 const NAV_ITEMS: { key: RouteKey; label: string; index: string }[] = [
   { key: "overview", label: "概览", index: "01" },
   { key: "monitor", label: "监测", index: "02" },
-  { key: "waf", label: "WAF 管理", index: "03" },
-  { key: "ai", label: "AI 配置", index: "04" },
-  { key: "report", label: "安全日报", index: "05" },
+  { key: "incidents", label: "案件", index: "03" },
+  { key: "waf", label: "WAF 管理", index: "04" },
+  { key: "ai", label: "AI 配置", index: "05" },
+  { key: "report", label: "安全日报", index: "06" },
 ];
 
 const PROVIDERS = ["custom"] as const;
@@ -135,6 +139,22 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
     terminalCtx.appendLogs,
     configCtx.refreshConfig
   );
+  const incidentsCtx = useIncidents();
+
+  // M3-04: 监听 "用 AI 分析案件" 自定义事件,触发 Copilot 拼好的 prompt
+  useEffect(() => {
+    function handleCopilotEvent(event: Event) {
+      const custom = event as CustomEvent<{ prompt?: string; incidentId?: string }>;
+      const prompt = custom.detail?.prompt;
+      if (!prompt) return;
+      void copilotCtx.sendMessage(prompt);
+      // 切到 AI/概览 让用户看到 Copilot 输出
+      setRoute("ai");
+    }
+    window.addEventListener("incident:copilot", handleCopilotEvent);
+    return () => window.removeEventListener("incident:copilot", handleCopilotEvent);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copilotCtx.sendMessage]);
 
   // 切换告警时让 history 重新拉取
   useEffect(() => {
@@ -160,6 +180,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   const selectedLogId = alertsCtx.selected?.id;
   const isOverviewRoute = route === "overview";
   const isMonitorRoute = route === "monitor";
+  const isIncidentsRoute = route === "incidents";
   const isWafRoute = route === "waf";
   const isAiRoute = route === "ai";
   const isReportRoute = route === "report";
@@ -209,6 +230,33 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
       "请分析当前选中的安全告警，给出风险等级、证据、影响范围和三条立即处置建议。"
     );
   }
+
+  // M3-04: 从当前告警创建案件
+  const handleCreateIncidentFromAlert = async (input: {
+    title: string;
+    severity: IncidentSeverity;
+    alert_id: string;
+  }): Promise<boolean> => {
+    const result = await incidentsCtx.createIncidentFromAlert({
+      title: input.title,
+      severity: input.severity,
+      alert_id: input.alert_id,
+    });
+    if (result.ok) {
+      // 切到案件视图
+      setRoute("incidents");
+      // 加载 detail 以便在案件列表选中
+      if (result.incident) {
+        await incidentsCtx.loadIncidentDetail(result.incident.incident_id, {
+          eventLimit: 20,
+        });
+      }
+      configCtx.setStatus(`已创建案件 ${result.incident?.incident_id ?? ""}`);
+      return true;
+    }
+    configCtx.setStatus(`案件创建失败: ${result.error || "未知错误"}`);
+    return false;
+  };
 
   const handleTriageSubmit = async (input: {
     status: import("@/types/alert").AlertTriageStatus;
@@ -323,6 +371,8 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                     loadHistory={alertsCtx.loadTriageHistory}
                     historyRefreshKey={triageHistoryRefreshKey}
                     historyLimit={5}
+                    onCreateIncidentFromAlert={handleCreateIncidentFromAlert}
+                    creatingIncident={incidentsCtx.actionState === "saving"}
                   />
                 }
                 onPrevPage={() => alertsCtx.setPage(Math.max(0, alertsCtx.page - 1))}
@@ -395,6 +445,20 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                   offline={!alertsCtx.wsConnected && securityTimelineCtx.loadState === "error"}
                   onRefresh={() => void securityTimelineCtx.refresh()}
                 />
+              </div>
+            </div>
+          )}
+
+          {/* 案件工作台 (M3-04) */}
+          {isIncidentsRoute && (
+            <div className="mt-14">
+              <SectionHeading
+                index="§ 03.7"
+                title="安全事件 / 案件工作台"
+                description="把分散告警归并为可追踪案件,推进处置状态、记录备注并保留脱敏审计时间线。"
+              />
+              <div className="p-6 bg-bg-raised border-l border-accent rounded-md">
+                <IncidentSection />
               </div>
             </div>
           )}

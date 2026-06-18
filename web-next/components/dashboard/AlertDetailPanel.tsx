@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Clipboard, ClipboardCheck, ShieldAlert } from "lucide-react";
+import { Clipboard, ClipboardCheck, ShieldAlert, FolderPlus, Loader2 } from "lucide-react";
 import type { AlertDetail } from "@/types/alertBriefing";
 import type { AlertTriage, AlertTriageEvent, AlertTriageStatus } from "@/types/alert";
+import type { IncidentSeverity } from "@/types/incident";
 import StatusView from "./StatusView";
 import AlertTriagePanel from "./AlertTriagePanel";
 
@@ -43,6 +44,14 @@ export interface AlertDetailPanelProps {
   historyRefreshKey?: number;
   /** M3-03: 历史展示条数,默认 5 */
   historyLimit?: number;
+  /** M3-04: "从当前告警创建案件" 回调;由 dashboard 注入 useIncidents。 */
+  onCreateIncidentFromAlert?: (input: {
+    title: string;
+    severity: IncidentSeverity;
+    alert_id: string;
+  }) => Promise<boolean>;
+  /** M3-04: 案件创建中状态(由 dashboard 透传) */
+  creatingIncident?: boolean;
 }
 
 const TONE_CLASS: Record<AlertDetail["riskTone"], string> = {
@@ -69,8 +78,32 @@ export default function AlertDetailPanel({
   loadHistory,
   historyRefreshKey,
   historyLimit,
+  onCreateIncidentFromAlert,
+  creatingIncident = false,
 }: AlertDetailPanelProps) {
   const [copied, setCopied] = useState<"none" | "report" | "summary">("none");
+  const [createMsg, setCreateMsg] = useState<string | null>(null);
+
+  const handleCreateIncident = useCallback(async () => {
+    if (!onCreateIncidentFromAlert || !alertId) return;
+    const source = (detail?.evidence ?? alertId).split(" ")[0] || alertId.slice(0, 8);
+    const title = `来自 ${source} 的安全事件`;
+    const severity: IncidentSeverity =
+      detail?.riskLevel === "critical"
+        ? "critical"
+        : detail?.riskLevel === "high"
+        ? "high"
+        : detail?.riskLevel === "medium"
+        ? "medium"
+        : "low";
+    const ok = await onCreateIncidentFromAlert({
+      title,
+      severity,
+      alert_id: alertId,
+    });
+    setCreateMsg(ok ? "已创建案件" : "创建失败");
+    window.setTimeout(() => setCreateMsg(null), 2200);
+  }, [onCreateIncidentFromAlert, alertId, detail?.riskLevel, detail?.evidence]);
 
   const handleCopyReport = useCallback(async () => {
     if (!detail) return;
@@ -157,6 +190,30 @@ export default function AlertDetailPanel({
           >
             在 AI 助手中继续分析 →
           </button>
+        ) : null}
+
+        {onCreateIncidentFromAlert ? (
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => void handleCreateIncident()}
+              data-testid="alert-detail-create-incident"
+              disabled={creatingIncident}
+              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover transition-colors inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {creatingIncident ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <FolderPlus className="w-3 h-3" />
+              )}
+              从此告警创建案件
+            </button>
+            {createMsg ? (
+              <span className="text-[10px] font-mono text-ink-tertiary">
+                {createMsg}
+              </span>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getToken } from "next-auth/jwt";
 import { BACKEND_BASE_URL } from "@/lib/utils";
 
-type ProxyMethod = "GET" | "POST" | "PUT";
+type ProxyMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 const BACKEND_REQUEST_TIMEOUT_MS = 15000;
 const COPILOT_STREAM_TIMEOUT_MS = 180000; // 3 minutes for copilot streaming
@@ -216,5 +216,18 @@ export async function POST(request: NextRequest, context: RouteContext): Promise
 export async function PUT(request: NextRequest, context: RouteContext): Promise<Response> {
   const { path } = await context.params;
   const backendResponse = await buildBackendRequest("PUT", request, joinBackendPath(path));
+  return toClientResponse(backendResponse);
+}
+
+// M3-04: 案件工作台 PATCH / DELETE 也走同一条代理
+export async function PATCH(request: NextRequest, context: RouteContext): Promise<Response> {
+  const { path } = await context.params;
+  const backendResponse = await buildBackendRequest("PATCH", request, joinBackendPath(path));
+  return toClientResponse(backendResponse);
+}
+
+export async function DELETE(request: NextRequest, context: RouteContext): Promise<Response> {
+  const { path } = await context.params;
+  const backendResponse = await buildBackendRequest("DELETE", request, joinBackendPath(path));
   return toClientResponse(backendResponse);
 }
