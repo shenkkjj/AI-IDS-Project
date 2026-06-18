@@ -148,4 +148,8 @@ class CopilotMessageIn(BaseModel):
 class CopilotStreamIn(BaseModel):
     message: str = Field(min_length=1, max_length=8000)
     alert_id: str | None = None
+    # M3-05: 案件感知 Copilot 合约;后端负责 owner 隔离并构造受控 context_block。
+    # 最多 64 字符,由 Pydantic 强制;incident_id 与 alert_id 可独立使用,二者同时
+    # 存在时 incident 优先(见 server.services.copilot_service.copilot_stream)。
+    incident_id: str | None = Field(default=None, max_length=64)
     history: list[CopilotMessageIn] = Field(default_factory=list)
