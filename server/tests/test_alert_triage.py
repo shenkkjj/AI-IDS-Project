@@ -1,6 +1,6 @@
 """``PATCH /alerts/{alert_id}/triage`` 端点测试。
 
-设计目标（docs/agent/M3_02_ALERT_TRIAGE_RESPONSE_WORKBENCH_TASK.md §3）：
+设计目标（docs/agent/M3_02_ALERT_TRIAGE_RESPONSE_WORKBENCH_TASK.md §3）:
 
 - 当前用户可更新自己的告警 triage（含 status / disposition / analyst_note）。
 - 更新后 ``GET /alerts`` 必须返回新的 triage 字段。
@@ -10,6 +10,11 @@
 - ``analyst_note`` 超过 800 字符返回 422。
 - 审计日志 ``Log(action="alert_triage_update")`` 必须记录,
   但 detail 不得写入完整 payload / 完整 note / 完整 secret。
+
+M3-03 改造:
+- service 现在走真 DB(``alert_records`` + ``alert_triage_events``)。
+- ``triage_env`` fixture 改用临时 SQLite + ``Base.metadata.create_all`` 建表,
+  并在 DB 中预置 user 与 demo alert record。
 """
 from __future__ import annotations
 
@@ -23,12 +28,17 @@ from typing import Any
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
+import server.core.database as db_module
 from server.core import state as state_module
 from server.core.config import ALERT_BACKLOG_SIZE, ALERT_QUEUE_MAX_SIZE
+from server.core.database import Base
 from server.core.state import app_state
-from server.models_db import Log, User
+from server.models_db import User
 from server.routers import alerts_router
+from server.services import alert_service
 
 
 # ---------------------------------------------------------------------------
@@ -36,28 +46,21 @@ from server.routers import alerts_router
 # ---------------------------------------------------------------------------
 
 
-class _FakeDb:
-    """最简 DB mock:满足 create_log 需要的 query/add/commit/refresh 接口。"""
-
-    def __init__(self) -> None:
-        self.logged: list[Log] = []
-
-    def add(self, item: Any) -> None:
-        self.logged.append(item)
-
-    def commit(self) -> None:
-        return None
-
-    def refresh(self, _item: Any) -> None:
-        return None
-
-    def query(self, _model: Any):  # 兼容接口
-        return self
-
-
 @pytest.fixture
-def triage_env(monkeypatch):
-    """构造一个干净的 app_state + 两个用户 + 一条告警,返回 (client_a, client_b, db, user_a, user_b, alert_id)."""
+def triage_env(tmp_path, monkeypatch):
+    """构造一个干净的 app_state + 两个用户 + DB 临时库 + 一条 demo alert。"""
+    db_file = tmp_path / "test.db"
+    db_url = f"sqlite:///{db_file.as_posix()}"
+    test_engine = create_engine(db_url, connect_args={"check_same_thread": False})
+    Base.metadata.drop_all(bind=test_engine)
+    Base.metadata.create_all(bind=test_engine)
+    TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+
+    monkeypatch.setattr(db_module, "engine", test_engine, raising=False)
+    monkeypatch.setattr(db_module, "SessionLocal", TestSessionLocal, raising=False)
+    monkeypatch.setattr(alert_service, "SessionLocal", TestSessionLocal, raising=False)
+    monkeypatch.setattr(alerts_router, "SessionLocal", TestSessionLocal, raising=False)
+
     user_a = User(
         id=1001,
         email="analyst-a@example.com",
@@ -70,6 +73,13 @@ def triage_env(monkeypatch):
         password_hash="x",
         is_active=True,
     )
+    setup_db = TestSessionLocal()
+    setup_db.add(user_a)
+    setup_db.add(user_b)
+    setup_db.commit()
+    setup_db.refresh(user_a)
+    setup_db.refresh(user_b)
+    setup_db.close()
 
     # 隔离 app_state.alert.backlog 与 queue
     monkeypatch.setattr(state_module, "app_state", state_module.AppState())
@@ -92,7 +102,7 @@ def triage_env(monkeypatch):
         "server.services.alert_service._send_alert_email_if_enabled", fake_email
     )
 
-    # 注入一条 user_a 拥有的告警
+    # 注入一条 user_a 拥有的告警 record(M3-03 走 DB)
     alert_id = uuid.uuid4().hex
     payload = {
         "alert_id": alert_id,
@@ -111,24 +121,29 @@ def triage_env(monkeypatch):
         },
         "processed_at": time.time(),
     }
-    app_state.alert.backlog.append(payload)
+    seed_db = TestSessionLocal()
+    alert_service.persist_alert_record(seed_db, payload, user_a.id)
+    seed_db.commit()
+    seed_db.close()
 
-    fake_db = _FakeDb()
+    # 同时写一份到 backlog,兼容老路径(WS 启动推送等)
+    app_state.alert.backlog.append(payload)
 
     def make_client(user: User) -> TestClient:
         app = FastAPI()
         app.include_router(alerts_router.router)
         app.dependency_overrides[alerts_router.require_auth_user] = lambda: user
-        app.dependency_overrides[alerts_router.get_db] = lambda: fake_db
+        app.dependency_overrides[alerts_router.get_db] = lambda: TestSessionLocal()
         return TestClient(app)
 
     client_a = make_client(user_a)
     client_b = make_client(user_b)
 
     try:
-        yield client_a, client_b, fake_db, user_a, user_b, alert_id
+        yield client_a, client_b, TestSessionLocal, user_a, user_b, alert_id, test_engine
     finally:
         app_state.alert.backlog.clear()
+        test_engine.dispose()
 
 
 # ---------------------------------------------------------------------------
@@ -158,7 +173,7 @@ def _assert_no_secret_in_text(text: str) -> None:
 
 def test_triage_requires_auth(triage_env):
     """未登录请求 401."""
-    _a, _b, _db, _ua, _ub, _alert_id = triage_env
+    _a, _b, _db, _ua, _ub, _alert_id, _engine = triage_env
     app = FastAPI()
     app.include_router(alerts_router.router)
     anon = TestClient(app)
@@ -171,7 +186,7 @@ def test_triage_requires_auth(triage_env):
 
 def test_triage_updates_own_alert(triage_env):
     """当前用户可更新自己的告警 triage."""
-    client_a, _b, _db, _ua, _ub, alert_id = triage_env
+    client_a, _b, _db, _ua, _ub, alert_id, _engine = triage_env
     resp = client_a.patch(
         f"/alerts/{alert_id}/triage",
         json={
@@ -194,7 +209,7 @@ def test_triage_updates_own_alert(triage_env):
 
 def test_triage_appears_in_get_alerts(triage_env):
     """更新后 GET /alerts 必须返回 triage 字段."""
-    client_a, _b, _db, _ua, _ub, alert_id = triage_env
+    client_a, _b, _db, _ua, _ub, alert_id, _engine = triage_env
     resp = client_a.patch(
         f"/alerts/{alert_id}/triage",
         json={"status": "contained", "disposition": "blocked_at_waf"},
@@ -213,7 +228,7 @@ def test_triage_appears_in_get_alerts(triage_env):
 
 def test_triage_other_user_returns_404(triage_env):
     """其他用户更新同一 alert_id 返回 404(不能通过 403 暴露 ID 是否存在)."""
-    _a, client_b, _db, _ua, _ub, alert_id = triage_env
+    _a, client_b, _db, _ua, _ub, alert_id, _engine = triage_env
     resp = client_b.patch(
         f"/alerts/{alert_id}/triage",
         json={"status": "false_positive"},
@@ -223,7 +238,7 @@ def test_triage_other_user_returns_404(triage_env):
 
 def test_triage_unknown_alert_returns_404(triage_env):
     """告警不存在返回 404."""
-    client_a, _b, _db, _ua, _ub, _alert_id = triage_env
+    client_a, _b, _db, _ua, _ub, _alert_id, _engine = triage_env
     resp = client_a.patch(
         "/alerts/nonexistent-id-1234567890/triage",
         json={"status": "investigating"},
@@ -233,7 +248,7 @@ def test_triage_unknown_alert_returns_404(triage_env):
 
 def test_triage_invalid_status_returns_422(triage_env):
     """无效 status 返回 422."""
-    client_a, _b, _db, _ua, _ub, alert_id = triage_env
+    client_a, _b, _db, _ua, _ub, alert_id, _engine = triage_env
     resp = client_a.patch(
         f"/alerts/{alert_id}/triage",
         json={"status": "firing_lasers"},
@@ -243,7 +258,7 @@ def test_triage_invalid_status_returns_422(triage_env):
 
 def test_triage_note_too_long_returns_422(triage_env):
     """analyst_note 超过 800 字符返回 422."""
-    client_a, _b, _db, _ua, _ub, alert_id = triage_env
+    client_a, _b, _db, _ua, _ub, alert_id, _engine = triage_env
     long_note = "x" * 801
     resp = client_a.patch(
         f"/alerts/{alert_id}/triage",
@@ -254,7 +269,7 @@ def test_triage_note_too_long_returns_422(triage_env):
 
 def test_triage_writes_audit_log_without_payload(triage_env):
     """审计 Log 必须记录,detail 不能含完整 payload / 完整 note / 完整 secret."""
-    client_a, _b, fake_db, _ua, _ub, alert_id = triage_env
+    client_a, _b, SessionLocal, _ua, _ub, alert_id, _engine = triage_env
     note_text = (
         "已确认 WAF 拦截，载荷含 UNION SELECT 凭据枚举。"
         "fake-key sk-test-abcdef0123456789"
@@ -269,29 +284,41 @@ def test_triage_writes_audit_log_without_payload(triage_env):
     )
     assert resp.status_code == 200
 
-    assert fake_db.logged, "create_log 没被调用"
-    log = fake_db.logged[-1]
-    assert log.action == "alert_triage_update"
-    assert log.user_id == _ua.id
-    detail = log.detail
-    assert isinstance(detail, str)
+    from server.models_db import Log
 
-    # detail 不含完整 note
-    assert note_text not in detail, f"审计 detail 含完整 note: {detail}"
-    # detail 不含完整 payload 关键字
-    assert "UNION SELECT" not in detail, f"审计 detail 含完整 payload: {detail}"
-    # detail 不含 API key
-    _assert_no_secret_in_text(detail)
-    # 关键摘要必须出现
-    assert "status=contained" in detail
-    assert "disposition=blocked_at_waf" in detail
-    # note 长度必须被记录
-    assert f"note_length={len(note_text)}" in detail
+    db = SessionLocal()
+    try:
+        logs = (
+            db.query(Log)
+            .filter(Log.user_id == _ua.id, Log.action == "alert_triage_update")
+            .order_by(Log.id.desc())
+            .all()
+        )
+        assert logs, "create_log 没被调用"
+        log = logs[0]
+        assert log.action == "alert_triage_update"
+        assert log.user_id == _ua.id
+        detail = log.detail
+        assert isinstance(detail, str)
+
+        # detail 不含完整 note
+        assert note_text not in detail, f"审计 detail 含完整 note: {detail}"
+        # detail 不含完整 payload 关键字
+        assert "UNION SELECT" not in detail, f"审计 detail 含完整 payload: {detail}"
+        # detail 不含 API key
+        _assert_no_secret_in_text(detail)
+        # 关键摘要必须出现
+        assert "status=contained" in detail
+        assert "disposition=blocked_at_waf" in detail
+        # note 长度必须被记录
+        assert f"note_length={len(note_text)}" in detail
+    finally:
+        db.close()
 
 
 def test_triage_disposition_optional(triage_env):
     """disposition 字段是可选的."""
-    client_a, _b, _db, _ua, _ub, alert_id = triage_env
+    client_a, _b, _db, _ua, _ub, alert_id, _engine = triage_env
     resp = client_a.patch(
         f"/alerts/{alert_id}/triage",
         json={"status": "resolved"},
@@ -304,7 +331,7 @@ def test_triage_disposition_optional(triage_env):
 
 def test_triage_old_alert_has_default_state_in_get(triage_env):
     """未带 triage 字段的旧告警,GET /alerts 映射为默认 new."""
-    client_a, _b, _db, _ua, _ub, alert_id = triage_env
+    client_a, _b, _db, _ua, _ub, alert_id, _engine = triage_env
     resp_list = client_a.get("/alerts")
     target = next(
         item for item in resp_list.json()["items"] if item["alert_id"] == alert_id
@@ -319,7 +346,7 @@ def test_triage_old_alert_has_default_state_in_get(triage_env):
 
 def test_triage_audit_log_failure_does_not_break_request(monkeypatch, triage_env):
     """Log 写入失败时,主请求依然 200."""
-    client_a, _b, _fake_db, _ua, _ub, alert_id = triage_env
+    client_a, _b, _db, _ua, _ub, alert_id, _engine = triage_env
 
     def boom(*_a, **_k):
         raise RuntimeError("Traceback (most recent call last):\n  KeyError: 'x'")

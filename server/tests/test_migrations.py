@@ -210,3 +210,160 @@ def test_legacy_sc22_sql_documented_in_migration_doc(project_root) -> None:
     assert "sc22" in text.lower() or "sc-22" in text.lower(), (
         "ALEMBIC_MIGRATION.md 必须明确说明 sc22_audit_indexes.sql 的处置"
     )
+
+
+# ---------------------------------------------------------------------------
+# M3-03 告警研判持久化迁移契约
+# ---------------------------------------------------------------------------
+
+
+def test_alembic_upgrade_head_creates_alert_records_tables(project_root, tmp_path) -> None:
+    """``alembic upgrade head`` 必须建出 M3-03 的 alert_records / alert_triage_events 表。"""
+    venv_python = project_root / ".venv" / "Scripts" / "python.exe"
+    if not venv_python.exists():
+        pytest.skip(".venv 不存在，跳过 upgrade head 验证")
+    if not (project_root / "alembic.ini").exists():
+        pytest.skip("alembic.ini 不存在，跳过 upgrade head 验证")
+
+    db_file = tmp_path / "alembic_m3_03.db"
+    db_url = f"sqlite:///{db_file.as_posix()}"
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = db_url
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env.setdefault("APP_SECRET", "test-local-secret-key-for-baseline-32chars")
+    env.setdefault("AUTH_SECRET", "test-local-auth-secret-for-baseline-32chars")
+
+    result = subprocess.run(
+        [str(venv_python), "-m", "alembic", "upgrade", "head"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert result.returncode == 0, (
+        f"alembic upgrade head 失败:\nstdout={result.stdout}\nstderr={result.stderr}"
+    )
+
+    import sqlite3
+
+    con = sqlite3.connect(str(db_file))
+    try:
+        rows = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name IN ('alert_records', 'alert_triage_events') ORDER BY name"
+        ).fetchall()
+    finally:
+        con.close()
+    table_names = {row[0] for row in rows}
+    assert "alert_records" in table_names, "alert_records 表未通过 migration 创建"
+    assert "alert_triage_events" in table_names, "alert_triage_events 表未通过 migration 创建"
+
+
+def test_alembic_upgrade_head_creates_alert_records_indexes(project_root, tmp_path) -> None:
+    """M3-03 migration 必须建出 alert_records / alert_triage_events 的关键索引。"""
+    venv_python = project_root / ".venv" / "Scripts" / "python.exe"
+    if not venv_python.exists():
+        pytest.skip(".venv 不存在，跳过 upgrade head 验证")
+    if not (project_root / "alembic.ini").exists():
+        pytest.skip("alembic.ini 不存在，跳过 upgrade head 验证")
+
+    db_file = tmp_path / "alembic_m3_03_idx.db"
+    db_url = f"sqlite:///{db_file.as_posix()}"
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = db_url
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env.setdefault("APP_SECRET", "test-local-secret-key-for-baseline-32chars")
+    env.setdefault("AUTH_SECRET", "test-local-auth-secret-for-baseline-32chars")
+
+    up = subprocess.run(
+        [str(venv_python), "-m", "alembic", "upgrade", "head"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert up.returncode == 0, f"alembic upgrade head 失败: {up.stderr}"
+
+    expected_indexes = {
+        "ix_alert_records_alert_id",
+        "ix_alert_records_user_processed",
+        "ix_alert_records_user_status_processed",
+        "ix_alert_triage_events_user_alert_created",
+        "ix_alert_triage_events_record_created",
+    }
+
+    import sqlite3
+
+    con = sqlite3.connect(str(db_file))
+    try:
+        rows = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND (tbl_name='alert_records' OR tbl_name='alert_triage_events')"
+        ).fetchall()
+    finally:
+        con.close()
+    found_indexes = {row[0] for row in rows}
+
+    missing = expected_indexes - found_indexes
+    assert not missing, (
+        f"M3-03 migration 缺少关键索引: {missing}; 实际: {found_indexes}"
+    )
+
+
+def test_alembic_downgrade_drops_alert_records_tables(project_root, tmp_path) -> None:
+    """``alembic downgrade base`` 必须能完整 drop M3-03 的新表(可回滚)。"""
+    venv_python = project_root / ".venv" / "Scripts" / "python.exe"
+    if not venv_python.exists():
+        pytest.skip(".venv 不存在，跳过 downgrade 验证")
+    if not (project_root / "alembic.ini").exists():
+        pytest.skip("alembic.ini 不存在，跳过 downgrade 验证")
+
+    db_file = tmp_path / "alembic_m3_03_down.db"
+    db_url = f"sqlite:///{db_file.as_posix()}"
+
+    env = os.environ.copy()
+    env["DATABASE_URL"] = db_url
+    env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUTF8"] = "1"
+    env.setdefault("APP_SECRET", "test-local-secret-key-for-baseline-32chars")
+    env.setdefault("AUTH_SECRET", "test-local-auth-secret-for-baseline-32chars")
+
+    up = subprocess.run(
+        [str(venv_python), "-m", "alembic", "upgrade", "head"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert up.returncode == 0, f"alembic upgrade head 失败: {up.stderr}"
+
+    down = subprocess.run(
+        [str(venv_python), "-m", "alembic", "downgrade", "base"],
+        cwd=str(project_root),
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    assert down.returncode == 0, f"alembic downgrade base 失败: {down.stderr}"
+
+    import sqlite3
+
+    con = sqlite3.connect(str(db_file))
+    try:
+        rows = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name IN ('alert_records', 'alert_triage_events')"
+        ).fetchall()
+    finally:
+        con.close()
+    assert not rows, (
+        f"downgrade base 后新表未 drop: {[r[0] for r in rows]}"
+    )
