@@ -150,3 +150,94 @@ class RefreshToken(Base):
     user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
     ip_address: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# 告警研判持久化 (M3-03)
+# ---------------------------------------------------------------------------
+#
+# 设计要点 (docs/agent/M3_03_ALERT_TRIAGE_PERSISTENCE_AND_HISTORY_TASK.md §4):
+# - ``AlertRecord`` 是每条告警的持久化快照,事实来源。
+#   ``(user_id, alert_id)`` 唯一;保存 raw alert JSON、LLM analysis JSON、
+#   analysis error、processed_at、最新 triage 字段。``GET /alerts`` 重启后走它。
+# - ``AlertTriageEvent`` 是每次 triage 状态变化的历史事件。
+#   按 alert_record_id 关联;保存 from/to、disposition、analyst_note、
+#   updated_by、created_at。``GET /alerts/{alert_id}/triage/history`` 走它。
+# - raw alert 与 LLM analysis 使用 ``Text`` 存 JSON 字符串(``json.dumps(...,
+#   ensure_ascii=False)``),不依赖 PostgreSQL JSONB,以便 SQLite / Compose
+#   PostgreSQL 走同一份代码;``_json_loads_dict`` 反序列化失败回退空 dict。
+# - 不引入新的 env 变量;不在日志打印完整 raw payload;不触碰 ``server/security/**``。
+
+
+class AlertRecord(Base, TimestampMixin):
+    """每条告警的持久化快照(M3-03 事实来源)。"""
+
+    __tablename__ = "alert_records"
+    __table_args__ = (
+        UniqueConstraint("user_id", "alert_id", name="uq_alert_records_user_alert"),
+        Index("ix_alert_records_user_processed", "user_id", "processed_at"),
+        Index(
+            "ix_alert_records_user_status_processed",
+            "user_id",
+            "triage_status",
+            "processed_at",
+        ),
+        Index("ix_alert_records_alert_id", "alert_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    alert_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    raw_alert_json: Mapped[str] = mapped_column(Text, nullable=False)
+    llm_analysis_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    analysis_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    processed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    triage_status: Mapped[str] = mapped_column(String(32), nullable=False, default="new")
+    triage_disposition: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    triage_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    triage_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    triage_updated_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    events: Mapped[list["AlertTriageEvent"]] = relationship(
+        "AlertTriageEvent",
+        primaryjoin="AlertRecord.id == foreign(AlertTriageEvent.alert_record_id)",
+        backref="record",
+        cascade="all, delete-orphan",
+        order_by="AlertTriageEvent.id",
+    )
+
+
+class AlertTriageEvent(Base):
+    """每次 triage 状态变化的历史事件(M3-03 事实来源)。"""
+
+    __tablename__ = "alert_triage_events"
+    __table_args__ = (
+        Index(
+            "ix_alert_triage_events_user_alert_created",
+            "user_id",
+            "alert_id",
+            "created_at",
+        ),
+        Index("ix_alert_triage_events_record_created", "alert_record_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    alert_record_id: Mapped[int] = mapped_column(
+        ForeignKey("alert_records.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    alert_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    disposition: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    analyst_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    updated_by: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
