@@ -669,3 +669,342 @@ push：❌ Failed to connect to github.com port 443 after 21060 ms
 - ✅ 真实 `.env`、`.env.compose.local`、证书私钥、数据库文件未提交
 - ✅ `git push origin main` 失败原因被清晰记录（`Failed to connect to github.com port 443`，21 秒 TCP 握手超时）
 - ⚠️ push 失败，`git status --short --branch` 仍显示 `ahead 2`（预期：阻塞情况下必如此）
+
+---
+
+### 阶段 15：GitHub push 连通性与凭据恢复
+
+> 任务文档：`docs/agent/GITHUB_PUSH_CONNECTIVITY_AND_CREDENTIALS_RECOVERY_TASK.md`（L5）
+> 启动时间：2026-06-18
+> 目标：按任务文档 §5 阶段 1-9 顺序，诊断本机到 GitHub 的 DNS/TCP/HTTPS/SSH 凭据状态，把本地 `main` 的 3 个 ahead commit 安全推送到 `origin/main`；如现有凭据不可用或需要用户登录交互，停止并把证据写清楚。
+> 前置背景：阶段 14 已明确"本机到 `github.com:443` 网络层阻塞（21 秒 TCP 握手超时）"。本阶段重新诊断。
+
+#### 阶段 15.1：工作面复核（任务 §5 阶段 1）
+
+```powershell
+git status --short --branch
+# ## main...origin/main [ahead 3]
+#  M .claude/settings.local.json
+#  M .coverage
+#  M docs/agent/UNATTENDED_LONG_TASKS.md
+# ?? docs/agent/GITHUB_PUSH_CONNECTIVITY_AND_CREDENTIALS_RECOVERY_TASK.md
+```
+
+- 当前分支：`main` ✅
+- 本地 ahead：3 commit（`a685c10` / `00e90d6` / `5e4d158`）✅
+- staged 区：**空** ✅
+- 工作树 modified：`.coverage`（禁提交）/ `.claude/settings.local.json`（禁提交）/ `docs/agent/UNATTENDED_LONG_TASKS.md`（owner 提前补的索引 1 行）
+- untracked：`docs/agent/GITHUB_PUSH_CONNECTIVITY_AND_CREDENTIALS_RECOVERY_TASK.md`（本任务文档本身）
+
+```powershell
+git log --oneline --decorate --max-count=8
+# a685c10 (HEAD -> main) docs(runs): 记录 M2-07 push 网络阻塞与最终收口状态
+# 00e90d6 docs(runs): 补齐 M2-07 push 收口证据与运行日志最终状态
+# 5e4d158 feat(deploy): M2-07 docker compose e2e readiness
+# 349758f (origin/main) docs(db): sync database migration facts and run handbook
+# d0b9a6a feat(db): unify DATABASE_URL and alembic baseline
+```
+
+```powershell
+git remote -v
+# origin  https://github.com/shenkkjj/AI-IDS-Project.git (fetch)
+# origin  https://github.com/shenkkjj/AI-IDS-Project.git (push)
+```
+
+remote URL 为标准 HTTPS，未包含任何 token 或用户名（脱敏检查通过）。
+
+#### 阶段 15.2：禁提交文件和 secret 审查（任务 §5 阶段 2）
+
+```powershell
+git diff --cached --name-only
+# (empty)
+```
+
+```powershell
+git ls-files .env .coverage .claude/settings.local.json .env.compose.local
+# .claude/settings.local.json
+# .coverage
+```
+
+判定：
+
+- `.env` / `.env.compose.local`：**未追踪** ✅（`.gitignore:10:.env` + `.gitignore:11:.env.*` 排除）
+- `.coverage` / `.claude/settings.local.json`：**已被历史追踪**（项目已知状态；本任务不 stage）✅
+- 当前 diff 不含任何禁提交文件 ✅
+- ahead commit 3 个中均不含禁提交文件（继承阶段 14.2 的 8 类审查结果）✅
+
+#### 阶段 15.3：HTTPS 网络与凭据诊断（任务 §5 阶段 3）
+
+```powershell
+Resolve-DnsName github.com
+# Name       IPAddress       Type
+# ----       ---------       ----
+# github.com 20.205.243.166  A
+```
+
+DNS ✅
+
+```powershell
+Test-NetConnection github.com -Port 443
+# ComputerName     : github.com
+# RemoteAddress    : 20.205.243.166
+# RemotePort       : 443
+# TcpTestSucceeded : True
+```
+
+TCP 443 握手 ✅（与阶段 14 "21 秒 TCP 超时"完全不同 — 本机网络层已恢复）
+
+```powershell
+git config --show-origin --get-all credential.helper
+# file:D:/develop/Git/etc/gitconfig  manager
+```
+
+凭据 helper = `manager`（Git Credential Manager，已配置）✅
+
+```powershell
+git config --show-origin --get-all http.proxy
+git config --show-origin --get-all https.proxy
+# (empty)
+```
+
+proxy 未配置 ✅
+
+```powershell
+git ls-remote origin refs/heads/main
+# 349758f5d5c5a169f8239450dd33ba4a1da454e2       refs/heads/main
+```
+
+`git ls-remote` **成功**！返回远端 `main` SHA = `349758f5d5c5a169f8239450dd33ba4a1da454e2` ✅
+
+**判断**：DNS 通、TCP 443 通、`git ls-remote` 通、凭据 manager 已配置 — 阶段 3 完全通过，无需进入阻塞分支。按任务 §3 阶段 3 决策表，**进入阶段 6**（跳过阶段 4/5 的阻塞路径，但仍执行其只读诊断记录完整证据）。
+
+#### 阶段 15.4：GitHub CLI 认证状态（任务 §5 阶段 4）
+
+```powershell
+gh --version
+# /usr/bin/bash: line 1: gh: command not found
+```
+
+判定：`gh` 在本环境**不可用**。按任务 §3 阶段 4："如果没有 gh：在运行日志记录 gh 不可用。进入阶段 5 检查 SSH。"
+
+#### 阶段 15.5：SSH 现有凭据诊断（任务 §5 阶段 5）
+
+```powershell
+ssh -o BatchMode=yes -o ConnectTimeout=10 -T git@github.com
+# Host key verification failed.
+```
+
+```powershell
+ls -la ~/.ssh/
+# -rw-r--r-- 1 276291 197121   0  5月  5 14:45 config
+# -rw-r--r-- 1 276291 197121 846  5月 24 13:04 known_hosts
+# -rw-r--r-- 1 276291 197121  98  5月 24 13:04 known_hosts.old
+```
+
+判定：
+
+- `~/.ssh/` 中**无**任何 `id_rsa` / `id_ed25519` 私钥文件 — 本机没有 GitHub SSH 私钥。
+- `ssh -T` 报 `Host key verification failed` — SSH 客户端未在 `known_hosts` 中保存 github.com 的 host key；BatchMode 下不会自动添加。
+- 按任务 §3 阶段 5 规则："host key 交互提示或其他交互要求：停止，不要自动写 known_hosts" — 本任务**不会自动写 known_hosts**。
+- 任务明确禁止生成新 SSH key；不会创建。
+- **SSH 路径不可用**；但 HTTPS 路径已在阶段 3 验证完全可用，**继续走 HTTPS**。
+
+#### 阶段 15.6：远端 fast-forward 审查（任务 §5 阶段 6）
+
+```powershell
+git rev-parse origin/main
+# 349758f5d5c5a169f8239450dd33ba4a1da454e2
+```
+
+```powershell
+git rev-parse HEAD
+# a685c1051ac322e6d7512b28741aa2600e4b8337
+```
+
+```powershell
+git ls-remote origin refs/heads/main
+# 349758f5d5c5a169f8239450dd33ba4a1da454e2       refs/heads/main
+```
+
+```powershell
+git log --oneline origin/main..HEAD
+# a685c10 docs(runs): 记录 M2-07 push 网络阻塞与最终收口状态
+# 00e90d6 docs(runs): 补齐 M2-07 push 收口证据与运行日志最终状态
+# 5e4d158 feat(deploy): M2-07 docker compose e2e readiness
+```
+
+判定：
+
+- 远端实际 `main` SHA = `349758f5d5c5a169f8239450dd33ba4a1da454e2`
+- 本地 `origin/main` SHA = `349758f5d5c5a169f8239450dd33ba4a1da454e2` ✅ **完全一致**
+- 本地 HEAD = `a685c1051ac322e6d7512b28741aa2600e4b8337` = `a685c10`
+- 本地干净 ahead 3 commit；远端无未知前进
+- **可 fast-forward 推送** ✅
+
+#### 阶段 15.7：安全 push（任务 §5 阶段 7）
+
+```powershell
+git push origin main
+# To https://github.com/shenkkjj/AI-IDS-Project.git
+#    349758f..a685c10  main -> main
+```
+
+🎉 **push 成功！** 远端 `main` 从 `349758f` 前进到 `a685c10`，3 个 commit 全部推送完成。
+
+```powershell
+git ls-remote origin refs/heads/main
+# a685c1051ac322e6d7512b28741aa2600e4b8337       refs/heads/main
+```
+
+```powershell
+git status --short --branch
+# ## main...origin/main
+#  M .claude/settings.local.json
+#  M .coverage
+#  M docs/agent/UNATTENDED_LONG_TASKS.md
+# ?? docs/agent/GITHUB_PUSH_CONNECTIVITY_AND_CREDENTIALS_RECOVERY_TASK.md
+```
+
+`git status` 不再显示 `ahead` ✅。本地与远端 `main` 同步。
+
+```powershell
+git log --oneline --decorate --max-count=8
+# a685c10 (HEAD -> main, origin/main) docs(runs): 记录 M2-07 push 网络阻塞与最终收口状态
+# 00e90d6 docs(runs): 补齐 M2-07 push 收口证据与运行日志最终状态
+# 5e4d158 feat(deploy): M2-07 docker compose e2e readiness
+# 349758f docs(db): sync database migration facts and run handbook
+# d0b9a6a feat(db): unify DATABASE_URL and alembic baseline
+```
+
+`a685c10` 已挂上 `origin/main` 标签 ✅
+
+**未执行的操作**（按任务 §3 硬规则）：
+
+- ❌ 未 force push（任务明确禁止）
+- ❌ 未修改 `http.sslVerify=false`（任务明确禁止）
+- ❌ 未关闭 TLS 校验
+- ❌ 未把 token 写进 remote URL（远端 URL 保持标准 `https://github.com/...`，无凭据）
+- ❌ 未打印任何 GitHub token、PAT、cookie、私钥
+- ❌ 未 stage `.coverage` / `.claude/settings.local.json` / 真实 `.env` / 任何私钥
+- ❌ 未运行 `git add .`
+- ❌ 未运行 `git reset --hard` / `git clean`
+
+#### 阶段 15.8：运行日志提交（任务 §5 阶段 8）
+
+精确 stage 3 个允许文件：
+
+```powershell
+git add docs/runs/2026-06-17-m2-07-docker-compose-e2e-readiness.md
+git add docs/agent/GITHUB_PUSH_CONNECTIVITY_AND_CREDENTIALS_RECOVERY_TASK.md
+git add docs/agent/UNATTENDED_LONG_TASKS.md
+```
+
+```powershell
+git diff --cached --name-status
+# M  docs/agent/UNATTENDED_LONG_TASKS.md
+# A  docs/agent/GITHUB_PUSH_CONNECTIVITY_AND_CREDENTIALS_RECOVERY_TASK.md
+# M  docs/runs/2026-06-17-m2-07-docker-compose-e2e-readiness.md
+```
+
+```powershell
+git diff --cached --check
+# Exit code 2 — 报告 trailing whitespace 警告
+# docs/agent/GITHUB_PUSH_CONNECTIVITY_AND_CREDENTIALS_RECOVERY_TASK.md:3-5:
+#   trailing whitespace.（任务文档原文中中文引用块的尾随空格，是 owner 输入
+#   时的排版习惯，非 secret / 非安全风险，不影响 commit）
+# 注：本任务禁止修改任务定义文件本身；trailing whitespace 是 linting warning
+#     级别，commit 不会被阻止。
+```
+
+提交：
+
+```powershell
+git commit -m "docs(runs): 记录 GitHub push 连通性收口"
+# [main 7a7ce5e] docs(runs): 记录 GitHub push 连通性收口
+#  3 files changed, 701 insertions(+)
+#  create mode 100644 docs/agent/GITHUB_PUSH_CONNECTIVITY_AND_CREDENTIALS_RECOVERY_TASK.md
+```
+
+本地日志 commit `7a7ce5e` 落地。
+
+按任务 §8："如果 push 已经成功但日志 commit 是 push 后才新增的：再次执行阶段 6 和 7，把日志 commit 也推上去。"
+
+#### 阶段 15.9：推送日志 commit（任务 §8 重推 — 实际阻塞）
+
+```powershell
+git log --oneline origin/main..HEAD
+# 7a7ce5e docs(runs): 记录 GitHub push 连通性收口
+```
+
+```powershell
+git push origin main
+# Exit code 128
+# fatal: unable to access 'https://github.com/shenkkjj/AI-IDS-Project.git/':
+#   Failed to connect to github.com port 443 after 21076 ms:
+#   Could not connect to server
+```
+
+签名与阶段 14.6 push 失败**完全一致**（21 秒 TCP 握手超时）。**与阶段 15.7 push 成功（同一命令、同一网络栈、同一远端）对比 — 说明本机到 `github.com:443` 的可达性是间歇性的**。本轮 commit `7a7ce5e` 推送因网络层再次阻塞失败。
+
+按任务 §2 停止条件："push 连续 2 次同签名失败" — 阶段 14.6 + 阶段 15.9 共 2 次同签名失败，**停止重试**。任务 §5 阶段 7 明确："如果失败，不要超过 2 次同签名重试"。
+
+按任务 §8："如果 push 失败：仍可提交运行日志，但不要继续硬刷 push。" — 日志 commit `7a7ce5e` 已落地在本地，**不丢失**；不再重试 push。
+
+#### 阶段 15.10：最终复核（任务 §5 阶段 9）
+
+```powershell
+git status --short --branch
+# ## main...origin/main [ahead 1]
+#  M .claude/settings.local.json
+#  M .coverage
+#  M docs/agent/UNATTENDED_LONG_TASKS.md
+
+git log --oneline --decorate --max-count=5
+# 7a7ce5e (HEAD -> main) docs(runs): 记录 GitHub push 连通性收口
+# a685c10 (origin/main) docs(runs): 记录 M2-07 push 网络阻塞与最终收口状态
+# 00e90d6 docs(runs): 补齐 M2-07 push 收口证据与运行日志最终状态
+# 5e4d158 feat(deploy): M2-07 docker compose e2e readiness
+# 349758f docs(db): sync database migration facts and run handbook
+
+git rev-parse origin/main
+# a685c1051ac322e6d7512b28741aa2600e4b8337
+git rev-parse HEAD
+# 7a7ce5e031536817a43ac61df9df67e967ac76d0
+```
+
+判定：
+
+- `git status --short --branch`：`ahead 1`（commit `7a7ce5e` 日志 commit 仍在本地）
+- staged 区：空
+- 仍未提交：`.coverage`（禁提交）/ `.claude/settings.local.json`（禁提交）
+- 8 类禁提交文件全部未 stage、未在 commit 中
+- 3 个核心 M2-07 commit（`5e4d158` / `00e90d6` / `a685c10`）已成功推送到 `origin/main` ✅
+- 1 个日志 commit（`7a7ce5e`）留在本地 ahead（任务允许"push 失败时仍可提交运行日志"）
+
+#### 阶段 15.11：最终报告（任务 §5 阶段 9 / §7 短报告）
+
+**完成状态：部分完成（3 个 M2-07 核心 commit 已推送成功；日志 commit `7a7ce5e` 因网络间歇性阻塞留在本地 ahead 1）。**
+
+| 项目 | 结果 |
+|---|---|
+| 本地 HEAD | `7a7ce5e docs(runs): 记录 GitHub push 连通性收口` |
+| 远端 main | `a685c1051ac322e6d7512b28741aa2600e4b8337` = `a685c10 docs(runs): 记录 M2-07 push 网络阻塞与最终收口状态` |
+| 本地 ahead | 1 commit（日志 commit `7a7ce5e`） |
+| 推送路径 | HTTPS（Git Credential Manager `manager`） |
+| DNS | `github.com` → `20.205.243.166` ✅ |
+| TCP 443 | 第一次握手成功（阶段 15.7 推送成功）；第二次握手 21 秒超时（阶段 15.9 重推失败）— 网络间歇性 |
+| `gh auth` | `gh` CLI 不可用 — 不需要（HTTPS 已工作） |
+| SSH | `Host key verification failed` — 不需要（任务禁止自动写 known_hosts / 生成 key） |
+| 阶段 15.7 `git push` | `349758f..a685c10  main -> main` ✅（3 commit 推送成功） |
+| 阶段 15.9 `git push` | ❌ 21 秒 TCP 握手超时（与阶段 14.6 同签名）— 停止重试 |
+| 未提交文件 | `.coverage`（禁提交）/ `.claude/settings.local.json`（禁提交） |
+| 8 类禁提交文件 | 均未 stage、未在任何新 commit 中 ✅ |
+| 暂存区 | 空 |
+| 完整 ahead commit 列表 | `5e4d158` `00e90d6` `a685c10`（已推送） + `7a7ce5e`（本地） |
+
+**用户需要做的**：
+
+1. **首选**：在能稳定访问 `github.com:443` 的网络/机器上执行 `git push origin main`，把日志 commit `7a7ce5e` 推上去（无敏感内容、无 secret，仅运行日志和任务文档）。
+2. **次选**：等待本机网络恢复后重跑本任务；本任务的 3 个核心 M2-07 commit 已成功同步，主线交付已完成。
+3. **不要**：force push、关闭 TLS 校验、把 token 写进 remote URL、删除/弱化任何 secret 保护。
+
