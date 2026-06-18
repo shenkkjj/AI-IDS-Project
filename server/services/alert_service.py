@@ -1,12 +1,37 @@
+"""告警服务 (M3-02 + M3-03)。
+
+设计要点 (docs/agent/M3_02_*.md §3, M3_03_*.md §4/§5):
+
+- M3-02: ``PATCH /alerts/{alert_id}/triage`` 状态保存到 ``app_state.alert.backlog``
+  payload 中,跨重启不保留;5 个稳定状态 (``new / investigating / contained /
+  false_positive / resolved``);``analyst_note`` 800 字上限;``Log(action=
+  "alert_triage_update")`` 写脱敏审计。
+- M3-03:
+  - ``alert_records`` 是告警快照事实来源(``(user_id, alert_id)`` 唯一),
+    保存 raw alert JSON、LLM analysis JSON、analysis error、processed_at、
+    **最新 triage 字段**。``GET /alerts`` 重启后从它读。
+  - ``alert_triage_events`` 是 triage 历史事实来源;每次 PATCH 写一条。
+    ``GET /alerts/{alert_id}/triage/history`` 走它。
+  - JSON 存 ``Text`` (``json.dumps(..., ensure_ascii=False)``),
+    反序列化失败回退空 dict + warning,不让 ``GET /alerts`` 整体失败。
+  - 内存 ``app_state.alert.backlog`` 仍用于 WebSocket 实时推送和 worker 缓存;
+    持久化失败时回退 backlog 不可阻挡主请求(仅 worker ingest 路径)。
+  - owner 隔离: ``(user_id, alert_id)`` 严格匹配;非 owner / 不存在统一返回 None,
+    路由层映射为 404,不暴露 alert_id 是否存在。
+  - 审计 ``Log`` 仅含脱敏摘要,不含完整 payload / note / secret / stack trace。
+"""
 import asyncio
 import csv
+import json
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi.concurrency import run_in_threadpool
 from loguru import logger
+from sqlalchemy.orm import Session
 
 from server.analyzer import LLMAnalyzer
 from server.core.config import ALERT_BACKLOG_SIZE, ALERT_EMAIL_COOLDOWN_SECONDS
@@ -15,19 +40,13 @@ from server.services.llm_service import get_runtime_llm_config
 from server.core.state import app_state
 from server.mailer import send_alert_email
 from server.models.schemas import AlertIn, AlertTriageUpdateIn
-from server.models_db import User, UserConfig
+from server.models_db import AlertRecord, AlertTriageEvent, User, UserConfig
 from server.core.websocket import manager
 
 
 # ---------------------------------------------------------------------------
-# 告警研判 (M3-02)
+# 告警研判 (M3-02 + M3-03)
 # ---------------------------------------------------------------------------
-#
-# 设计要点(参考 docs/agent/M3_02_ALERT_TRIAGE_RESPONSE_WORKBENCH_TASK.md §3):
-# - 状态保存到当前进程的告警 backlog payload 中,跨重启不保留。
-# - 状态变更走 ``create_log`` 写审计,detail 仅含脱敏摘要(alert_id / status /
-#   disposition / note_length / source_ip 摘要),不写完整 payload / note / secret。
-# - 旧告警(没有 triage 字段)在 ``get_alerts`` 返回时映射为默认 ``new``。
 
 _TRIAGE_DEFAULT_STATUS = "new"
 _TRIAGE_AUDIT_ACTION = "alert_triage_update"
@@ -51,6 +70,38 @@ def _ensure_triage(payload: dict[str, Any]) -> dict[str, Any]:
     if "triage" not in payload or not isinstance(payload.get("triage"), dict):
         payload["triage"] = default_alert_triage()
     return payload
+
+
+def _epoch_to_dt(value: float | int | None) -> datetime | None:
+    """``time.time()`` 秒级时间戳转 naive UTC ``datetime``。"""
+    if value is None or not value:
+        return None
+    try:
+        return datetime.fromtimestamp(float(value), tz=timezone.utc).replace(tzinfo=None)
+    except (TypeError, ValueError, OSError):
+        return None
+
+
+def _dt_to_epoch(value: datetime | None) -> float:
+    if value is None:
+        return 0.0
+    return float(value.replace(tzinfo=timezone.utc).timestamp())
+
+
+def _json_dumps(obj: Any) -> str:
+    """JSON 序列化 helper:``ensure_ascii=False`` 保留中文等。"""
+    return json.dumps(obj, ensure_ascii=False, default=str)
+
+
+def _json_loads_dict(text: str | None) -> dict[str, Any]:
+    """反序列化为 dict;失败返回空 dict,不抛。"""
+    if not text:
+        return {}
+    try:
+        result = json.loads(text)
+        return result if isinstance(result, dict) else {}
+    except (TypeError, ValueError):
+        return {}
 
 
 def _build_audit_detail(
@@ -77,44 +128,256 @@ def _build_audit_detail(
     return ";".join(parts)
 
 
+# ---------------------------------------------------------------------------
+# M3-03 持久化 helpers
+# ---------------------------------------------------------------------------
+
+
+def _payload_user_id(payload: dict[str, Any]) -> int:
+    raw = payload.get("raw_alert") or {}
+    try:
+        return int(raw.get("alert_user_id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _record_to_payload(record: AlertRecord) -> dict[str, Any]:
+    """DB record → 前端 / 路由识别的 backend alert payload。"""
+    raw = _json_loads_dict(record.raw_alert_json)
+    analysis = _json_loads_dict(record.llm_analysis_json)
+    processed_at_epoch = _dt_to_epoch(record.processed_at)
+    triage = {
+        "status": record.triage_status or _TRIAGE_DEFAULT_STATUS,
+        "disposition": record.triage_disposition,
+        "analyst_note": record.triage_note,
+        "updated_at": _dt_to_epoch(record.triage_updated_at),
+        "updated_by": int(record.triage_updated_by) if record.triage_updated_by else None,
+    }
+    return {
+        "alert_id": record.alert_id,
+        "raw_alert": raw,
+        "llm_analysis": analysis,
+        "analysis_error": record.analysis_error,
+        "processed_at": processed_at_epoch,
+        "triage": triage,
+    }
+
+
+def _build_record_defaults(payload: dict[str, Any], user_id: int) -> dict[str, Any]:
+    """从 payload 抽取 AlertRecord 字段默认值;不调用 ``_ensure_triage`` 以保留 DB 写入语义。"""
+    raw = payload.get("raw_alert") or {}
+    analysis = payload.get("llm_analysis")
+    return {
+        "raw_alert_json": _json_dumps(raw),
+        "llm_analysis_json": _json_dumps(analysis) if analysis is not None else None,
+        "analysis_error": payload.get("analysis_error"),
+        "processed_at": _epoch_to_dt(payload.get("processed_at")) or _epoch_to_dt(time.time()),
+    }
+
+
+def _triage_from_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    triage = payload.get("triage")
+    if not isinstance(triage, dict):
+        return None
+    return {
+        "status": triage.get("status") or _TRIAGE_DEFAULT_STATUS,
+        "disposition": triage.get("disposition"),
+        "analyst_note": triage.get("analyst_note"),
+        "updated_at": _epoch_to_dt(triage.get("updated_at")),
+        "updated_by": triage.get("updated_by"),
+    }
+
+
+def persist_alert_record(
+    db: Session,
+    payload: dict[str, Any],
+    user_id: int,
+) -> int:
+    """把告警 payload 写入 ``alert_records``(upsert by user_id+alert_id)。
+
+    - 已存在 record:保留历史 triage 字段(让 update_alert_triage 单独写 history),
+      重新写 ``raw_alert_json / llm_analysis_json / analysis_error / processed_at``。
+    - 新 record:默认 ``triage_status='new'``。
+    - 返回 record.id。
+    """
+    alert_id = str(payload.get("alert_id") or uuid.uuid4().hex)
+    payload = {**payload, "alert_id": alert_id}
+    raw_alert = payload.get("raw_alert") or {}
+    if not raw_alert.get("alert_user_id"):
+        raw_alert = {**raw_alert, "alert_user_id": int(user_id)}
+    payload = {**payload, "raw_alert": raw_alert}
+
+    record = (
+        db.query(AlertRecord)
+        .filter(AlertRecord.user_id == int(user_id), AlertRecord.alert_id == alert_id)
+        .first()
+    )
+    defaults = _build_record_defaults(payload, user_id)
+    if record is None:
+        record = AlertRecord(
+            user_id=int(user_id),
+            alert_id=alert_id,
+            triage_status=_TRIAGE_DEFAULT_STATUS,
+            **defaults,
+        )
+        db.add(record)
+    else:
+        # 保留历史 triage 字段;只刷新原始 alert 内容
+        record.raw_alert_json = defaults["raw_alert_json"]
+        record.llm_analysis_json = defaults["llm_analysis_json"]
+        record.analysis_error = defaults["analysis_error"]
+        record.processed_at = defaults["processed_at"]
+    db.flush()
+    return int(record.id)
+
+
+def list_alert_records(
+    db: Session,
+    user_id: int,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """从 DB 读 user 全部 alert record(按 processed_at desc),反序列化为 payload。"""
+    bounded = max(1, min(int(limit), ALERT_BACKLOG_SIZE))
+    records = (
+        db.query(AlertRecord)
+        .filter(AlertRecord.user_id == int(user_id))
+        .order_by(AlertRecord.processed_at.desc(), AlertRecord.id.desc())
+        .limit(bounded)
+        .all()
+    )
+    # API 返回顺序: 旧 -> 新, 与原 backlog 行为保持一致
+    return [_record_to_payload(r) for r in reversed(records)]
+
+
+def get_alert_triage_history(
+    db: Session,
+    user_id: int,
+    alert_id: str,
+    limit: int = 50,
+) -> list[dict[str, Any]] | None:
+    """读取 triage 历史。
+
+    - 找不到 record / 非 owner → 返回 ``None``(路由层映射为 404)。
+    - 返回 list[newest-first],每条含 ``id / from_status / to_status / disposition /
+      analyst_note / updated_by / created_at``。
+    """
+    record = (
+        db.query(AlertRecord)
+        .filter(AlertRecord.user_id == int(user_id), AlertRecord.alert_id == str(alert_id))
+        .first()
+    )
+    if record is None:
+        return None
+    bounded = max(1, min(int(limit), 100))
+    events = (
+        db.query(AlertTriageEvent)
+        .filter(
+            AlertTriageEvent.alert_record_id == int(record.id),
+            AlertTriageEvent.user_id == int(user_id),
+        )
+        .order_by(AlertTriageEvent.created_at.desc(), AlertTriageEvent.id.desc())
+        .limit(bounded)
+        .all()
+    )
+    return [
+        {
+            "id": int(ev.id),
+            "from_status": ev.from_status,
+            "to_status": ev.to_status,
+            "disposition": ev.disposition,
+            "analyst_note": ev.analyst_note,
+            "updated_by": int(ev.updated_by) if ev.updated_by else None,
+            "created_at": _dt_to_epoch(ev.created_at),
+        }
+        for ev in events
+    ]
+
+
 async def update_alert_triage(
+    db: Session,
     user_id: int,
     alert_id: str,
     data: AlertTriageUpdateIn,
 ) -> dict[str, Any] | None:
-    """更新告警 triage;非 owner / 不存在返回 ``None``。"""
+    """更新告警 triage;非 owner / 不存在返回 ``None``。
 
-    now = time.time()
-    triage_payload: dict[str, Any] = {
-        "status": data.status,
-        "disposition": data.disposition,
-        "analyst_note": data.analyst_note,
-        "updated_at": now,
-        "updated_by": int(user_id),
-    }
-    updated = await app_state.alert.update_backlog_triage(
-        user_id=int(user_id),
-        alert_id=alert_id,
-        triage=triage_payload,
+    流程:
+      1. 查 record(``(user_id, alert_id)``);不存在 → ``None``。
+      2. 写 ``AlertTriageEvent``(from=old, to=new),持有 ``analyst_note`` 等。
+      3. 更新 record 最新 triage 字段 + ``triage_updated_at``。
+      4. 尝试同步内存 backlog;失败不阻断。
+      5. 写 ``Log`` 脱敏审计(由路由层处理,这里只返回 audit dict)。
+    """
+    record = (
+        db.query(AlertRecord)
+        .filter(AlertRecord.user_id == int(user_id), AlertRecord.alert_id == str(alert_id))
+        .first()
     )
-    if updated is None:
+    if record is None:
         return None
 
+    previous_status = record.triage_status or _TRIAGE_DEFAULT_STATUS
+    previous_disposition = record.triage_disposition
+    now_epoch = time.time()
+    now_dt = _epoch_to_dt(now_epoch) or datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # 1. 写 history
+    event = AlertTriageEvent(
+        alert_record_id=int(record.id),
+        user_id=int(user_id),
+        alert_id=str(alert_id),
+        from_status=previous_status,
+        to_status=data.status,
+        disposition=data.disposition,
+        analyst_note=data.analyst_note,
+        updated_by=int(user_id),
+        created_at=now_dt,
+    )
+    db.add(event)
+
+    # 2. 更新 record 最新 triage 字段
+    record.triage_status = data.status
+    record.triage_disposition = data.disposition
+    record.triage_note = data.analyst_note
+    record.triage_updated_at = now_dt
+    record.triage_updated_by = int(user_id)
+    db.commit()
+    db.refresh(record)
+
+    payload = _record_to_payload(record)
+
+    # 3. 尝试同步内存 backlog(失败不阻断)
+    try:
+        updated = await app_state.alert.update_backlog_triage(
+            user_id=int(user_id),
+            alert_id=str(alert_id),
+            triage=payload["triage"],
+        )
+        if updated is not None:
+            payload = updated
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("backlog triage sync failed alert_id={} err={}", alert_id, exc)
+
     return {
-        "triage": triage_payload,
-        "alert": updated,
+        "triage": payload["triage"],
+        "alert": payload,
         "audit": {
             "action": _TRIAGE_AUDIT_ACTION,
             "detail": _build_audit_detail(
-                alert_id=alert_id,
+                alert_id=str(alert_id),
                 status=data.status,
                 disposition=data.disposition,
                 note_length=len(data.analyst_note or ""),
-                source_ip=str((updated.get("raw_alert") or {}).get("source_ip") or ""),
+                source_ip=str((payload.get("raw_alert") or {}).get("source_ip") or ""),
             ),
             "user_id": int(user_id),
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Alert 生命周期(worker / ingest / demo)
+# ---------------------------------------------------------------------------
 
 
 def _feature_value(raw: dict[str, Any], key: str) -> Any:
@@ -231,9 +494,6 @@ async def _send_alert_email_if_enabled(payload: dict[str, Any]) -> None:
     if not await _should_send_alert_email(alert_user_id):
         return
 
-    # Single JOIN to load user + config in one round-trip (was N+1 with two
-    # sequential queries). `contains_eager` tells SQLAlchemy the relationship
-    # is already populated so it does not lazy-load `config` again below.
     db = SessionLocal()
     try:
         from sqlalchemy.orm import joinedload
@@ -269,6 +529,10 @@ async def _send_alert_email_if_enabled(payload: dict[str, Any]) -> None:
 
 
 async def alert_worker(worker_id: int) -> None:
+    """后台 alert 处理 worker。
+
+    M3-03: 持久化失败时只记录 warning,不广播未持久化 alert,
+    避免前端误以为已落库 / 已可恢复。"""
     logger.info("Alert worker started id={}", worker_id)
     while True:
         alert = await app_state.alert.queue.get()
@@ -277,6 +541,19 @@ async def alert_worker(worker_id: int) -> None:
             await app_state.alert.append_backlog(payload)
             alert_user_id = int((payload.get("raw_alert") or {}).get("alert_user_id") or 0)
             if alert_user_id > 0:
+                # 持久化尝试
+                try:
+                    db = SessionLocal()
+                    try:
+                        persist_alert_record(db, payload, alert_user_id)
+                        db.commit()
+                    finally:
+                        db.close()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "alert worker persist failed worker_id={} alert_id={} err={}",
+                        worker_id, payload.get("alert_id"), exc,
+                    )
                 await manager.broadcast_json(alert_user_id, payload)
                 await _send_alert_email_if_enabled(payload)
         except Exception as exc:
@@ -285,14 +562,30 @@ async def alert_worker(worker_id: int) -> None:
             app_state.alert.queue.task_done()
 
 
-async def get_alerts(user_id: int, limit: int = 100) -> dict[str, Any]:
-    backlog = await app_state.alert.get_backlog_snapshot()
-    user_items = [_ensure_triage(item) for item in backlog if (item.get("raw_alert") or {}).get("alert_user_id") == user_id]
-    bounded = max(1, min(limit, ALERT_BACKLOG_SIZE))
-    return {
-        "items": user_items[-bounded:],
-        "count": len(user_items),
-    }
+async def get_alerts(db: Session, user_id: int, limit: int = 100) -> dict[str, Any]:
+    """读取当前用户的告警列表。
+
+    优先级:DB → 内存 backlog 兜底。DB 读失败时记录 warning 并回退到 backlog,
+    不让主请求 5xx。"""
+    try:
+        items = list_alert_records(db, user_id, limit)
+        return {
+            "items": [_ensure_triage(item) for item in items],
+            "count": len(items),
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("get_alerts DB read failed, falling back to backlog: {}", exc)
+        backlog = await app_state.alert.get_backlog_snapshot()
+        user_items = [
+            _ensure_triage(item)
+            for item in backlog
+            if (item.get("raw_alert") or {}).get("alert_user_id") == user_id
+        ]
+        bounded = max(1, min(limit, ALERT_BACKLOG_SIZE))
+        return {
+            "items": user_items[-bounded:],
+            "count": len(user_items),
+        }
 
 
 async def receive_alert(alert: AlertIn, request) -> dict[str, Any]:
@@ -361,8 +654,16 @@ DEMO_ATTACK_SCENARIOS: dict[str, dict[str, Any]] = {
 }
 
 
-async def trigger_demo_attack(*, user_id: int, scenario: str) -> dict[str, Any]:
-    """Create a deterministic demo alert for the current authenticated user."""
+async def trigger_demo_attack(
+    *,
+    db: Session,
+    user_id: int,
+    scenario: str,
+) -> dict[str, Any]:
+    """Create a deterministic demo alert for the current authenticated user.
+
+    M3-03: 写 ``alert_records`` 失败时,主请求返回 ``None``(路由层映射 503),
+    保证用户期待"重启可恢复"不被静默破坏。"""
     template = DEMO_ATTACK_SCENARIOS[scenario]
     now = time.time()
     alert = AlertIn(
@@ -392,6 +693,10 @@ async def trigger_demo_attack(*, user_id: int, scenario: str) -> dict[str, Any]:
             "story": "模拟攻击 -> 告警入队 -> Dashboard 展示 -> Copilot 告警上下文",
         },
     })
+
+    # 持久化优先:失败时由路由层返回 5xx
+    persist_alert_record(db, payload, user_id)
+    db.commit()
 
     await app_state.alert.append_backlog(payload)
     await manager.broadcast_json(user_id, payload)

@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -37,8 +37,10 @@ async def receive_alert(
 async def get_alerts(
     limit: int = 100,
     user: User = Depends(require_auth_user),
+    db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    return await alert_service.get_alerts(user.id, limit)
+    """读取当前用户的告警列表(M3-03: 优先从 DB 读,失败回退 backlog)。"""
+    return await alert_service.get_alerts(db, user.id, limit)
 
 
 @router.patch("/{alert_id}/triage")
@@ -48,16 +50,18 @@ async def update_alert_triage(
     user: User = Depends(require_auth_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """更新指定告警的研判状态。
+    """更新指定告警的研判状态(M3-02 + M3-03)。
 
     - 仅告警所有者可更新;非 owner / 不存在统一返回 404,
       避免通过 403 暴露 alert_id 是否存在。
     - 无效 status / 超长 note 由 Pydantic 在进入 handler 前返回 422。
+    - M3-03: 写 ``alert_records`` / ``alert_triage_events``;DB 写失败返回 5xx。
     - 审计日志 ``Log(action="alert_triage_update")`` 记录脱敏摘要;
       写入失败不得破坏主请求。
     """
 
     result = await alert_service.update_alert_triage(
+        db=db,
         user_id=user.id,
         alert_id=alert_id,
         data=data,
@@ -86,20 +90,60 @@ async def update_alert_triage(
     }
 
 
+@router.get("/{alert_id}/triage/history")
+async def get_alert_triage_history(
+    alert_id: str,
+    limit: int = Query(default=50, ge=1, le=100),
+    user: User = Depends(require_auth_user),
+    db: Session = Depends(get_db),
+) -> dict[str, Any]:
+    """返回指定告警的 triage 历史(M3-03)。
+
+    - 仅 owner 可见;非 owner / 不存在统一 404。
+    - ``limit`` 范围 1-100,默认 50。
+    - 返回 newest-first;``count`` = 实际返回条数。
+    """
+    events = alert_service.get_alert_triage_history(
+        db=db, user_id=user.id, alert_id=alert_id, limit=limit
+    )
+    if events is None:
+        raise HTTPException(status_code=404, detail="Alert not found")
+    return {
+        "status": "ok",
+        "alert_id": alert_id,
+        "items": events,
+        "count": len(events),
+        "limit": limit,
+    }
+
+
 @router.post("/demo")
 async def trigger_demo_attack(
     data: DemoAttackIn,
     user: User = Depends(require_auth_user),
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
+    """触发确定性 Demo 攻击(M3-02 + M3-03)。
+
+    - M3-03: 写 ``alert_records`` 失败 → 返回 503(用户期待"重启可恢复")。
+    - SOC 时间线事件:写 Log 让 ``/logs/security-timeline`` 能渲染 demo 攻击;
+      失败保护:主请求不能因为 Log 写入失败而失败。
+    """
     if data.scenario not in DEMO_ATTACK_SCENARIOS:
         raise HTTPException(status_code=422, detail="Unknown demo scenario")
 
-    payload = await alert_service.trigger_demo_attack(user_id=user.id, scenario=data.scenario)
-    # SOC 时间线事件：写 Log 让 ``/logs/security-timeline`` 能渲染 demo 攻击。
-    # 失败保护：主请求不能因为 Log 写入失败而失败。
     try:
-        from server.core.database import create_log
+        payload = await alert_service.trigger_demo_attack(
+            db=db, user_id=user.id, scenario=data.scenario
+        )
+    except Exception as exc:  # noqa: BLE001
+        # 持久化失败 → 503,不静默成功
+        db.rollback()
+        logger.warning("demo_attack persist failed user_id={} scenario={} err={}",
+                       user.id, data.scenario, exc)
+        raise HTTPException(status_code=503, detail="Alert persistence failed")
+
+    try:
         create_log(
             db,
             user_id=user.id,
@@ -108,7 +152,7 @@ async def trigger_demo_attack(
             detail=f"scenario={data.scenario};alert_id={payload['alert_id']}",
         )
     except Exception:  # noqa: BLE001
-        # loguru 已经在内部 log 过；这里只保证主请求不被破坏。
+        # loguru 已经在内部 log 过;这里只保证主请求不被破坏。
         pass
     return {
         "status": "ok",
@@ -120,7 +164,7 @@ async def trigger_demo_attack(
 
 @router.websocket("/ws/alerts")
 async def ws_alerts(websocket: WebSocket) -> None:
-    # 支持多种认证方式：header、cookie、URL query param
+    # 支持多种认证方式:header、cookie、URL query param
     token = websocket.headers.get("authorization")
     cookie_text = websocket.headers.get("cookie", "")
     access_token_cookie: str | None = None
@@ -151,6 +195,8 @@ async def ws_alerts(websocket: WebSocket) -> None:
         return
     await manager.connect(user.id, websocket)
     try:
+        # M3-03: WebSocket 启动推送仍走 backlog(实时缓存),不重读 DB。
+        # DB 持久化的告警会通过 GET /alerts 轮询呈现,WebSocket 只负责新告警。
         backlog = await app_state.alert.get_backlog_snapshot()
         for item in backlog:
             if (item.get("raw_alert") or {}).get("alert_user_id") == user.id:
