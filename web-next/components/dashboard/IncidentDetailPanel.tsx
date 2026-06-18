@@ -18,6 +18,10 @@ import StatusView from "./StatusView";
 const NOTE_MAX_LENGTH = 1000;
 const SUMMARY_MAX_LENGTH = 1000;
 const TITLE_MAX_LENGTH = 120;
+// M3-05: "用 AI 分析案件" 短意图;不再把 incident 详情拼进 message。
+// 后端会通过 incident_id 走 owner 隔离并构造受控 context_block。
+const INCIDENT_COPILOT_SHORT_PROMPT =
+  "请分析当前安全案件,给出风险、证据、影响和下一步处置。";
 
 export interface IncidentDetailPanelProps {
   detail: IncidentDetailResponse;
@@ -117,27 +121,18 @@ export default function IncidentDetailPanel({
   );
 
   const handleCopilot = useCallback(() => {
-    const summary = buildCopilotPrompt(detail);
-    // 写入 sessionStorage,让 CopilotSection 读取
-    try {
-      window.sessionStorage.setItem("incident_copilot_prompt", summary);
-      window.sessionStorage.setItem(
-        "incident_copilot_meta",
-        JSON.stringify({
-          incident_id: detail.incident.incident_id,
-          title: detail.incident.title,
-        })
-      );
-    } catch {
-      // ignore sessionStorage 失败
-    }
-    // 触发自定义事件,dashboard-client 可监听
+    // M3-05: 不再把 incident 详情拼进 message;后端通过 incident_id 构造受控
+    // context_block(走 server.services.copilot_service._load_incident_context),
+    // 前端只发短意图 + incidentId。后端负责 owner 隔离 / 脱敏 / Guardrails / SSE 净化。
     window.dispatchEvent(
       new CustomEvent("incident:copilot", {
-        detail: { prompt: summary, incidentId: detail.incident.incident_id },
+        detail: {
+          prompt: INCIDENT_COPILOT_SHORT_PROMPT,
+          incidentId: detail.incident.incident_id,
+        },
       })
     );
-  }, [detail]);
+  }, [detail.incident.incident_id]);
 
   const saving = actionState === "saving";
 
@@ -379,49 +374,10 @@ export default function IncidentDetailPanel({
 }
 
 /**
- * 把 incident 摘要拼成 Copilot 用户消息(前端拼接,不走后端 incident-aware contract)。
+ * M3-05: 案件 Copilot 入口。
  *
- * 包含:
- * - incident id / title / severity / status / 关联告警数 / 最多 5 条告警摘要
- * - 明确要求输出:风险、证据、影响、下一步处置
- *
- * 不得包含:secret / system prompt / stack trace / 完整 payload。
+ * 不再把 incident 详情拼进 message;后端通过 incident_id 走
+ * ``server.services.copilot_service._load_incident_context`` 构造受控
+ * context_block。前端只发短意图 + incidentId,后端负责 owner 隔离 / 脱敏 /
+ * Guardrails / SSE 净化。详见 ``docs/agent/M3_05_INCIDENT_AWARE_COPILOT_CONTRACT_TASK.md``。
  */
-function buildCopilotPrompt(detail: IncidentDetailResponse): string {
-  const lines: string[] = [];
-  const inc = detail.incident;
-  lines.push(`请分析以下安全案件 (incident_id=${inc.incident_id}):`);
-  lines.push(`- 标题: ${inc.title}`);
-  lines.push(`- 严重度: ${inc.severity}`);
-  lines.push(`- 状态: ${inc.status}`);
-  lines.push(`- 关联告警数: ${inc.alert_count}`);
-  if (inc.summary) {
-    lines.push(`- 摘要: ${inc.summary}`);
-  }
-  if (inc.created_from_alert_id) {
-    lines.push(`- 首条告警 id: ${inc.created_from_alert_id}`);
-  }
-  lines.push("");
-  lines.push("关联告警(最多 5 条):");
-  const top = detail.linked_alerts.slice(0, 5);
-  if (top.length === 0) {
-    lines.push("- (无)");
-  } else {
-    for (const a of top) {
-      const src = a.raw_alert?.source_ip ?? "?";
-      const dst = a.raw_alert?.destination_ip ?? "?";
-      const risk = a.llm_analysis?.risk_level ?? "unknown";
-      const summary = (a.llm_analysis?.summary ?? "").toString().slice(0, 120);
-      lines.push(`- ${a.alert_id} ${src} → ${dst} (risk=${risk}) ${summary}`);
-    }
-  }
-  lines.push("");
-  lines.push("请按以下结构输出:");
-  lines.push("1. 风险: 简要说明该案件的潜在威胁等级和影响面");
-  lines.push("2. 证据: 列出支撑判断的关键告警和模式");
-  lines.push("3. 影响: 当前/潜在业务影响范围");
-  lines.push("4. 下一步处置: 给出 3-5 条可立即执行的建议动作");
-  return lines.join("\n");
-}
-
-export { buildCopilotPrompt };

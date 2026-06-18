@@ -141,13 +141,20 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
   );
   const incidentsCtx = useIncidents();
 
-  // M3-04: 监听 "用 AI 分析案件" 自定义事件,触发 Copilot 拼好的 prompt
+  // M3-04 / M3-05: 监听 "用 AI 分析案件" 自定义事件,触发 Copilot。
+  // M3-05 起只发短意图 + incidentId,后端通过 incident_id 走 owner 隔离并构造
+  // 受控 context_block(详见 docs/agent/M3_05_INCIDENT_AWARE_COPILOT_CONTRACT_TASK.md)。
   useEffect(() => {
     function handleCopilotEvent(event: Event) {
       const custom = event as CustomEvent<{ prompt?: string; incidentId?: string }>;
       const prompt = custom.detail?.prompt;
       if (!prompt) return;
-      void copilotCtx.sendMessage(prompt);
+      const incidentId = custom.detail?.incidentId;
+      if (incidentId) {
+        void copilotCtx.sendMessage(prompt, { incidentId });
+      } else {
+        void copilotCtx.sendMessage(prompt);
+      }
       // 切到 AI/概览 让用户看到 Copilot 输出
       setRoute("ai");
     }
