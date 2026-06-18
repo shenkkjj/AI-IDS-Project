@@ -293,13 +293,17 @@ npm run build        # /dashboard 43.7 kB / First Load JS 191 kB
   | `docs(incidents): 记录案件报告导出边界` | 文档 | `PRODUCT.md` + `docs/plans/M2_PRODUCT_ROADMAP.md` + `docs/agent/UNATTENDED_LONG_TASKS.md` + `docs/runs/2026-06-18-m3-07-incident-evidence-report-export.md` |
 
 - 禁提交保留在本地噪声(不 stage):`.coverage` / `.claude/settings.local.json` / `docs/agent/M3_07_INCIDENT_EVIDENCE_REPORT_EXPORT_TASK.md`(本任务文档,保留原状)。
-- commit / push 状态:**4 个 commit 已落地本地 main;push 受网络层阻塞未完成**。
+- commit / push 状态:**5 个 commit 已落地本地 main 并成功 push 到 origin/main**。
   - `d705403 test(incidents): 覆盖案件证据报告导出契约`
   - `fdbe2ab feat(incidents): 实现案件证据报告 service 与端点`
   - `3fb4da7 feat(dashboard): 支持复制和下载案件报告`
   - `c403c5e docs(incidents): 记录案件报告导出边界`
-  - 本地 `main` 领先 `origin/main` 4 commits(`git status --short --branch` → `## main...origin/main [ahead 4]`)。
-  - push 阶段多次 `git push origin main` 均报 `Failed to connect to github.com port 443 after 21s: Could not connect to server`(共 4 次:60s/90s/180s/60s 超时);`git ls-remote origin main` 同样 21s 后 connect timeout。
-  - 本地 `gh` CLI 不存在;SSH 22 端口可达但 host key 不在 known_hosts 中(若需切 SSH push,用户需先 `ssh-keyscan github.com >> ~/.ssh/known_hosts`)。
-  - **不属于任务边界内可修复项**(任务文档 §9 "禁止修改:部署 / 真实 .env / 网络配置")。按 `UNATTENDED_LONG_TASKS.md` `GITHUB_PUSH_CONNECTIVITY_AND_CREDENTIALS_RECOVERY_TASK.md` 精神,网络连通性 / 凭据恢复需用户介入,**停止 push 不算失败**。
+  - `ebbf8c5 docs(incidents): 补记 M3-07 push 受网络阻塞状态`
+  - push 实际执行:第 1 次 background push 失败 (Connection timed out 300s),随后 3 次 foreground push 全部失败 (Failed to connect to github.com port 443 after 21s),环境层诊断显示 `github.com` DNS 被劫持到内网 `10.6.10.251`。第 5 次重试 (网络层瞬时恢复) 成功:
+    ```
+    To https://github.com/shenkkjj/AI-IDS-Project.git
+       03c85ef..ebbf8c5  main -> main
+    ```
+  - `git status --short --branch` → `## main...origin/main`(无 ahead/behind 差距,本地与远端完全同步)。
+  - `git rev-parse origin/main` → `ebbf8c5c8f30526019c3bd6eff72b87a4ffc5e26`(与本地 HEAD `ebbf8c5` 一致)。
 - 剩余本地噪声:`.coverage` / `docs/agent/M3_07_INCIDENT_EVIDENCE_REPORT_EXPORT_TASK.md`(禁提交 / 任务文档保留,保留原状)。`git status` 确认:工作树只剩 `.coverage` modified + 任务文档 untracked,无任何意外文件被遗漏或多余 stage。
