@@ -241,3 +241,147 @@ class AlertTriageEvent(Base):
         ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+# ---------------------------------------------------------------------------
+# 安全事件 / 案件 (M3-04)
+# ---------------------------------------------------------------------------
+#
+# 设计要点 (docs/agent/M3_04_INCIDENT_CASE_WORKBENCH_TASK.md §4):
+# - ``Incident`` 是案件事实来源。``(user_id, incident_id)`` 唯一。
+#   保存 title / summary / severity / status / assignee_user_id /
+#   created_from_alert_id / created_at / updated_at / closed_at。
+#   ``GET /incidents`` 和 ``GET /incidents/{id}`` 走它。
+# - ``IncidentAlertLink`` 是告警关联事实来源。保存 incident_record_id /
+#   alert_record_id / alert_id 字符串冗余 / linked_by / linked_at /
+#   removed_at(软删除)。重复 link 由 service 层做幂等检查。
+# - ``IncidentEvent`` 是事件时间线事实来源。event_type ∈
+#   {created / status_changed / alert_linked / alert_unlinked /
+#    note_added / summary_updated / severity_changed}。
+#   保存 from_status / to_status / detail(脱敏摘要) / note(owner API 私有
+#   返回,不入 Log) / actor_user_id / created_at。
+#   ``newest-first`` 顺序返回(与 M3-03 triage history 一致)。
+# - 所有表都用 ``Text`` 存 detail(JSON 不需要,只存脱敏字符串)；
+#   不依赖 PostgreSQL JSONB,SQLite 测试库与 Compose PostgreSQL 走同一份代码。
+# - 不引入新 env 变量;不触碰 ``server/security/**``;不修改认证/JWT/2FA 语义。
+
+
+class Incident(Base, TimestampMixin):
+    """安全事件 / 案件事实来源 (M3-04)。"""
+
+    __tablename__ = "incidents"
+    __table_args__ = (
+        UniqueConstraint("user_id", "incident_id", name="uq_incidents_user_incident"),
+        Index("ix_incidents_user_updated", "user_id", "updated_at"),
+        Index(
+            "ix_incidents_user_status_updated",
+            "user_id",
+            "status",
+            "updated_at",
+        ),
+        Index("ix_incidents_created_from_alert", "created_from_alert_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    incident_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    assignee_user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_from_alert_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    events: Mapped[list["IncidentEvent"]] = relationship(
+        "IncidentEvent",
+        primaryjoin="Incident.id == foreign(IncidentEvent.incident_record_id)",
+        backref="incident",
+        cascade="all, delete-orphan",
+        order_by="IncidentEvent.id",
+    )
+
+
+class IncidentAlertLink(Base):
+    """告警 ↔ 事件关联事实来源 (M3-04)。
+
+    重复 link 的幂等检查放在 service 层:同一 ``(incident_record_id,
+    alert_record_id)`` 已存在 active link 时不重复写,不写新 ``IncidentEvent``。
+    软删除:设置 ``removed_at`` 而不是物理删除。
+    """
+
+    __tablename__ = "incident_alert_links"
+    __table_args__ = (
+        Index(
+            "ix_incident_alert_links_incident_active",
+            "incident_record_id",
+            "removed_at",
+        ),
+        Index(
+            "ix_incident_alert_links_user_alert",
+            "user_id",
+            "alert_id",
+        ),
+        Index("ix_incident_alert_links_alert_record", "alert_record_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    incident_record_id: Mapped[int] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    incident_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    alert_record_id: Mapped[int] = mapped_column(
+        ForeignKey("alert_records.id", ondelete="CASCADE"), nullable=False
+    )
+    alert_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    linked_by: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    linked_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class IncidentEvent(Base):
+    """事件时间线事实来源 (M3-04)。
+
+    - ``event_type`` ∈ {created, status_changed, alert_linked, alert_unlinked,
+      note_added, summary_updated, severity_changed}。
+    - ``detail`` 走脱敏: incident_id / status / severity / alert_id /
+      关键计数,不含完整 note / payload / secret。
+    - ``note`` 私有 note(由 owner API 返回),不写入 Log。
+    """
+
+    __tablename__ = "incident_events"
+    __table_args__ = (
+        Index(
+            "ix_incident_events_incident_created",
+            "incident_record_id",
+            "created_at",
+        ),
+        Index("ix_incident_events_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    incident_record_id: Mapped[int] = mapped_column(
+        ForeignKey("incidents.id", ondelete="CASCADE"), nullable=False
+    )
+    incident_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    to_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    detail: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
