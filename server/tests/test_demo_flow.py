@@ -185,9 +185,17 @@ def test_demo_attack_rejects_unknown_scenario(demo_client):
 
 
 def test_demo_alert_can_drive_copilot_fallback(tmp_db, monkeypatch):
-    """service 层 trigger_demo_attack 在新签名下也仍可被 worker 之类调用。"""
+    """service 层 trigger_demo_attack 在新签名下也仍可被 worker 之类调用。
+
+    M3-06:该测试只验证 demo alert 能驱动 Copilot no-key fallback 路径,
+    并不验证 Guardrails 决策。为避免本地无真实 OpenAI key 时
+    L4 moderation fail-closed 阻断(``moderation_unavailable``),
+    在测试中 stub ``GuardrailEngine.instance().check_input`` 为 allow。
+    模式与 ``test_copilot_contract._stub_guardrails`` 保持一致。
+    """
     _engine, SessionLocal = tmp_db
     from server.models.schemas import CopilotStreamIn
+    from server.security.llm_guardrails import core as guard_core
     from server.services import alert_service, copilot_service
 
     user = User(id=77, email="fallback@example.com", is_active=True)
@@ -201,6 +209,16 @@ def test_demo_alert_can_drive_copilot_fallback(tmp_db, monkeypatch):
 
     monkeypatch.setattr(
         "server.services.alert_service.manager.broadcast_json", fake_broadcast_json
+    )
+
+    class _StubEngine:
+        async def check_input(self, **_kwargs):
+            return None  # allow:不验证 Guardrails,只验证 no-key fallback
+
+    monkeypatch.setattr(
+        guard_core.GuardrailEngine,
+        "instance",
+        staticmethod(lambda: _StubEngine()),
     )
 
     async def run_flow():
