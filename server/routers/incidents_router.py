@@ -1,18 +1,23 @@
-"""安全事件 / 案件工作台 API (M3-04)。
+"""安全事件 / 案件工作台 API (M3-04 / M3-07)。
 
-设计要点（docs/agent/M3_04_INCIDENT_CASE_WORKBENCH_TASK.md §5）:
+设计要点（docs/agent/M3_04_INCIDENT_CASE_WORKBENCH_TASK.md §5 +
+docs/agent/M3_07_INCIDENT_EVIDENCE_REPORT_EXPORT_TASK.md §5）:
 
 - 所有端点必须 ``require_auth_user``;非 owner / 不存在统一 404。
 - ``Log`` 写脱敏摘要,失败仅 warning,不阻断主请求。
 - ``limit`` 参数走 Query 范围校验(1-100)。
 - 请求体用 Pydantic schema 校验,失败 422。
 - 错误响应不含 stack trace;用户可见 detail 走中文。
+- 案件报告端点:``GET /incidents/{id}/report?format=json|markdown``,
+  复用 owner 隔离 + 脱敏 sentinel;不返回完整 raw payload / 完整 note /
+  fake secret / system prompt / stack trace。
 """
 from __future__ import annotations
 
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi.responses import PlainTextResponse
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -26,6 +31,7 @@ from server.services.incident_service import (
     INCIDENT_SEVERITY_VALUES,
     INCIDENT_STATUS_VALUES,
 )
+from server.services.incident_report_service import build_incident_report
 
 
 router = APIRouter(prefix="/incidents", tags=["案件"])
@@ -277,4 +283,126 @@ async def unlink_alert_endpoint(
         "status": "ok",
         "incident": result["incident"],
         "alert_count": result["alert_count"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# M3-07: 案件证据报告导出
+# ---------------------------------------------------------------------------
+# 端点契约(docs/agent/M3_07_INCIDENT_EVIDENCE_REPORT_EXPORT_TASK.md §5):
+# - GET /incidents/{incident_id}/report?format=json|markdown
+# - 复用 owner 隔离(``get_incident_detail``),非 owner / 不存在统一 404。
+# - format 校验:仅 ``json`` / ``markdown``;其他 422。
+# - format=json:返回 ``{status, incident_id, filename, markdown, meta}`` envelope。
+# - format=markdown:返回 ``text/markdown; charset=utf-8`` body + Content-Disposition。
+# - 报告内容:incident 基础信息 + 关联告警摘要 + 事件时间线 + 安全声明;
+#   走 ``server.services.incident_report_service`` 纯函数 + 脱敏 sentinel,
+#   绝不写完整 raw payload / 完整 note / fake secret / system prompt /
+#   stack trace / Guardrails regex。
+# - audit Log:仅在成功生成报告时写 ``Log(action="incident_report_export")``;
+#   detail 只含 incident_id / format / 计数 / redaction_count,
+#   不含 title / summary / payload / note / markdown 全文。
+# - 错误:401 未登录 / 404 非 owner 或不存在 / 422 invalid format / 503 DB 失败。
+
+
+_REPORT_ALLOWED_FORMATS: frozenset[str] = frozenset({"json", "markdown"})
+
+
+def _write_report_audit_log(
+    db: Session,
+    *,
+    user_id: int,
+    incident_id: str,
+    fmt: str,
+    meta: dict[str, Any],
+) -> None:
+    """写脱敏 audit Log;失败仅 warning,不阻断主请求。"""
+    try:
+        create_log(
+            db,
+            user_id=int(user_id),
+            level="info",
+            action="incident_report_export",
+            detail=(
+                f"incident_id={incident_id};"
+                f"format={fmt};"
+                f"alert_count={int(meta.get('alert_count', 0))};"
+                f"included_alerts={int(meta.get('included_alerts', 0))};"
+                f"event_count={int(meta.get('event_count', 0))};"
+                f"included_events={int(meta.get('included_events', 0))};"
+                f"redaction_count={int(meta.get('redaction_count', 0))}"
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001
+        # 审计写入失败不得破坏主请求
+        logger.warning(
+            "incident_report_export audit log failed incident_id={} err={}",
+            incident_id, exc,
+        )
+
+
+@router.get("/{incident_id}/report", response_model=None)
+async def get_incident_report_endpoint(
+    incident_id: str,
+    format: str = Query(default="json", alias="format"),
+    event_limit: int = Query(default=100, ge=1, le=100),
+    user: User = Depends(require_auth_user),
+    db: Session = Depends(get_db),
+):
+    """返回案件脱敏 Markdown 证据报告;``format=json|markdown``。
+
+    - ``format=json`` 返回 envelope + markdown 字符串(前端拿到后复制 / 下载)。
+    - ``format=markdown`` 直接返回 text/markdown body(便于 curl / 命令行)。
+    - 非 owner / 不存在统一 404,错误信息不区分。
+    - 成功生成时写 ``Log(action="incident_report_export")``;非 owner / 不存在 /
+      invalid format / DB 失败均**不**写 success Log。
+    """
+    fmt = (format or "json").lower()
+    if fmt not in _REPORT_ALLOWED_FORMATS:
+        raise HTTPException(status_code=422, detail="报告格式非法,仅支持 json 或 markdown")
+
+    try:
+        detail = incident_service.get_incident_detail(
+            db, user.id, incident_id, event_limit=event_limit
+        )
+    except Exception as exc:  # noqa: BLE001
+        db.rollback()
+        logger.warning(
+            "incident_report load failed incident_id={} err={}", incident_id, exc
+        )
+        raise HTTPException(status_code=503, detail="案件报告加载失败")
+
+    if detail is None:
+        raise HTTPException(status_code=404, detail="案件不存在")
+
+    # 报告主体派生(纯函数)
+    report = build_incident_report(detail)
+
+    # 写脱敏 audit Log(不阻断主请求)
+    _write_report_audit_log(
+        db,
+        user_id=user.id,
+        incident_id=str(detail["incident"]["incident_id"]),
+        fmt=fmt,
+        meta=report["meta"],
+    )
+
+    if fmt == "markdown":
+        # 返回 text/markdown + Content-Disposition 便于 curl 直接下载;
+        # Next.js 代理层若不透传 Content-Disposition,前端仍用 format=json
+        # 自行创建 Blob 下载。
+        return PlainTextResponse(
+            content=report["markdown"],
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f"attachment; filename={report['filename']}",
+            },
+        )
+
+    return {
+        "status": "ok",
+        "incident_id": str(detail["incident"]["incident_id"]),
+        "filename": report["filename"],
+        "markdown": report["markdown"],
+        "meta": report["meta"],
     }
