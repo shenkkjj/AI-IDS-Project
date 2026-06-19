@@ -409,6 +409,53 @@ M2 完成时，项目应满足：
 - 前端 `web-next`：`npm run typecheck` 0 错误；`npm run build` 通过（`/dashboard` 43.7 kB / First Load JS 191 kB）。
 - 运行日志：`docs/runs/2026-06-18-m3-08-incident-report-browser-e2e-and-agent-docs-catchup.md`。
 
+### NEXT-01 next-auth 会话 loading 阻塞收口（2026-06-19 已交付）
+
+> 核心目的：解开 M3-08 暴露的 next-auth 5 beta + Next.js 15 dev mode `useSession()` 永 `loading` 阻塞，让真实浏览器 E2E 能进入 Dashboard。
+
+**已交付**：
+
+- `web-next/app/dashboard/page.tsx` 改为 Server Component：`auth()` + `redirect("/")` 决定放行，不再依赖客户端 `useSession()` 的 hydration。
+- `web-next/app/layout.tsx` 在服务端调 `auth()` 把 session 透传给 `Providers`；`web-next/app/providers.tsx` 接受 `session?: Session | null` 并喂给 `<SessionProvider session=...>`。
+- 不升级 next-auth / next；不改后端 `server/core/auth*` / `server/routers/auth*` / `server/security/**`。
+- 新增 `server/tests/test_auth_session_e2e.py` 最小 E2E：注册 → UI 登录 + `/api/auth/callback/credentials` 兜底 → 等 dashboard URL → 断言 `trigger-demo-attack` 45s 内可见 / `SYSTEM · LOADING` 消失 / `/api/auth/session` 返回 user / DOM 无 sentinel。M3-08 `test_incident_report_e2e.py` helper 同步加 callback 兜底 + 列表点击等待。
+
+**验证矩阵（最终）**：
+
+- `pytest server/tests/test_auth_session_e2e.py --run-e2e` **1 passed**。
+- `pytest server/tests/test_incident_report_e2e.py --run-e2e` **1 passed**（`registered/demo/create/download/copy_status='已复制'/forbidden=None`）。
+- `pytest server/tests/test_incident_report_export.py` **14 passed**；Guardrails 专项 **139 passed**；前端 `npm run typecheck` 0 错误 + `npm run build` 通过（`/dashboard` 43.4 kB / First Load JS 191 kB）。
+- 运行日志：`docs/runs/2026-06-19-next-01-auth-session-loading-e2e-recovery.md`。
+
+### NEXT-02 E2E 与 SSRF 质量门硬化（2026-06-19 已交付）
+
+> 核心目的：把 NEXT-01 之后仍残留的两条质量门缺口收口——旧 Demo Flow E2E 用 `expect_navigation` 等 App Router client-side route 不稳定，SSRF 公网域名测试依赖真实 DNS 在受限网络下误红——同时不降低生产 SSRF 防护与认证策略。
+
+**已交付**：
+
+- `server/tests/test_demo_flow_e2e.py` 的 `_register_via_ui` 重写为 NEXT-01 已验证路径：后端 API `/api/backend/auth/register`（409/"已存在"/"exists" 视为已存在）→ 等 `login-email` hydration + `login-submit` 可点击 → `/api/auth/csrf` + `/api/auth/callback/credentials` 直接种 httpOnly cookie → 点击 `login-submit` 兜底 → URL polling `window.location.pathname === '/dashboard'`，失败 fallback 显式 `page.goto("/dashboard")` 让服务端 `auth()` 决定接受 / redirect；`pytestmark` 改成 `[pytest.mark.e2e]` 列表风格；`_wait_for_demo_button` timeout 从 15s 提到 45s。
+- `server/tests/test_ssrf.py` 抽出 module 级 `allow_public_dns` fixture（monkeypatch `_is_url_pointing_to_internal -> False`）只在 `test_public_domain_ok` / `test_build_url_with_ssrf_check` / `test_build_url_strips_trailing_slash` / `test_build_url_with_subpath` 4 个公网域名测试上启用；新增 `test_allow_public_dns_fixture_does_not_bypass_literal_internal_ip` 双保险，确认 fixture 启用时 literal IP 仍走生产阻断；保留 `test_loopback_blocked` / `test_private_ip_blocked` / `test_link_local_blocked` / `test_cloud_metadata_blocked` / `test_build_url_rejects_internal` / `test_multicast_blocked` / `test_reserved_blocked` / `test_build_url_rejects_empty` / `test_empty_hostname` 不加 fixture。
+- **未改**生产 `server/analyzer.py` / `server/core/utils.py` SSRF 逻辑；未改 `web-next/app/{dashboard,layout,providers}` / 后端认证 / Guardrails / 数据库 schema / 部署配置。Copilot fallback `API Key`/`Base URL`、triage `data-triage-status="investigating"`、DOM forbidden sentinel 断言全部保留。
+
+**安全边界（保持不降级）**：
+
+- `_is_ssrf_safe` 阻断列表（loopback / RFC1918 / link-local / metadata / multicast / reserved）不变；`build_chat_completions_url` fail-closed 不变。
+- `allow_public_dns` fixture 仅 monkeypatch DNS helper，literal IP 仍走生产阻断（双保险测试已验证）。
+- Demo Flow E2E 仍通过 NextAuth callback + httpOnly cookie 进入 Dashboard，未禁用任何 auth check；不写 token 进 storage / DOM。
+- DOM forbidden sentinel 仍扫描 secret / stack / system prompt；Copilot fallback 与 triage 状态切换断言保留。
+
+**验证矩阵（最终）**：
+
+- `pytest server/tests/test_demo_flow_e2e.py --run-e2e` **1 passed**（`registered/demo/copilot/triage` 全部 True / `forbidden=None`）。
+- `pytest server/tests/test_auth_session_e2e.py --run-e2e` **1 passed**。
+- `pytest server/tests/test_incident_report_e2e.py --run-e2e` **1 passed**（`copy_status='已复制'`）。
+- `pytest server/tests/test_ssrf.py` **14 passed**（13 原 + 1 新增保护测试，正常解开本地 DNS 环境失败）。
+- `pytest server/tests` **333 passed, 4 skipped**（4 个 e2e 默认 skip，与 NEXT-01 基线一致）。
+- `pytest server/tests/security/llm_guardrails` **139 passed**。
+- 前端 `npm run typecheck` 0 错误 + `npm run build` 通过（`/dashboard` 43.4 kB / First Load JS 191 kB）。
+- 运行日志：`docs/runs/2026-06-19-next-02-e2e-and-ssrf-quality-gate-hardening.md`。
+
+
 ### M3-06 测试与安全质量门收口（2026-06-18 已交付）
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
