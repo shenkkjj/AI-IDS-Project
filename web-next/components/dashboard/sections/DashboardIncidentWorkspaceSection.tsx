@@ -12,7 +12,7 @@ export default function DashboardIncidentWorkspaceSection({
   incidents,
 }: DashboardIncidentWorkspaceSectionProps) {
   return (
-    <div className="mt-14" data-testid="dashboard-section-incidents">
+    <div className="mt-8 sm:mt-14" data-testid="dashboard-section-incidents">
       <SectionHeading
         index="§ 03.7"
         title="安全事件 / 案件工作台"

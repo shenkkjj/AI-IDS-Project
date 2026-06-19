@@ -12,7 +12,7 @@ export default function DashboardBriefingSection({
   alerts,
 }: DashboardBriefingSectionProps) {
   return (
-    <div className="mt-14" data-testid="dashboard-section-briefing">
+    <div className="mt-8 sm:mt-14" data-testid="dashboard-section-briefing">
       <SectionHeading
         index="§ 00"
         title="日 / 周安全简报"

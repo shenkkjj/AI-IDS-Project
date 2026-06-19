@@ -129,8 +129,8 @@ export default function SystemStatusBar({
       </div>
 
       {/* 移动端 tab */}
-      <div className="md:hidden border-t border-line-subtle overflow-x-auto">
-        <div className="flex gap-4 px-4 py-2 min-w-max">
+      <div className="md:hidden border-t border-line-subtle overflow-x-auto overscroll-x-contain">
+        <div className="flex gap-3 px-4 py-2 min-w-max">
           {DASHBOARD_NAV_ITEMS.map((item) => {
             const active = route === item.key;
             return (
@@ -140,7 +140,7 @@ export default function SystemStatusBar({
                 data-dashboard-route={item.key}
                 aria-current={active ? "page" : undefined}
                 onClick={() => onChangeRoute(item.key)}
-                className={`text-[10px] font-mono uppercase tracking-[0.15em] transition-colors flex items-center gap-1.5 whitespace-nowrap ${
+                className={`text-[10px] font-mono uppercase tracking-[0.08em] transition-colors flex items-center gap-1 whitespace-nowrap ${
                   active ? "text-accent" : "text-ink-secondary"
                 }`}
               >

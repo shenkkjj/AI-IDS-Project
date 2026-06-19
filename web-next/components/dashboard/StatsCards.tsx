@@ -78,25 +78,28 @@ export default function StatsCards({ stats }: StatsCardsProps) {
   ];
 
   return (
-    <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-line border border-line">
+    <div
+      className="grid grid-cols-2 md:grid-cols-4 gap-px bg-line border border-line"
+      data-testid="stats-card-grid"
+    >
       {cards.map((card, index) => (
         <div
           key={card.label}
-          className="bg-bg-raised p-6 sm:p-8"
+          className="bg-bg-raised p-4 sm:p-6 md:p-8 min-h-[118px] sm:min-h-[132px] md:min-h-0"
           style={{
             animation: `fade-soft 320ms ${index * 60}ms cubic-bezier(0.16, 1, 0.3, 1) both`,
           }}
         >
-          <div className="flex items-baseline justify-between mb-6">
+          <div className="flex items-baseline justify-between mb-4 sm:mb-6 gap-3">
             <span className="text-[10px] font-mono uppercase tracking-[0.2em] text-ink-tertiary">
               {card.index}
             </span>
-            <span className="text-[10px] font-mono uppercase tracking-[0.15em] text-ink-tertiary">
+            <span className="text-[10px] font-mono uppercase tracking-[0.12em] sm:tracking-[0.15em] text-ink-tertiary text-right break-words">
               {card.label}
             </span>
           </div>
           <div
-            className={`font-display text-3xl sm:text-4xl md:text-5xl tracking-tight tabular-nums leading-none ${
+            className={`font-display text-2xl sm:text-3xl md:text-5xl tracking-tight tabular-nums leading-none break-words ${
               card.tone === "danger"
                 ? "text-danger"
                 : card.tone === "warning"
