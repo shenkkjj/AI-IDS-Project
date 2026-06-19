@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import { auth } from "@/lib/auth";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -23,7 +24,12 @@ export const viewport: Viewport = {
   maximumScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+// NEXT-01: 在 Server Component 里用 auth() 解析当前 session, 透传给
+// Providers -> SessionProvider 的 session prop. 这避免了 next-auth 5 beta +
+// Next.js 15 dev mode 下 useSession() 永远卡在 status='loading' 的阻塞.
+// 这会让 root layout 动态化, 但本应用是登录态 SOC 控制台, 可以接受.
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const session = await auth();
   return (
     <html lang="zh-CN" className="light">
       <head>
@@ -37,7 +43,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="apple-touch-icon" href="/icon-192.png" />
       </head>
       <body className="min-h-screen bg-bg text-ink font-sans antialiased">
-        <Providers>{children}</Providers>
+        <Providers session={session}>{children}</Providers>
         <script
           // Register the service worker for PWA support. Failed registration
           // (e.g. private mode, unsupported browser) is silently ignored.

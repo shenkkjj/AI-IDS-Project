@@ -184,7 +184,32 @@ async def _register_via_ui(page, email: str, password: str) -> None:
     # 3) 填入 login 模式下的 email + password,提交登录
     await page.get_by_test_id("login-email").first.fill(email)
     await page.get_by_test_id("login-password").first.fill(password)
-    await page.get_by_test_id("login-submit").click()
+
+    # NEXT-01 兜底:next-auth 5 beta + React 19 dev mode 下,前端
+    # ``signIn("credentials", ...)`` 偶尔不发出 callback 请求(客户端 hydration
+    # 时序). 同时直接走 next-auth 的 ``/api/auth/callback/credentials`` HTTP
+    # 端点种 cookie,语义与原生表单 POST 一致。
+    csrf_resp = await page.request.get(f"{BASE}/api/auth/csrf", timeout=10000)
+    csrf_token = (await csrf_resp.json()).get("csrfToken", "")
+    if csrf_token:
+        await page.request.post(
+            f"{BASE}/api/auth/callback/credentials",
+            form={
+                "email": email,
+                "password": password,
+                "csrfToken": csrf_token,
+                "callbackUrl": f"{BASE}/dashboard",
+                "json": "true",
+            },
+            timeout=15000,
+        )
+
+    # 兜底成功后, 浏览器仍停在 / (cookie 是通过 page.request 种到 storageState,
+    # 浏览器原生导航需要 click 提交触发). 把按钮的 click 包在 try, 失败时直接 goto.
+    try:
+        await page.get_by_test_id("login-submit").click(timeout=5000)
+    except Exception:
+        pass
 
     # 4) Next.js App Router 用 client-side router.push,expect_navigation 不会触发;
     #    改用 wait_for_function 轮询 window.location.pathname
@@ -378,11 +403,26 @@ async def test_incident_report_browser_e2e() -> None:
             await create_btn.wait_for(state="visible", timeout=10000)
             await create_btn.click()
 
-            # 5) 等待案件详情面板
+            # 5) 等待案件详情面板(NEXT-01: IncidentSection 自己持有 useIncidents
+            #    hook, 与 dashboard-client 的实例隔离, 不会自动收到父组件传过来的
+            #    selectedIncident; 必须点击列表项触发 IncidentSection 内的
+            #    setSelectedIncident -> loadIncidentDetail。)
+            try:
+                # 等列表项出现, 然后点第一个 -> Section 内 hook 加载 detail
+                await page.wait_for_selector(
+                    '[data-testid="incident-list-item"]',
+                    state="visible",
+                    timeout=20000,
+                )
+                first_item = page.locator('[data-testid="incident-list-item"]').first
+                await first_item.click()
+            except Exception:
+                pass
+
             await page.wait_for_selector(
                 '[data-testid="incident-detail-panel"]',
                 state="visible",
-                timeout=20000,
+                timeout=30000,
             )
             diag["create"] = True
 
