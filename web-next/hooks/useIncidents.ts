@@ -496,3 +496,10 @@ export function useIncidents() {
     setSelectedIncident,
   };
 }
+
+/**
+ * M3-09: useIncidents() 的返回类型,供 dashboard-client.tsx 父层创建实例后,
+ * 通过 props 传给 IncidentSection,让案件列表 / selected / detail / 报告导出
+ * 共享同一份 state,避免双 hook race(必须点击列表项才能拿到 detail)。
+ */
+export type IncidentsController = ReturnType<typeof useIncidents>;

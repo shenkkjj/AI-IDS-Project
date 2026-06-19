@@ -1,22 +1,22 @@
 "use client";
 
 import { useEffect } from "react";
-import { useIncidents } from "@/hooks/useIncidents";
+import type { IncidentsController } from "@/hooks/useIncidents";
 import IncidentList from "./IncidentList";
 import IncidentDetailPanel from "./IncidentDetailPanel";
 import StatusView from "./StatusView";
 import type { IncidentSeverity, IncidentStatus } from "@/types/incident";
 
 /**
- * 安全事件 / 案件工作台 (M3-04)。
+ * 安全事件 / 案件工作台 (M3-04, M3-09 单一事实源版本)。
  *
- * 设计要点:
- * - 紧凑工作台布局,不做营销页;第一屏可操作。
- * - 左侧列表 + 右侧详情;选中后展示 timeline / linked alerts。
- * - 上方筛选 + 刷新按钮。
- * - 不展示后端 stack trace;错误走低调 StatusView。
+ * M3-09: incident state 由 dashboard-client.tsx 父层持有(`useIncidents()`),
+ * 通过 props 注入,确保从告警创建案件后,列表 / selectedIncident / detail /
+ * 报告导出共享同一份 state,不再需要 E2E 点击 incident-list-item 兜底。
  */
 export interface IncidentSectionProps {
+  /** 父层共享的 incidents controller(必传)。 */
+  incidents: IncidentsController;
   /** 起始选中的 incident_id(由父组件控制,如从告警详情跳转) */
   initialIncidentId?: string | null;
   /** "创建案件"快捷入口的回调,父组件可提供"从选中告警创建"的能力 */
@@ -33,25 +33,36 @@ export interface IncidentSectionProps {
 }
 
 export default function IncidentSection({
+  incidents,
   initialIncidentId,
   renderCreateShortcut,
 }: IncidentSectionProps) {
-  const incidents = useIncidents();
-
-  // 初次进入加载列表
+  // 初次进入加载列表(父层可能已经创建过案件并乐观写入 incidentItems,
+  // 这里仍刷新以保持服务端一致)。
   useEffect(() => {
     void incidents.loadIncidents({ limit: 50 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // 选中 / 切换 incident 时加载 detail
+  // 选中 / 切换 incident 时加载 detail。
+  // M3-09: 已经 ready 且 id 一致时跳过,避免重复拉取造成闪烁。
   useEffect(() => {
     const id = incidents.selectedIncident?.incident_id || initialIncidentId;
-    if (id) {
-      void incidents.loadIncidentDetail(id, { eventLimit: 20 });
+    if (!id) return;
+    if (
+      incidents.detail?.incident.incident_id === id &&
+      incidents.detailState === "ready"
+    ) {
+      return;
     }
+    void incidents.loadIncidentDetail(id, { eventLimit: 20 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incidents.selectedIncident?.incident_id, initialIncidentId]);
+  }, [
+    incidents.selectedIncident?.incident_id,
+    initialIncidentId,
+    incidents.detail?.incident.incident_id,
+    incidents.detailState,
+  ]);
 
   return (
     <div

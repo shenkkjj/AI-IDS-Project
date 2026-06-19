@@ -465,7 +465,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
                 description="把分散告警归并为可追踪案件,推进处置状态、记录备注并保留脱敏审计时间线。"
               />
               <div className="p-6 bg-bg-raised border-l border-accent rounded-md">
-                <IncidentSection />
+                <IncidentSection incidents={incidentsCtx} />
               </div>
             </div>
           )}
