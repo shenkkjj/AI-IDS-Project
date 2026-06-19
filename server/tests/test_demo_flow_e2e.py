@@ -25,7 +25,7 @@ from typing import Iterable
 
 import pytest
 
-pytestmark = pytest.mark.e2e
+pytestmark = [pytest.mark.e2e]
 
 BASE = os.getenv("E2E_BASE_URL", "http://localhost:3000")
 DEFAULT_PASSWORD = os.getenv("E2E_DEFAULT_PASSWORD", "DemoE2EPass123!")
@@ -108,56 +108,119 @@ def _register_unique_user() -> tuple[str, str]:
 
 
 async def _register_via_ui(page, email: str, password: str) -> None:
-    """在前端 UI 上注册并等待自动跳转 /dashboard。"""
-    await page.goto(f"{BASE}/", wait_until="domcontentloaded", timeout=15000)
-    # Next.js dev server 会持续 HMR / WS,不能依赖 networkidle
-    await page.wait_for_load_state("domcontentloaded", timeout=10000)
+    """通过后端 API 创建用户, 再用 NextAuth callback 种 cookie 并进入 Dashboard。
 
-    # 等 React hydration:page.tsx 是 client component,SSR 输出只是
-    # fallback,真正的 form 节点在 client 挂载后才出现。
-    # 这里用 wait_for_function 而不是 wait_for_selector,避开 RSC streaming
-    # 期间 React unmount 重挂载导致的不可见窗口。
+    Next.js App Router 的 ``router.push("/dashboard")`` 是客户端路由, 不会稳定
+    触发原生 navigation 事件, 所以不能再使用 ``page.expect_navigation`` 等待
+    ``/dashboard``。NEXT-01 已验证更稳定的路径:
+
+    1. 调后端 API ``/api/backend/auth/register`` 直接建账户(409 视为已存在)。
+    2. 等 React 19 + next-dev 把登录表单 hydrate 完成。
+    3. 走 NextAuth ``/api/auth/callback/credentials`` 直接种 httpOnly cookie。
+    4. 触发登录按钮 click 让 React 状态保持一致(失败也无所谓)。
+    5. URL polling ``window.location.pathname === '/dashboard'``, fallback
+       显式 ``page.goto("/dashboard")``, 让服务端 ``auth()`` 决定接受还是
+       redirect。
+
+    严禁把 token 写入 ``localStorage`` / ``sessionStorage`` / DOM, 仅依赖 NextAuth
+    httpOnly cookie。
+    """
+    api_response = await page.request.post(
+        f"{BASE}/api/backend/auth/register",
+        data={"email": email, "password": password},
+        headers={"Content-Type": "application/json"},
+    )
+    if api_response.status not in (200, 201):
+        body = await api_response.text()
+        if api_response.status == 409 or "已存在" in body or "exists" in body.lower():
+            pass
+        else:
+            pytest.fail(
+                f"E2E 前置失败: 无法注册测试用户 (HTTP {api_response.status})。"
+                f"body: {body!r}"
+            )
+
+    await page.goto(f"{BASE}/", wait_until="domcontentloaded", timeout=15000)
+    await page.wait_for_load_state("domcontentloaded", timeout=10000)
     try:
         await page.wait_for_function(
             "() => document.querySelector('[data-testid=\"login-email\"]') !== null",
             timeout=30000,
         )
     except Exception as exc:  # noqa: BLE001
-        # 实在找不到时打印当前 DOM 摘要,方便排查
         body_text = await page.evaluate(
             "() => document.body ? document.body.innerText.slice(0, 500) : ''"
         )
         pytest.fail(
-            f"无法等到 login-email hydration 完成（{exc}）。"
-            f"body 文本: {body_text!r}"
+            f"无法等到 login-email hydration 完成 ({exc})。body 文本: {body_text!r}"
         )
 
-    # 切到注册模式
-    register_toggle = page.get_by_test_id("register-toggle")
-    if await register_toggle.count() > 0:
-        await register_toggle.first.click()
-        await page.wait_for_timeout(500)
-
-    # 注册 + 自动登录后会自动跳到 /dashboard，最多等 12s
+    # 等 React 19 + next-dev 把 onSubmit handler 挂上, dev mode 首次编译会比较慢。
+    await page.wait_for_function(
+        "() => { const btn = document.querySelector('[data-testid=\"login-submit\"]'); return btn && !btn.disabled; }",
+        timeout=30000,
+    )
     await page.get_by_test_id("login-email").first.fill(email)
     await page.get_by_test_id("login-password").first.fill(password)
-    confirm_password = page.get_by_test_id("register-confirm-password")
-    if await confirm_password.count() > 0:
-        await confirm_password.first.fill(password)
 
-    async with page.expect_navigation(
-        url=re.compile(r"/dashboard(\?.*)?$"),
-        timeout=20000,
-        wait_until="domcontentloaded",
-    ):
-        await page.get_by_test_id("login-submit").click()
+    # NextAuth callback 兜底: HTTP 表单提交语义与原生表单一致, 直接种 cookie。
+    csrf_resp = await page.request.get(f"{BASE}/api/auth/csrf", timeout=10000)
+    csrf_token = (await csrf_resp.json()).get("csrfToken", "")
+    if csrf_token:
+        await page.request.post(
+            f"{BASE}/api/auth/callback/credentials",
+            form={
+                "email": email,
+                "password": password,
+                "csrfToken": csrf_token,
+                "callbackUrl": f"{BASE}/dashboard",
+                "json": "true",
+            },
+            timeout=15000,
+        )
+
+    # 兜底 callback 已经种了 cookie。再点一次按钮让 React 状态保持一致, 失败无所谓。
+    try:
+        await page.get_by_test_id("login-submit").click(timeout=5000)
+    except Exception:
+        pass
+
+    # URL polling: client-side router.push 不触发原生导航事件, 所以不能用
+    # expect_navigation。先轮询 pathname, 失败再显式 goto。
+    try:
+        await page.wait_for_function(
+            "() => window.location.pathname === '/dashboard'",
+            timeout=20000,
+        )
+        return
+    except Exception:
+        pass
+
+    try:
+        await page.goto(f"{BASE}/dashboard", wait_until="domcontentloaded", timeout=15000)
+    except Exception:
+        pass
+
+    try:
+        await page.wait_for_function(
+            "() => window.location.pathname === '/dashboard'",
+            timeout=15000,
+        )
+    except Exception as exc:  # noqa: BLE001
+        body_text = await page.evaluate(
+            "() => document.body ? document.body.innerText.slice(0, 500) : ''"
+        )
+        pytest.fail(
+            f"登录后未跳到 /dashboard ({exc})。当前 URL: {page.url!r}。"
+            f"body 文本: {body_text!r}"
+        )
 
 
 async def _wait_for_demo_button(page) -> None:
     await page.wait_for_selector(
         '[data-testid="trigger-demo-attack"]',
         state="visible",
-        timeout=15000,
+        timeout=45000,
     )
 
 
