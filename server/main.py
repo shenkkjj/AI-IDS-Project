@@ -40,6 +40,7 @@ from server.routers import (  # noqa: E402
     compliance_router,
     copilot_router,
     export_router,
+    incidents_router,
     llm_router,
     logs_router,
     metrics_router,
