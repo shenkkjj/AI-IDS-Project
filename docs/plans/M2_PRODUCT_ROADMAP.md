@@ -34,7 +34,8 @@ AI-CyberSentinel 当前已经具备一个可演示的安全闭环：
    - Docker Compose 可 build，但数据库、迁移、生产 env、nginx allowlist、MCP key、metrics 暴露边界还没有端到端验收。
 
 4. 前端大组件风险：
-   - `web-next/app/page.tsx` 和 `web-next/app/dashboard/dashboard-client.tsx` 偏大，后续 agent 改状态容易误伤。
+   - `web-next/app/page.tsx` 仍偏大。
+   - `web-next/app/dashboard/dashboard-client.tsx` 已在 M3-10 从 840 行降到 406 行，并把 route JSX 拆到 section 组件；后续风险主要是 section 响应式 QA、可访问性和浏览器截图证据不足。
 
 5. E2E 仍是可选：
    - 默认 pytest 跳过 Playwright E2E。
@@ -454,6 +455,48 @@ M2 完成时，项目应满足：
 - `pytest server/tests/security/llm_guardrails` **139 passed**。
 - 前端 `npm run typecheck` 0 错误 + `npm run build` 通过（`/dashboard` 43.4 kB / First Load JS 191 kB）。
 - 运行日志：`docs/runs/2026-06-19-next-02-e2e-and-ssrf-quality-gate-hardening.md`。
+
+### M3-09 案件状态单一事实源与 E2E 韧性（2026-06-19 已交付）
+
+> 核心目的：消除 `IncidentSection` 与 `dashboard-client.tsx` 各自独立 `useIncidents()` 带来的案件详情 race，并让多条浏览器 E2E 连续运行不再依赖重启 dev server 解锁注册限流。
+
+**已交付**：
+
+- `web-next/hooks/useIncidents.ts` 导出 `IncidentsController = ReturnType<typeof useIncidents>` 类型；`IncidentSection` 改为接收 `incidents` props，内部不再创建第二个 `useIncidents()` 实例。
+- `dashboard-client.tsx` 将父层 `incidentsCtx` 注入 `IncidentSection`，从告警创建案件后列表、selectedIncident、detail、复制/下载报告共享同一 state。
+- 新增 `server/tests/e2e_helpers.py` 与 `server/tests/test_e2e_helpers.py`，复用注册、NextAuth callback、稳定账号 fallback 和 dashboard URL 验收；Auth/Demo/Incident 三条 E2E 删除重复 helper。
+- 未改生产注册限流、后端 auth/token/cookie 语义、Guardrails、SSRF、DB schema。
+
+**验证矩阵（最终）**：
+
+- `pytest server/tests/test_e2e_helpers.py` **9 passed**。
+- Auth/Demo/Incident 三条连续 E2E **3 passed in 20.83s**。
+- `pytest server/tests` **342 passed, 4 skipped**。
+- `pytest server/tests/security/llm_guardrails` **139 passed**。
+- 前端 `npm run typecheck` 0 错误 + `npm run build` 通过（`/dashboard` 43.4 kB / First Load JS 191 kB）。
+- 运行日志：`docs/runs/2026-06-19-m3-09-incident-state-and-e2e-resilience.md`。
+
+### M3-10 Dashboard route composition（2026-06-19 已交付）
+
+> 核心目的：在不改业务语义、不碰认证/Guardrails/SSRF/DB schema 的前提下，把 Dashboard route 渲染大文件收口成“父层 controller 编排 + section 组件 props 渲染 + 单一路由元数据”。
+
+**已交付**：
+
+- 新增 `web-next/constants/dashboardRoutes.ts`，统一 `overview / monitor / incidents / waf / ai / report` 的 label、index、description 和导航项。
+- `SystemStatusBar.tsx` 改读 `DASHBOARD_NAV_ITEMS`，桌面与移动导航都包含 `incidents` 一等入口，并补 `data-testid` / `data-dashboard-route` / `aria-current`。
+- 新增 `SectionHeading` / `DashboardFields` / `DashboardRows` 与 `web-next/components/dashboard/sections/*.tsx`；`dashboard-client.tsx` 从 840 行降到 406 行，只保留 hook/controller、handler 和 route 组合。
+- 父层继续持有 `useAlerts` / `useConfig` / `useCopilot` / `useTerminal` / `useReport` / `useSiteHealth` / `useSecurityTimeline` / `useThreatConfirm` / `useIncidents`；section 组件只接收 props，未重新创建 `useIncidents()` / `useAlerts()` 等业务 hook。
+- 新增 `server/tests/test_dashboard_route_sections_e2e.py`，先跑出目标 RED（缺少 `dashboard-section-stats` wrapper），再 GREEN 锁住六个 route tab 与核心 section wrapper。
+- 未改认证/授权、Guardrails、SSRF、DB schema、后端 API、npm 依赖；未提交 `.coverage` / env / DB / 密钥。
+
+**验证矩阵（最终）**：
+
+- Dashboard route E2E **1 passed**。
+- Auth/Demo/Incident/Dashboard 四条连续 E2E **4 passed in 32.46s**。
+- `pytest server/tests` **342 passed, 5 skipped, 17 warnings**。
+- `pytest server/tests/security/llm_guardrails` **139 passed, 17 warnings**。
+- 前端 `npm run typecheck` 0 错误 + `npm run build` 通过（`/dashboard` 44 kB / First Load JS 191 kB）。
+- 运行日志：`docs/runs/2026-06-19-m3-10-dashboard-route-composition.md`。
 
 
 ### M3-06 测试与安全质量门收口（2026-06-18 已交付）
