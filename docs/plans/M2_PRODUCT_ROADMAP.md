@@ -383,6 +383,32 @@ M2 完成时，项目应满足：
 - **当前不做**：跨用户案件共享 / SOC 协作会话 / Copilot 案件对话历史持久化 / LLM 端 incident 子文档检索。
 - 运行日志：`docs/runs/2026-06-18-m3-05-incident-aware-copilot-contract.md`。
 
+### M3-08 案件报告浏览器验收与 Agent 文档归档（2026-06-18 已交付 / E2E dev 环境阻塞）
+
+> 核心目的：把 M3-07 报告导出从后端契约 / 前端构建推进到真实浏览器级验收；同时收口 M3-07 任务文档未入库问题。
+
+**已交付**：
+
+- `server/tests/test_incident_report_e2e.py` Playwright 真实浏览器 E2E（默认 `pytest server/tests` 跳过；`--run-e2e` 显式触发）：唯一邮箱 → 后端 API 预 register → UI login → 触发 Demo 攻击 → 点击告警 → 创建案件 → 等待 `incident-detail-panel` → 点击"下载报告"（`expect_download` + `accept_downloads=True`）→ 读取 markdown 真实文件内容 → 验证 4 段固定结构（`# 案件证据报告` / `## 1. 案件摘要` / `## 2. 关联告警` / `## 3. 案件时间线` / `## 4. 安全与脱敏说明`） + `payload_length` / `payload_preview` 字段 → 12 条 forbidden sentinel（`sk-` / `sk-proj-` / `AKIA` / `ghp_` / `xox` / `PRIVATE KEY` / `Traceback` / `ignore previous instructions` / `disregard system prompt` / `forget instructions` / `system:` / `developer:`）→ 点击"复制报告" → 验证 `incident-report-status` 命中 `已复制` / `复制失败` / `报告生成失败` / `已下载` / `下载失败` 任一降级 marker → 整页 DOM 扫描 forbidden 文本。`pytestmark = [pytest.mark.e2e]` + `@pytest.mark.e2e` 显式双层 marker（pytest 9 + module-level pytestmark 合并规则兼容）。
+- 最小后端修复 1 行：`server/main.py:36-51` `from server.routers import (...)` 漏导 `incidents_router`（M3-04 commit 引入时的回归，本任务首次启动 dev server 触发 `NameError: name 'incidents_router' is not defined`）。修复后 uvicorn 启动正常。
+- 文档收口：M3-07 / M3-08 任务文档入库；`UNATTENDED_LONG_TASKS.md` M3-08 条目更新为"已交付"；推荐启动口令更新为下一条 NEXT-01 工单（修 next-auth 5 beta dev mode `useSession` 永 loading 阻塞）。
+
+**E2E 阻塞摘要**（按 M3-08 任务 §15 处理）：
+
+- **现状**：`pytest server/tests` 默认 1 skipped（E2E 不跑）；`--run-e2e` 显式触发时，E2E 在 dashboard 客户端"创建案件"之前 fail（`wait_for_selector('[data-testid="trigger-demo-attack"]')` 45s 超时）。
+- **根因**：next-auth 5.0.0-beta.30 + Next.js 15 dev mode 下，`useSession()` 在 dashboard 客户端 `status` 永为 `loading`；`/api/auth/session` 客户端 fetch 返回 200 + user，但 React 状态不同步；`SYSTEM · LOADING` 60s 不消失。
+- **不属于 M3-08 任务修复范围**：禁改认证/授权/Guardrails（§6）；`providers.tsx` / `lib/auth.ts` / `next-auth` 升级都属认证代码。
+- **影响面**：M3-04 / M3-05 / M3-07 任务都已完成，但前端案件工作台、报告导出 UI 实际**未**在真实浏览器中跑通（E2E 都 fail 在同一阻塞点）；E2E 验收缺失。
+- **下一条工单**：NEXT-01（修 `useSession` 永 loading；授权修改认证代码与升级 next-auth / Next.js）。
+
+**验证矩阵（最终）**：
+
+- `pytest server/tests` 默认基线：**332 passed, 3 skipped**（M3-07 baseline 318 + M3-07 新增 14 = 332；+1 skip = E2E 跳过；0 失败）。
+- `pytest server/tests/test_incident_report_export.py` 专项：**14 passed**。
+- `pytest server/tests/security/llm_guardrails` 专项：**139 passed**。
+- 前端 `web-next`：`npm run typecheck` 0 错误；`npm run build` 通过（`/dashboard` 43.7 kB / First Load JS 191 kB）。
+- 运行日志：`docs/runs/2026-06-18-m3-08-incident-report-browser-e2e-and-agent-docs-catchup.md`。
+
 ### M3-06 测试与安全质量门收口（2026-06-18 已交付）
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
