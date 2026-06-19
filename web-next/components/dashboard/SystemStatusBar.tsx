@@ -2,6 +2,7 @@
 
 import { Bell, LogOut, Moon, Sun } from "lucide-react";
 import { signOut } from "next-auth/react";
+import { DASHBOARD_NAV_ITEMS } from "@/constants/dashboardRoutes";
 import { useTheme } from "@/contexts/ThemeContext";
 import { useDesktopNotify } from "@/hooks/useDesktopNotify";
 import type { RouteKey } from "@/types/route";
@@ -29,14 +30,6 @@ export interface SystemStatusBarProps {
   pageFocus: "ALL SYSTEMS" | "FOCUSED VIEW";
 }
 
-const NAV_ITEMS: { key: RouteKey; label: string; index: string }[] = [
-  { key: "overview", label: "概览", index: "01" },
-  { key: "monitor", label: "监测", index: "02" },
-  { key: "waf", label: "WAF 管理", index: "03" },
-  { key: "ai", label: "AI 配置", index: "04" },
-  { key: "report", label: "安全日报", index: "05" },
-];
-
 export default function SystemStatusBar({
   userEmail,
   wsConnected,
@@ -62,11 +55,14 @@ export default function SystemStatusBar({
             </span>
           </div>
           <nav className="hidden md:flex items-center gap-5">
-            {NAV_ITEMS.map((item) => {
+            {DASHBOARD_NAV_ITEMS.map((item) => {
               const active = route === item.key;
               return (
                 <button
                   key={item.key}
+                  data-testid={`dashboard-route-desktop-${item.key}`}
+                  data-dashboard-route={item.key}
+                  aria-current={active ? "page" : undefined}
                   onClick={() => onChangeRoute(item.key)}
                   className={`text-xs font-mono uppercase tracking-[0.1em] transition-colors flex items-center gap-1.5 ${
                     active ? "text-accent" : "text-ink-secondary hover:text-ink"
@@ -131,11 +127,14 @@ export default function SystemStatusBar({
       {/* 移动端 tab */}
       <div className="md:hidden border-t border-line-subtle overflow-x-auto">
         <div className="flex gap-4 px-4 py-2 min-w-max">
-          {NAV_ITEMS.map((item) => {
+          {DASHBOARD_NAV_ITEMS.map((item) => {
             const active = route === item.key;
             return (
               <button
                 key={item.key}
+                data-testid={`dashboard-route-mobile-${item.key}`}
+                data-dashboard-route={item.key}
+                aria-current={active ? "page" : undefined}
                 onClick={() => onChangeRoute(item.key)}
                 className={`text-[10px] font-mono uppercase tracking-[0.15em] transition-colors flex items-center gap-1.5 whitespace-nowrap ${
                   active ? "text-accent" : "text-ink-secondary"
