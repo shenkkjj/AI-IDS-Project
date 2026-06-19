@@ -107,6 +107,8 @@ export default function CopilotPanel({
             type="submit"
             disabled={loading || !draft.trim()}
             className="text-accent hover:text-accent-hover disabled:opacity-30 transition-colors p-1"
+            title="发送给 Copilot"
+            aria-label="发送给 Copilot"
           >
             <Send className="w-3.5 h-3.5" />
           </button>

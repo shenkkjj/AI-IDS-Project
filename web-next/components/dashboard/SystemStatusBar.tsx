@@ -98,6 +98,7 @@ export default function SystemStatusBar({
             onClick={() => void requestPermission()}
             className="p-1.5 text-ink-secondary hover:text-ink transition-colors"
             title="启用桌面通知"
+            aria-label="启用桌面通知"
             type="button"
           >
             <Bell className="w-3.5 h-3.5" />
@@ -105,6 +106,8 @@ export default function SystemStatusBar({
           <button
             onClick={toggleTheme}
             className="p-1.5 text-ink-secondary hover:text-ink transition-colors"
+            title={theme === "light" ? "切换为深色主题" : "切换为浅色主题"}
+            aria-label={theme === "light" ? "切换为深色主题" : "切换为浅色主题"}
             type="button"
           >
             {theme === "light" ? <Moon className="w-3.5 h-3.5" /> : <Sun className="w-3.5 h-3.5" />}
@@ -117,6 +120,7 @@ export default function SystemStatusBar({
             onClick={() => signOut({ callbackUrl: "/" })}
             className="p-1.5 text-ink-secondary hover:text-danger transition-colors"
             title="退出登录"
+            aria-label="退出登录"
             type="button"
           >
             <LogOut className="w-3.5 h-3.5" />
