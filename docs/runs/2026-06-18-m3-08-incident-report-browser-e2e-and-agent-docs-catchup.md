@@ -172,29 +172,39 @@ NameError: name 'incidents_router' is not defined
 - ✅ `PRODUCT.md` 第 15 条 M3-08 已交付条目（E2E dev 环境阻塞摘要 + 质量门 + 下一条工单 NEXT-01）。
 - ✅ `docs/runs/2026-06-18-m3-08-incident-report-browser-e2e-and-agent-docs-catchup.md`（本 run log）。
 
-### 阶段 9：精确 stage + commit + push ✅
+### 阶段 9：精确 stage + commit + push ✅（本地完成；push 阻塞）
 
-精确 stage（不用 `git add .`）：
+4 个 commit 精确 stage（不用 `git add .`）：
 
-```text
-test(e2e): 覆盖案件报告浏览器验收
-- server/tests/test_incident_report_e2e.py
+1. `efd78e4 test(e2e): 覆盖案件报告浏览器验收` — `server/tests/test_incident_report_e2e.py`（1 file, 447 insertions）
+2. `bd2cdf9 fix(incidents): 补回 main.py 的 incidents_router import` — `server/main.py`（1 file, 1 insertion）
+3. `69715cc docs(agent): 归档 M3-07 与 M3-08 长任务` — 3 个 agent 文件（3 files, 1293 insertions, 1 deletion）
+4. `0e5cb74 docs(incidents): 记录案件报告浏览器验收` — run log + PRODUCT + ROADMAP（3 files, 273 insertions）
 
-fix(incidents): 补回 main.py 的 incidents_router import
-- server/main.py
+**Push 阻塞**（按任务 §18）：
 
-docs(agent): 归档 M3-07 与 M3-08 长任务
-- docs/agent/M3_07_INCIDENT_EVIDENCE_REPORT_EXPORT_TASK.md
-- docs/agent/M3_08_INCIDENT_REPORT_BROWSER_E2E_AND_AGENT_DOCS_CATCHUP_TASK.md
-- docs/agent/UNATTENDED_LONG_TASKS.md
-
-docs(incidents): 记录案件报告浏览器验收
-- docs/runs/2026-06-18-m3-08-incident-report-browser-e2e-and-agent-docs-catchup.md
-- PRODUCT.md
-- docs/plans/M2_PRODUCT_ROADMAP.md
-```
+- `git push origin main` 第一次：`fatal: unable to access 'https://github.com/shenkkjj/AI-IDS-Project.git/': schannel: server closed abruptly (missing close_notify)`
+- 重试 1（同命令）：同上 schannel 错误
+- 重试 2（sleep 10s 后）：`fatal: schannel: failed to receive handshake, SSL/TLS connection failed`
+- 重试 3（sleep 30s 后）：同上 SSL/TLS 错误
+- **结论**：本地 4 个 commit 全部完成，**push 至 `origin/main` 因 GitHub TLS / DNS 间歇性网络阻塞未成功**。按任务 §18 规则"不要反复无限重试。最多重试 3 次"已用尽。提交本身完整且可审查，下次网络恢复后 `git push origin main` 即可。
 
 禁提交文件检查（任务 §6 / §18）：
+
+- `.coverage` modified 但 **未 stage**
+- `.claude/settings.local.json` 不存在 / 未 stage
+- 真实 `.env` / `data/*.db` / 证书 / 私钥 / token **未 stage**
+- `server/security/**` 无 diff
+- `docker-compose.yml` / `nginx/**` 无 diff
+- Alembic migration 无 diff
+
+## 7. 提交与推送
+
+- commit 1：`efd78e4 test(e2e): 覆盖案件报告浏览器验收`
+- commit 2：`bd2cdf9 fix(incidents): 补回 main.py 的 incidents_router import`
+- commit 3：`69715cc docs(agent): 归档 M3-07 与 M3-08 长任务`
+- commit 4：`0e5cb74 docs(incidents): 记录案件报告浏览器验收`
+- push：**阻塞**（3 次重试均 schannel SSL/TLS 错误）。本地完成，push 待网络恢复后重试。
 
 - `.coverage` modified 但 **未 stage**
 - `.claude/settings.local.json` 不存在 / 未 stage
