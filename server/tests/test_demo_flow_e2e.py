@@ -19,16 +19,18 @@ from __future__ import annotations
 
 import os
 import re
-import time
-from importlib.util import find_spec
-from typing import Iterable
 
 import pytest
+
+from server.tests.e2e_helpers import (
+    assert_dev_server_reachable,
+    register_or_login_for_e2e,
+    skip_without_playwright,
+)
 
 pytestmark = [pytest.mark.e2e]
 
 BASE = os.getenv("E2E_BASE_URL", "http://localhost:3000")
-DEFAULT_PASSWORD = os.getenv("E2E_DEFAULT_PASSWORD", "DemoE2EPass123!")
 
 # 任何真密钥、stack trace、Guardrails L1 regex 都不应出现在用户可见 DOM
 # 中（security review SC-2 / SC-4）。这些是 sanity sentinel —— 命中即 fail。
@@ -44,37 +46,6 @@ _FORBIDDEN_DOM_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bsystem\s*:\s*", re.IGNORECASE),
     re.compile(r"PRIVATE\s+KEY", re.IGNORECASE),
 )
-
-
-def _skip_without_playwright() -> None:
-    if find_spec("playwright") is None:
-        pytest.skip(
-            "未安装 playwright。运行 `pip install playwright && "
-            "playwright install chromium` 后加 --run-e2e 显式执行。"
-        )
-
-
-async def _assert_dev_server_reachable(page) -> None:
-    """在浏览器上下文中探测 Next.js API 代理，确保前后端都已就绪。
-
-    失败信息明确指向：需要先启动 dev server。
-    """
-    try:
-        response = await page.request.get(f"{BASE}/api/backend/health", timeout=5000)
-    except Exception as exc:  # noqa: BLE001
-        pytest.fail(
-            f"E2E 前置失败：无法连到 {BASE}/api/backend/health。"
-            f"请先启动后端 (:8000) 和前端 (:3000) dev server：\n"
-            f"  1) ./.venv/Scripts/python.exe -m uvicorn server.main:app --port 8000\n"
-            f"  2) cd web-next && npm run dev\n"
-            f"原始错误：{exc}"
-        )
-
-    if response.status != 200:
-        pytest.fail(
-            f"E2E 前置失败：{BASE}/api/backend/health 返回 {response.status}。"
-            f"请确认后端 dev server 正在 :8000 运行。"
-        )
 
 
 async def _collect_visible_text(page) -> str:
@@ -100,122 +71,6 @@ def _contains_forbidden(text: str) -> str | None:
     return None
 
 
-def _register_unique_user() -> tuple[str, str]:
-    """生成时间戳邮箱，确保测试可重入。"""
-    ts = int(time.time() * 1000)
-    email = f"e2e-demo-{ts}@example.com"
-    return email, DEFAULT_PASSWORD
-
-
-async def _register_via_ui(page, email: str, password: str) -> None:
-    """通过后端 API 创建用户, 再用 NextAuth callback 种 cookie 并进入 Dashboard。
-
-    Next.js App Router 的 ``router.push("/dashboard")`` 是客户端路由, 不会稳定
-    触发原生 navigation 事件, 所以不能再使用 ``page.expect_navigation`` 等待
-    ``/dashboard``。NEXT-01 已验证更稳定的路径:
-
-    1. 调后端 API ``/api/backend/auth/register`` 直接建账户(409 视为已存在)。
-    2. 等 React 19 + next-dev 把登录表单 hydrate 完成。
-    3. 走 NextAuth ``/api/auth/callback/credentials`` 直接种 httpOnly cookie。
-    4. 触发登录按钮 click 让 React 状态保持一致(失败也无所谓)。
-    5. URL polling ``window.location.pathname === '/dashboard'``, fallback
-       显式 ``page.goto("/dashboard")``, 让服务端 ``auth()`` 决定接受还是
-       redirect。
-
-    严禁把 token 写入 ``localStorage`` / ``sessionStorage`` / DOM, 仅依赖 NextAuth
-    httpOnly cookie。
-    """
-    api_response = await page.request.post(
-        f"{BASE}/api/backend/auth/register",
-        data={"email": email, "password": password},
-        headers={"Content-Type": "application/json"},
-    )
-    if api_response.status not in (200, 201):
-        body = await api_response.text()
-        if api_response.status == 409 or "已存在" in body or "exists" in body.lower():
-            pass
-        else:
-            pytest.fail(
-                f"E2E 前置失败: 无法注册测试用户 (HTTP {api_response.status})。"
-                f"body: {body!r}"
-            )
-
-    await page.goto(f"{BASE}/", wait_until="domcontentloaded", timeout=15000)
-    await page.wait_for_load_state("domcontentloaded", timeout=10000)
-    try:
-        await page.wait_for_function(
-            "() => document.querySelector('[data-testid=\"login-email\"]') !== null",
-            timeout=30000,
-        )
-    except Exception as exc:  # noqa: BLE001
-        body_text = await page.evaluate(
-            "() => document.body ? document.body.innerText.slice(0, 500) : ''"
-        )
-        pytest.fail(
-            f"无法等到 login-email hydration 完成 ({exc})。body 文本: {body_text!r}"
-        )
-
-    # 等 React 19 + next-dev 把 onSubmit handler 挂上, dev mode 首次编译会比较慢。
-    await page.wait_for_function(
-        "() => { const btn = document.querySelector('[data-testid=\"login-submit\"]'); return btn && !btn.disabled; }",
-        timeout=30000,
-    )
-    await page.get_by_test_id("login-email").first.fill(email)
-    await page.get_by_test_id("login-password").first.fill(password)
-
-    # NextAuth callback 兜底: HTTP 表单提交语义与原生表单一致, 直接种 cookie。
-    csrf_resp = await page.request.get(f"{BASE}/api/auth/csrf", timeout=10000)
-    csrf_token = (await csrf_resp.json()).get("csrfToken", "")
-    if csrf_token:
-        await page.request.post(
-            f"{BASE}/api/auth/callback/credentials",
-            form={
-                "email": email,
-                "password": password,
-                "csrfToken": csrf_token,
-                "callbackUrl": f"{BASE}/dashboard",
-                "json": "true",
-            },
-            timeout=15000,
-        )
-
-    # 兜底 callback 已经种了 cookie。再点一次按钮让 React 状态保持一致, 失败无所谓。
-    try:
-        await page.get_by_test_id("login-submit").click(timeout=5000)
-    except Exception:
-        pass
-
-    # URL polling: client-side router.push 不触发原生导航事件, 所以不能用
-    # expect_navigation。先轮询 pathname, 失败再显式 goto。
-    try:
-        await page.wait_for_function(
-            "() => window.location.pathname === '/dashboard'",
-            timeout=20000,
-        )
-        return
-    except Exception:
-        pass
-
-    try:
-        await page.goto(f"{BASE}/dashboard", wait_until="domcontentloaded", timeout=15000)
-    except Exception:
-        pass
-
-    try:
-        await page.wait_for_function(
-            "() => window.location.pathname === '/dashboard'",
-            timeout=15000,
-        )
-    except Exception as exc:  # noqa: BLE001
-        body_text = await page.evaluate(
-            "() => document.body ? document.body.innerText.slice(0, 500) : ''"
-        )
-        pytest.fail(
-            f"登录后未跳到 /dashboard ({exc})。当前 URL: {page.url!r}。"
-            f"body 文本: {body_text!r}"
-        )
-
-
 async def _wait_for_demo_button(page) -> None:
     await page.wait_for_selector(
         '[data-testid="trigger-demo-attack"]',
@@ -230,12 +85,11 @@ async def _run_demo_flow() -> dict:
     Returns 一个诊断字典，便于测试报告。
     """
     # 缺 playwright 必须先 skip，否则下面的 import 会抛 ModuleNotFoundError
-    _skip_without_playwright()
+    skip_without_playwright()
 
     from playwright.async_api import async_playwright
 
     diag: dict = {"registered": False, "demo": False, "copilot": False, "triage": False, "forbidden": None}
-    email, password = _register_unique_user()
 
     async with async_playwright() as p:
         launch_options = {"headless": True}
@@ -255,10 +109,12 @@ async def _run_demo_flow() -> dict:
             context = await browser.new_context(viewport={"width": 1280, "height": 800})
             page = await context.new_page()
 
-            await _assert_dev_server_reachable(page)
+            await assert_dev_server_reachable(page)
 
-            await _register_via_ui(page, email, password)
-            diag["registered"] = True
+            email, _password, register_status = await register_or_login_for_e2e(
+                page, "e2e-demo"
+            )
+            diag["registered"] = register_status in {"created", "exists"}
 
             await _wait_for_demo_button(page)
 
