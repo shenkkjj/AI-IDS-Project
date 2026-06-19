@@ -499,7 +499,50 @@ M2 完成时，项目应满足：
 - 运行日志：`docs/runs/2026-06-19-m3-10-dashboard-route-composition.md`。
 
 
-### M3-06 测试与安全质量门收口（2026-06-18 已交付）
+### M3-11 Dashboard section 响应式 QA 与可访问性收口（2026-06-19 已交付）
+
+> 核心目的：在 M3-10 已拆分 Dashboard route section 后，用真实浏览器 E2E + 必要轻量 UI/可访问性修复，收口桌面/移动响应式、按钮文字溢出、icon-only 命名、键盘可达性和 DOM forbidden sentinel；不重做视觉设计，不迁移状态管理，不改后端 / 认证 / Guardrails / SSRF / DB schema。
+
+**已交付**：
+
+- 新增 `server/tests/test_dashboard_responsive_e2e.py`（默认 skip，需 `--run-e2e`）：parametrize 桌面 1366×900 与移动 390×844 viewport，覆盖六个 Dashboard route 切换、`aria-current=page`、核心 section wrapper、整页横向溢出（`scrollWidth ≤ clientWidth + 4`）、按钮文字溢出、icon-only 按钮 `title` / `aria-label`、键盘 Tab+Enter 切换路由、forbidden sentinel（`sk-...` / `AKIA...` / `ghp_...` / `Traceback` / `ignore previous instructions` / `system:` / `developer:` / `PRIVATE KEY` 等），失败留 screenshot，成功保留 desktop/mobile overview/incidents 共 4 张截图。
+- RED 准确暴露 `SystemStatusBar.tsx` 主题切换按钮 `Moon` / `Sun` 与 `CopilotPanel.tsx` Copilot 提交按钮 `Send` 属于 icon-only 但缺 `title` / `aria-label`。
+- GREEN：`SystemStatusBar.tsx` 主题切换按钮加 `title` + `aria-label`，并把已有 `title` 的 `Bell` / `LogOut` 按钮顺手补 `aria-label`；`CopilotPanel.tsx` 提交按钮加 `title` + `aria-label`。**未触动业务语义** —— 没有改 hook、没有改 state、没有改路由、没有改 prompts、没有改 props 结构。
+- 截图证据：`docs/runs/artifacts/m3-11-dashboard-responsive/desktop-overview.png` / `desktop-incidents.png` / `mobile-overview.png` / `mobile-incidents.png` 共 168 KB（< 5 MB 限额，随 commit 提交）。
+
+**真实验证**：
+
+- `pytest server/tests/test_dashboard_responsive_e2e.py --run-e2e` **2 passed in 17.40s**（桌面 + 移动 viewport）。
+- `pytest server/tests/test_dashboard_route_sections_e2e.py --run-e2e` **1 passed**。
+- `pytest server/tests/test_auth_session_e2e.py server/tests/test_demo_flow_e2e.py server/tests/test_incident_report_e2e.py server/tests/test_dashboard_route_sections_e2e.py server/tests/test_dashboard_responsive_e2e.py --run-e2e` **6 passed in 46.64s**（重启 backend 清空 register rate limit 后；五条 E2E 实测连续通过）。
+- `pytest server/tests` **342 passed, 7 skipped, 17 warnings**（5 个 e2e + 2 既有 skip）。
+- `pytest server/tests/security/llm_guardrails` **139 passed**（0 回归）。
+- 前端 `npm run typecheck` 0 错误 + `npm run build` 通过（`/dashboard` 44 kB / First Load JS 191 kB）。
+- 运行日志：`docs/runs/2026-06-19-m3-11-dashboard-section-responsive-qa.md`。
+
+**安全边界**：
+
+- 未改 `server/services/auth_service.py` / `server/core/auth*` / `server/routers/auth*` / `server/security/**` / `server/core/state.py` / `server/core/config.py` / `server/analyzer.py` / `server/core/utils.py` / Alembic migration / DB schema。
+- 未改后端 API contract / npm 依赖 / `REGISTER_RATE_LIMIT_MAX` 等限流配置。
+- 未把 token 写进 `localStorage` / `sessionStorage` / DOM；E2E helper 仍走 httpOnly cookie path。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_dashboard_responsive_e2e.py`（新增 RED→GREEN E2E）
+- `web-next/components/dashboard/SystemStatusBar.tsx`（Moon/Sun/Bell/LogOut 按钮加 `aria-label`，主题切换补 `title`）
+- `web-next/components/dashboard/CopilotPanel.tsx`（Send 按钮加 `title` + `aria-label`）
+- `docs/runs/2026-06-19-m3-11-dashboard-section-responsive-qa.md`（本任务 run log）
+- `docs/runs/artifacts/m3-11-dashboard-responsive/{desktop,mobile}-{overview,incidents}.png`（成功截图）
+- `docs/agent/M3_11_DASHBOARD_SECTION_RESPONSIVE_QA_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-11 索引更新为"已交付"，下一条建议工单刷新）
+- `PRODUCT.md` §2.2 新增第 20 项 M3-11 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无。
+
+**当前不做**：重做视觉设计、迁移状态管理、新增后端 API、引入 PDF/DOCX、可视化埋点、performance budget 调整、bundle 拆分、Tailwind 主题重构。
+
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
