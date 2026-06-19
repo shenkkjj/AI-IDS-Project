@@ -593,9 +593,60 @@ M2 完成时，项目应满足：
 - `PRODUCT.md` §2.2 新增第 21 项 M3-12 说明
 - `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
 
-**未解决问题**：长时运行的 dev backend 中 OpenAIModerationClient httpx pool 偶发退化、moderation `check` 在 < 1.5s 内抛 exc → rail timeout 来不及触发 → fail-closed 拦截 Copilot。在 fresh backend 状态下行为正确，本任务不修。该问题需 owner 单独授权动 `server/security/llm_guardrails/**`，列入 M3-13 候选。
+**未解决问题**：长时运行的 dev backend 中 OpenAIModerationClient httpx pool 偶发退化、moderation `check` 在 < 1.5s 内抛 exc → rail timeout 来不及触发 → fail-closed 拦截 Copilot。在 fresh backend 状态下行为正确，本任务不修。该问题需 owner 单独授权动 `server/security/llm_guardrails/**`，列入后续 Guardrails 健康监控候选工单。
 
 **当前不做**：修改 Guardrails 代码（包括 moderation client 健康监控、`_init_moderation` 空 key 检测、rail timeout 调整），改 rate limit 常量，改后端 API contract，改前端业务 hook / state / 路由。
+
+
+### M3-13 Dashboard 移动 viewport 视觉 QA 收口（2026-06-19 已交付）
+
+> 核心目的：基于 M3-11 `mobile-overview.png` / `mobile-incidents.png` 截图证据，用真实浏览器 E2E 锁住移动端 stats 卡片密度、section 间距、移动 nav active tab 可见性、整页横向溢出、forbidden sentinel 与 `N` 浮层 DOM 来源；只做轻量 Tailwind/layout class 修复，不重做视觉设计，不碰认证、Guardrails、SSRF、DB schema、后端 API、npm 依赖或 rate limit 常量。
+
+**已交付**：
+
+- 新增 `server/tests/test_dashboard_mobile_visual_e2e.py`（默认 skip，需 `--run-e2e`）：覆盖 390×844 与 430×932 两个 viewport，分别检查 `overview` / `incidents` route。
+- E2E 断言 active mobile nav tab 在横向滚动容器可见区域、整页 `scrollWidth <= clientWidth + 4`、stats grid 高度不超过 viewport 42%、单卡高度不超过 160px、stats 到 briefing section 间距不超过 64px、DOM forbidden sentinel 为 `None`、形似圆形 `N` 的应用 DOM 候选 count 为 0。
+- 成功保存 4 张 full-page 截图：`docs/runs/artifacts/m3-13-dashboard-mobile-visual/mobile-390-overview.png` / `mobile-390-incidents.png` / `mobile-430-overview.png` / `mobile-430-incidents.png`，合计约 913 KB。
+- `StatsCards.tsx` 轻量收口移动端 padding、最小高度、header 间距、label tracking 与 value 换行，并给 grid 增加 `data-testid="stats-card-grid"`。
+- `SystemStatusBar.tsx` 收紧移动 nav gap/tracking，并显式使用 `overflow-x-auto overscroll-x-contain`，提升 active tab 可见性。
+- `DashboardBriefingSection.tsx` / `DashboardIncidentWorkspaceSection.tsx` 将 section 顶距从 `mt-14` 调整为 `mt-8 sm:mt-14`。
+- 截图中仍可见左下圆形 `N` 浮层，但 DOM candidates 为 0，判定为浏览器/外部 overlay，不修改应用代码。
+
+**真实验证**：
+
+- `pytest server/tests/test_dashboard_mobile_visual_e2e.py --run-e2e` **1 passed in 13.82s**。
+- `pytest server/tests/test_dashboard_responsive_e2e.py --run-e2e` **2 passed in 20.08s**。
+- `pytest server/tests/test_demo_flow_stability_e2e.py --run-e2e` **1 passed in 6.32s**。
+- 七组关键 E2E 连续 `pytest server/tests/test_auth_session_e2e.py test_demo_flow_e2e.py test_incident_report_e2e.py test_dashboard_route_sections_e2e.py test_dashboard_responsive_e2e.py test_demo_flow_stability_e2e.py test_dashboard_mobile_visual_e2e.py --run-e2e` **8 passed in 69.21s**。
+- `pytest server/tests` **342 passed, 9 skipped, 17 warnings**。
+- `pytest server/tests/security/llm_guardrails` **139 passed, 17 warnings**。
+- 前端 typecheck 等价命令通过（本机 npm shim 损坏，使用 `next.cmd typegen` + `tsc.cmd --noEmit`）；`next.cmd build` 通过（`/dashboard` 44.1 kB / First Load JS 191 kB）。
+- 运行日志：`docs/runs/2026-06-19-m3-13-dashboard-mobile-visual-qa.md`。
+
+**安全边界**：
+
+- 未改 `server/services/auth_service.py` / `server/core/auth*` / `server/routers/auth*` / `server/security/**` / `server/core/state.py` / `server/core/config.py` / `server/analyzer.py` / `server/core/utils.py` / Alembic migration / DB schema。
+- 未改后端 API contract、npm 依赖、`REGISTER_RATE_LIMIT_*`、`COPILOT_RATE_LIMIT_*`。
+- 未把 token 写进 `localStorage` / `sessionStorage` / DOM。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_dashboard_mobile_visual_e2e.py`（新增移动视觉 E2E）
+- `web-next/components/dashboard/StatsCards.tsx`（移动 stats 密度与测试定位）
+- `web-next/components/dashboard/SystemStatusBar.tsx`（移动 nav active tab 可见性）
+- `web-next/components/dashboard/sections/DashboardBriefingSection.tsx`（移动 section 间距）
+- `web-next/components/dashboard/sections/DashboardIncidentWorkspaceSection.tsx`（移动 section 间距）
+- `docs/runs/2026-06-19-m3-13-dashboard-mobile-visual-qa.md`（本任务 run log）
+- `docs/runs/artifacts/m3-13-dashboard-mobile-visual/*.png`（成功截图）
+- `docs/agent/M3_13_DASHBOARD_MOBILE_VISUAL_QA_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-13 索引更新为已交付）
+- `PRODUCT.md` §2.2 新增第 22 项 M3-13 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无阻塞。`N` 浮层不是应用 DOM；本任务仅用 E2E 防止应用 DOM 引入同类浮层。
+
+**当前不做**：重做视觉设计、改 Dashboard 业务 hook/state/prompt、改认证/授权、改 Guardrails、改 SSRF、改 DB schema、改后端 API、改 npm 依赖、改 rate limit 常量。
 
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
