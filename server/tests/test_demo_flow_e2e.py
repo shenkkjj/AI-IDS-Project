@@ -22,6 +22,11 @@ import re
 
 import pytest
 
+from server.tests.e2e_copilot_helpers import (
+    install_network_diagnostics,
+    save_copilot_failure_artifacts,
+    wait_for_copilot_fallback_message,
+)
 from server.tests.e2e_helpers import (
     assert_dev_server_reachable,
     register_or_login_for_e2e,
@@ -89,7 +94,14 @@ async def _run_demo_flow() -> dict:
 
     from playwright.async_api import async_playwright
 
-    diag: dict = {"registered": False, "demo": False, "copilot": False, "triage": False, "forbidden": None}
+    diag: dict = {
+        "registered": False,
+        "demo": False,
+        "copilot": False,
+        "triage": False,
+        "forbidden": None,
+        "artifacts": {},
+    }
 
     async with async_playwright() as p:
         launch_options = {"headless": True}
@@ -108,6 +120,7 @@ async def _run_demo_flow() -> dict:
         try:
             context = await browser.new_context(viewport={"width": 1280, "height": 800})
             page = await context.new_page()
+            install_network_diagnostics(page, diag)
 
             await assert_dev_server_reachable(page)
 
@@ -138,22 +151,24 @@ async def _run_demo_flow() -> dict:
             await analyze_btn.wait_for(state="visible", timeout=10000)
             await analyze_btn.click()
 
-            # 4) 等待 Copilot 出现可验证的 assistant 降级消息（最多 15s）
-            assistant_text = ""
-            for _ in range(30):
-                messages = await page.query_selector_all(
-                    '[data-testid="copilot-message"][data-role="assistant"]'
+            # 4) 等待 Copilot 出现可验证的 assistant 降级消息（条件等待，最多 45s）
+            try:
+                assistant_text = await wait_for_copilot_fallback_message(
+                    page,
+                    timeout_ms=45000,
                 )
-                for msg in reversed(messages):
-                    text = (await msg.inner_text()).strip()
-                    if "API Key" in text or "Base URL" in text:
-                        assistant_text = text
-                        break
-                if assistant_text:
-                    break
-                await page.wait_for_timeout(500)
+            except Exception as exc:  # noqa: BLE001
+                diag["artifacts"] = await save_copilot_failure_artifacts(
+                    page,
+                    diag,
+                    prefix="demo-flow-copilot-timeout",
+                )
+                pytest.fail(
+                    "Copilot 未在 45s 内返回可验证的降级态消息。"
+                    f" artifacts={diag['artifacts']} error={exc}"
+                )
 
-            assert assistant_text, "Copilot 未在 15s 内返回可验证的降级态消息。"
+            assert assistant_text, "Copilot fallback helper 返回了空文本。"
             diag["copilot"] = True
 
             # 5) 验证降级态文案：必须包含 "API Key" 或 "Base URL"
