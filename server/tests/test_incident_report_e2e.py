@@ -27,16 +27,18 @@ from __future__ import annotations
 
 import os
 import re
-import time
-from importlib.util import find_spec
-from typing import Iterable
 
 import pytest
+
+from server.tests.e2e_helpers import (
+    assert_dev_server_reachable,
+    register_or_login_for_e2e,
+    skip_without_playwright,
+)
 
 pytestmark = [pytest.mark.e2e]
 
 BASE = os.getenv("E2E_BASE_URL", "http://localhost:3000")
-DEFAULT_PASSWORD = os.getenv("E2E_DEFAULT_PASSWORD", "DemoE2EPass123!")
 
 # 任何真密钥、stack trace、Guardrails L1 regex、system prompt 触发都不应出现在
 # 页面可见 DOM 或下载的报告 markdown 中（security review SC-2 / SC-4）。
@@ -77,37 +79,6 @@ _DOWNLOAD_FAIL_MARKERS = ("下载失败", "报告生成失败")
 # ---------------------------------------------------------------------------
 
 
-def _skip_without_playwright() -> None:
-    if find_spec("playwright") is None:
-        pytest.skip(
-            "未安装 playwright。运行 `pip install playwright && "
-            "playwright install chromium` 后加 --run-e2e 显式执行。"
-        )
-
-
-async def _assert_dev_server_reachable(page) -> None:
-    """在浏览器上下文中探测 Next.js API 代理,确保前后端都已就绪。
-
-    失败信息明确指向:需要先启动 dev server。
-    """
-    try:
-        response = await page.request.get(f"{BASE}/api/backend/health", timeout=5000)
-    except Exception as exc:  # noqa: BLE001
-        pytest.fail(
-            f"E2E 前置失败:无法连到 {BASE}/api/backend/health。"
-            f"请先启动后端 (:8000) 和前端 (:3000) dev server:\n"
-            f"  1) ./.venv/Scripts/python.exe -m uvicorn server.main:app --port 8000\n"
-            f"  2) cd web-next && npm run dev\n"
-            f"原始错误:{exc}"
-        )
-
-    if response.status != 200:
-        pytest.fail(
-            f"E2E 前置失败:{BASE}/api/backend/health 返回 {response.status}。"
-            f"请确认后端 dev server 正在 :8000 运行。"
-        )
-
-
 async def _collect_visible_text(page) -> str:
     """读取 body 文本,过滤 script/style/noscript 节点。"""
     return await page.evaluate(
@@ -129,121 +100,6 @@ def _contains_forbidden(text: str) -> str | None:
         if pattern.search(text):
             return pattern.pattern
     return None
-
-
-def _register_unique_user() -> tuple[str, str]:
-    """生成时间戳邮箱,确保测试可重入。"""
-    ts = int(time.time() * 1000)
-    email = f"e2e-report-{ts}@example.com"
-    return email, DEFAULT_PASSWORD
-
-
-async def _register_via_ui(page, email: str, password: str) -> None:
-    """在前端 UI 上注册并等待自动跳转 /dashboard。
-
-    实现策略:
-    1. 走 ``/api/backend/auth/register`` 直接创建用户(避免 next-auth 客户端
-       signIn + 浏览器 CSRF cookie 时序问题,任务 §7 接受"注册或登录")。
-    2. 在 UI 上切到 login 模式,填入同样的 email/password,提交登录。
-    3. 等 URL 变为 /dashboard。
-    """
-    # 1) 探测 dev server 健康并直接通过后端 API 注册一个用户
-    api_response = await page.request.post(
-        f"{BASE}/api/backend/auth/register",
-        data={"email": email, "password": password},
-        headers={"Content-Type": "application/json"},
-    )
-    if api_response.status not in (200, 201):
-        # 409 conflict 也允许(用户已存在),直接走 login。
-        body = await api_response.text()
-        if api_response.status == 409 or "已存在" in body or "exists" in body.lower():
-            pass
-        else:
-            pytest.fail(
-                f"E2E 前置失败:无法注册测试用户 (HTTP {api_response.status})。"
-                f"body: {body!r}"
-            )
-
-    # 2) 打开 UI 首页,等 React hydration
-    await page.goto(f"{BASE}/", wait_until="domcontentloaded", timeout=15000)
-    await page.wait_for_load_state("domcontentloaded", timeout=10000)
-    try:
-        await page.wait_for_function(
-            "() => document.querySelector('[data-testid=\"login-email\"]') !== null",
-            timeout=30000,
-        )
-    except Exception as exc:  # noqa: BLE001
-        body_text = await page.evaluate(
-            "() => document.body ? document.body.innerText.slice(0, 500) : ''"
-        )
-        pytest.fail(
-            f"无法等到 login-email hydration 完成({exc})。"
-            f"body 文本:{body_text!r}"
-        )
-
-    # 3) 填入 login 模式下的 email + password,提交登录
-    await page.get_by_test_id("login-email").first.fill(email)
-    await page.get_by_test_id("login-password").first.fill(password)
-
-    # NEXT-01 兜底:next-auth 5 beta + React 19 dev mode 下,前端
-    # ``signIn("credentials", ...)`` 偶尔不发出 callback 请求(客户端 hydration
-    # 时序). 同时直接走 next-auth 的 ``/api/auth/callback/credentials`` HTTP
-    # 端点种 cookie,语义与原生表单 POST 一致。
-    csrf_resp = await page.request.get(f"{BASE}/api/auth/csrf", timeout=10000)
-    csrf_token = (await csrf_resp.json()).get("csrfToken", "")
-    if csrf_token:
-        await page.request.post(
-            f"{BASE}/api/auth/callback/credentials",
-            form={
-                "email": email,
-                "password": password,
-                "csrfToken": csrf_token,
-                "callbackUrl": f"{BASE}/dashboard",
-                "json": "true",
-            },
-            timeout=15000,
-        )
-
-    # 兜底成功后, 浏览器仍停在 / (cookie 是通过 page.request 种到 storageState,
-    # 浏览器原生导航需要 click 提交触发). 把按钮的 click 包在 try, 失败时直接 goto.
-    try:
-        await page.get_by_test_id("login-submit").click(timeout=5000)
-    except Exception:
-        pass
-
-    # 4) Next.js App Router 用 client-side router.push,expect_navigation 不会触发;
-    #    改用 wait_for_function 轮询 window.location.pathname
-    try:
-        await page.wait_for_function(
-            "() => window.location.pathname === '/dashboard' || /\\?.*dashboard/.test(window.location.search)",
-            timeout=20000,
-        )
-        return
-    except Exception:
-        # next-auth 5.0.0-beta.30 客户端 signIn 成功但 useSession 不自动刷新,
-        # 强制 page.goto /dashboard,让 server-side session 检查决定是否接受。
-        pass
-
-    # fallback: 直接 goto /dashboard,如果 session cookie 有效就会接受。
-    try:
-        await page.goto(f"{BASE}/dashboard", wait_until="domcontentloaded", timeout=15000)
-    except Exception:
-        pass
-
-    try:
-        await page.wait_for_function(
-            "() => window.location.pathname === '/dashboard' || /\\?.*dashboard/.test(window.location.search)",
-            timeout=20000,
-        )
-    except Exception as exc:  # noqa: BLE001
-        body_text = await page.evaluate(
-            "() => document.body ? document.body.innerText.slice(0, 500) : ''"
-        )
-        current_url = page.url
-        pytest.fail(
-            f"登录后未跳到 /dashboard ({exc})。当前 URL: {current_url!r}。"
-            f"body 文本:{body_text!r}"
-        )
 
 
 async def _trigger_demo_and_get_first_alert_id(page) -> str:
@@ -341,7 +197,7 @@ async def test_incident_report_browser_e2e() -> None:
         注册 -> 触发 Demo 攻击 -> 创建案件 -> 下载报告 -> 验证 markdown 结构
         与脱敏 sentinel -> 点击复制 -> 扫描页面 DOM 无泄漏。
     """
-    _skip_without_playwright()
+    skip_without_playwright()
     from playwright.async_api import async_playwright
 
     diag: dict[str, object] = {
@@ -353,7 +209,6 @@ async def test_incident_report_browser_e2e() -> None:
         "forbidden": None,
         "filename": "",
     }
-    email, password = _register_unique_user()
 
     async with async_playwright() as p:
         launch_options: dict[str, object] = {"headless": True}
@@ -388,11 +243,13 @@ async def test_incident_report_browser_e2e() -> None:
             page = await context.new_page()
 
             # 1) 探测 dev server 健康
-            await _assert_dev_server_reachable(page)
+            await assert_dev_server_reachable(page)
 
             # 2) 注册唯一用户并自动跳到 /dashboard
-            await _register_via_ui(page, email, password)
-            diag["registered"] = True
+            email, _password, register_status = await register_or_login_for_e2e(
+                page, "e2e-report"
+            )
+            diag["registered"] = register_status in {"created", "exists"}
 
             # 3) 触发 Demo 攻击 + 选中最新告警
             alert_id = await _trigger_demo_and_get_first_alert_id(page)
@@ -403,28 +260,36 @@ async def test_incident_report_browser_e2e() -> None:
             await create_btn.wait_for(state="visible", timeout=10000)
             await create_btn.click()
 
-            # 5) 等待案件详情面板(NEXT-01: IncidentSection 自己持有 useIncidents
-            #    hook, 与 dashboard-client 的实例隔离, 不会自动收到父组件传过来的
-            #    selectedIncident; 必须点击列表项触发 IncidentSection 内的
-            #    setSelectedIncident -> loadIncidentDetail。)
-            try:
-                # 等列表项出现, 然后点第一个 -> Section 内 hook 加载 detail
-                await page.wait_for_selector(
-                    '[data-testid="incident-list-item"]',
-                    state="visible",
-                    timeout=20000,
-                )
-                first_item = page.locator('[data-testid="incident-list-item"]').first
-                await first_item.click()
-            except Exception:
-                pass
-
+            # 5) M3-09 单一事实源:dashboard-client.tsx 父层持有唯一 useIncidents()
+            #    实例并通过 props 传给 IncidentSection。父层 createIncidentFromAlert
+            #    + loadIncidentDetail 直接驱动列表 / selectedIncident / detail,
+            #    不再需要点击 incident-list-item 兜底。
+            #
+            #    这里直接等待 detail-panel,严禁回退到列表点击 workaround;
+            #    点击兜底就是双 hook race 复发的标志(M3_09 RED A)。
             await page.wait_for_selector(
                 '[data-testid="incident-detail-panel"]',
                 state="visible",
                 timeout=30000,
             )
             diag["create"] = True
+
+            # 5.1) 列表项必须同步 selected 状态:即父层 selectedIncident 已经把
+            #     第一行高亮并暴露 data-incident-id。失败说明列表 hook 与 detail
+            #     hook 不共享 state(双 useIncidents() race 仍存在)。
+            selected_item = page.locator('[data-testid="incident-list-item"]').first
+            await selected_item.wait_for(state="visible", timeout=20000)
+            list_incident_id = await selected_item.get_attribute("data-incident-id")
+            assert list_incident_id, (
+                "案件列表项缺少 data-incident-id;父层 useIncidents 未把 selectedIncident "
+                "同步到 IncidentSection 列表。"
+            )
+            detail_panel = page.locator('[data-testid="incident-detail-panel"]').first
+            detail_incident_id = await detail_panel.get_attribute("data-incident-id")
+            assert detail_incident_id == list_incident_id, (
+                f"detail-panel 与 list-item 指向不同 incident_id: "
+                f"detail={detail_incident_id!r} list={list_incident_id!r}"
+            )
 
             # 6) 点击"下载报告" -> expect_download
             suggested_filename, markdown, _path = await _click_download_report(page)
