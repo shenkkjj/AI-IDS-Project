@@ -544,6 +544,60 @@ M2 完成时，项目应满足：
 **当前不做**：重做视觉设计、迁移状态管理、新增后端 API、引入 PDF/DOCX、可视化埋点、performance budget 调整、bundle 拆分、Tailwind 主题重构。
 
 
+### M3-12 Demo Flow E2E 稳定性收口（2026-06-19 已交付）
+
+> 核心目的：把 M3-11 暴露的 Demo Flow Copilot fallback 串跑偶发 15s 超时收口为可诊断、可重复、不放宽断言的稳定 E2E。仅动测试层 + 文档；不改认证、Guardrails、SSRF、DB schema、后端 API、npm 依赖或 rate limit 常量。
+
+**已交付**：
+
+- 新增 `server/tests/e2e_copilot_helpers.py`（test-only diagnostic helper）：
+  - `ARTIFACT_DIR=docs/runs/artifacts/m3-12-demo-flow-stability`。
+  - `_SENSITIVE_PATTERNS` 正则脱敏 `sk-...` / `sk-proj-...` / `AKIA...` / `ghp_...` / `xox...`。
+  - `wait_for_copilot_fallback_message`：用 `page.wait_for_function` 在 DOM 内扫描 `[data-testid="copilot-message"][data-role="assistant"]` 是否含 `API Key` 或 `Base URL`，默认 45s。
+  - `install_network_diagnostics`：监听 `console`(error/warning)、`pageerror`、`response`，仅记录 `/api/backend/copilot/stream` / `/api/backend/alerts/demo` / `/api/backend/health` / `/api/auth/session` 的 method/path/status。
+  - `save_copilot_failure_artifacts`：失败时 full-page screenshot + sanitized JSON。
+- 修改 `server/tests/test_demo_flow_e2e.py`：把 30×500ms 手写轮询替换为 `wait_for_copilot_fallback_message(page, timeout_ms=45000)` + 失败 artifact 落盘 + `pytest.fail`，保留 `assert "API Key" in assistant_text or "Base URL" in assistant_text` 严格断言。
+- 新增 `server/tests/test_demo_flow_stability_e2e.py`（默认 skip，需 `--run-e2e`）：同一 chromium context + page，连续两次 `trigger-demo-attack → analyze-current-alert → wait_for_copilot_fallback_message`，第二次 `attack-log-row` 数量 ≥ 2，整体跑完做 forbidden sentinel 扫描。
+
+**真实验证**：
+
+- 单条 Demo Flow E2E ×3 不重启 backend：`1 passed in 10.38s` / `10.53s` / `10.51s`（无放宽断言）。
+- Stability ×2 不重启 backend：`1 passed in 10.28s` / `6.63s`。
+- 六组关键 E2E 连续 `pytest server/tests/test_auth_session_e2e.py test_demo_flow_e2e.py test_incident_report_e2e.py test_dashboard_route_sections_e2e.py test_dashboard_responsive_e2e.py test_demo_flow_stability_e2e.py --run-e2e` **7 passed in 58.27s**（Auth 1 + Demo 1 + Incident 1 + Route 1 + Responsive 2 + Stability 1）。
+- `pytest server/tests` **342 passed, 8 skipped, 17 warnings**（baseline + stability 默认 skip）。
+- `pytest server/tests/security/llm_guardrails` **139 passed**（0 回归）。
+- 前端 `npm run typecheck` 0 错误 + `npm run build` 通过（`/dashboard` 44 kB / First Load JS 191 kB 不变）。
+- 运行日志：`docs/runs/2026-06-19-m3-12-demo-flow-e2e-stability.md`。
+
+**根因排查**：
+
+- 本机环境 `curl https://api.openai.com` exit 28（5s 超时不可达）。
+- Fresh backend 时 `GuardrailEngine.check_input` 1.5s rail timeout 优先于 `OpenAIModerationClient` 5s ConnectTimeout 触发 → return None → 放行 Copilot → 进入 `stream_user_chat_completion` 的"无 LLM key"分支返回 `请先在配置页设置可用的 API Key 与 Base URL`。
+- 长时运行 backend 中 moderation httpx pool 退化后 < 1.5s 立即抛 exc → fail-closed 拦截 Copilot → 出现 `moderation_unavailable` 文案。本任务在 fresh backend 状态下行为正确，**未动 Guardrails 代码**。建议作为另一条独立工单（owner 单独授权）补 client 健康探测 + 周期性重建。
+
+**安全边界**：
+
+- 未改 `server/services/auth_service.py` / `server/core/auth*` / `server/routers/auth*` / `server/security/**` / `server/core/state.py` / `server/core/config.py` / `server/analyzer.py` / `server/core/utils.py` / Alembic migration / DB schema。
+- 未改后端 API contract / npm 依赖 / `REGISTER_RATE_LIMIT_*` / `COPILOT_RATE_LIMIT_*` 限流配置。
+- 未把 token 写进 `localStorage` / `sessionStorage` / DOM；helper 不打印 cookie / token / password / API key / 全量响应体。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥；artifact 目录成功路径不留文件。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/e2e_copilot_helpers.py`（新增）
+- `server/tests/test_demo_flow_e2e.py`（接入条件等待 + 失败 artifact）
+- `server/tests/test_demo_flow_stability_e2e.py`（新增）
+- `docs/runs/2026-06-19-m3-12-demo-flow-e2e-stability.md`（本任务 run log）
+- `docs/agent/M3_12_DEMO_FLOW_E2E_STABILITY_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-12 索引更新为"已交付"，下一条建议工单刷新）
+- `PRODUCT.md` §2.2 新增第 21 项 M3-12 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：长时运行的 dev backend 中 OpenAIModerationClient httpx pool 偶发退化、moderation `check` 在 < 1.5s 内抛 exc → rail timeout 来不及触发 → fail-closed 拦截 Copilot。在 fresh backend 状态下行为正确，本任务不修。该问题需 owner 单独授权动 `server/security/llm_guardrails/**`，列入 M3-13 候选。
+
+**当前不做**：修改 Guardrails 代码（包括 moderation client 健康监控、`_init_moderation` 空 key 检测、rail timeout 调整），改 rate limit 常量，改后端 API contract，改前端业务 hook / state / 路由。
+
+
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
 **3 大失败面全部清零**：
