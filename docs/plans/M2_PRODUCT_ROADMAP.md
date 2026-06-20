@@ -648,6 +648,52 @@ M2 完成时，项目应满足：
 
 **当前不做**：重做视觉设计、改 Dashboard 业务 hook/state/prompt、改认证/授权、改 Guardrails、改 SSRF、改 DB schema、改后端 API、改 npm 依赖、改 rate limit 常量。
 
+### M3-14 案件报告预览 UX 收口（2026-06-20 已交付）
+
+> 核心目的：基于 M3-07/M3-08 已交付的 Markdown 报告复制/下载能力，在 Dashboard 案件详情内补齐可见、可截图、可回归的内联报告预览体验；只消费后端已脱敏 report API，不改认证、Guardrails、SSRF、DB schema、后端 report API、npm 依赖或 rate limit。
+
+**已交付**：
+
+- 新增 `web-next/components/dashboard/IncidentReportPreview.tsx`，展示报告文件名、生成时间、告警/事件/脱敏/截断 meta、脱敏/截断说明，以及后端 markdown 的安全预览片段。
+- `IncidentDetailPanel.tsx` 新增 `incident-preview-report` 按钮、loading/error/close 状态、Escape 关闭、切换案件清空预览；复制/下载仍即时调用 `onLoadReport()` 拉取完整脱敏报告，不复用截断预览 state。
+- 预览正文不引入 markdown 依赖，不使用 `dangerouslySetInnerHTML` / `innerHTML`，按行渲染标题、表格、列表与段落；组件 state 只保留截断后的 `previewMarkdown`，不写 `localStorage` / `sessionStorage`。
+- 新增 `server/tests/test_incident_report_preview_e2e.py`（默认 skip，需 `--run-e2e`），覆盖登录、Demo 告警、创建案件、预览报告、文件名/meta/body、桌面/移动截图、复制/下载报告、Escape/关闭按钮和 DOM/markdown forbidden sentinel。
+- 成功保存 2 张 full-page 截图：`docs/runs/artifacts/m3-14-incident-report-preview/incident-report-preview-desktop.png` / `incident-report-preview-mobile.png`。
+
+**真实验证**：
+
+- 新增 preview E2E：**1 passed in 10.34s**。
+- 既有 incident report E2E：**1 passed in 6.12s**。
+- mobile visual E2E：**1 passed in 12.09s**。
+- 八组关键 E2E（Auth / Demo / Incident report / Dashboard route / Responsive desktop+mobile / Demo stability / Mobile visual / Incident report preview）：**9 passed in 77.63s**。
+- 后端全量：**342 passed, 10 skipped, 17 warnings in 85.57s**。
+- Guardrails 专项：**139 passed, 17 warnings in 19.48s**。
+- 前端 typecheck 等价命令通过（`next.cmd typegen` + `tsc.cmd --noEmit`）；`next.cmd build` 通过（`/dashboard` 45.7 kB / First Load JS 193 kB）。
+- 运行日志：`docs/runs/2026-06-19-m3-14-incident-report-preview-ux.md`。
+
+**安全边界**：
+
+- 未改 `server/services/auth_service.py` / `server/core/auth*` / `server/routers/auth*` / `server/security/**` / SSRF / Alembic migration / DB schema。
+- 未改后端 report API contract、`server/services/incident_report_service.py`、npm 依赖、`REGISTER_RATE_LIMIT_*`、`COPILOT_RATE_LIMIT_*`。
+- 未把报告 markdown 写入 `localStorage` / `sessionStorage`；未使用 `dangerouslySetInnerHTML` / `innerHTML` 渲染报告。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥；本地 dev server 日志不纳入提交。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_incident_report_preview_e2e.py`（新增报告预览浏览器 E2E）
+- `web-next/components/dashboard/IncidentReportPreview.tsx`（新增内联预览组件）
+- `web-next/components/dashboard/IncidentDetailPanel.tsx`（接入预览按钮与状态）
+- `docs/runs/2026-06-19-m3-14-incident-report-preview-ux.md`（本任务 run log）
+- `docs/runs/artifacts/m3-14-incident-report-preview/*.png`（成功截图）
+- `docs/agent/M3_14_INCIDENT_REPORT_PREVIEW_UX_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-14 索引更新为已交付，下一条建议刷新）
+- `PRODUCT.md` §2.2 新增第 23 项 M3-14 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无本任务阻塞。无真实 OpenAI key / 外网 moderation 快速失败时，Demo Copilot fallback E2E 需要隔离的本地 no-key 测试环境验证；这属于 Guardrails moderation client 健康监控后续独立授权工单，不在本次预览 UX 范围内。
+
+**当前不做**：改 Guardrails fail-closed 策略、改认证/授权、改 SSRF、改 DB schema、改后端 report API、改 npm 依赖、改 rate limit 常量、持久化报告文件、PDF/DOCX/HTML 渲染。
+
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
