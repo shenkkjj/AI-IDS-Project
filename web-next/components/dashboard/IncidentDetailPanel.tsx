@@ -6,6 +6,7 @@ import {
   Clipboard,
   ClipboardCheck,
   Download,
+  FileSearch,
   Loader2,
   Sparkles,
   RefreshCw,
@@ -23,6 +24,7 @@ import {
 } from "@/types/incident";
 import IncidentTimeline from "./IncidentTimeline";
 import IncidentLinkedAlerts from "./IncidentLinkedAlerts";
+import IncidentReportPreview from "./IncidentReportPreview";
 import StatusView from "./StatusView";
 
 const NOTE_MAX_LENGTH = 1000;
@@ -32,6 +34,31 @@ const TITLE_MAX_LENGTH = 120;
 // 后端会通过 incident_id 走 owner 隔离并构造受控 context_block。
 const INCIDENT_COPILOT_SHORT_PROMPT =
   "请分析当前安全案件,给出风险、证据、影响和下一步处置。";
+
+const PREVIEW_HEADINGS = (
+  "# 案件证据报告\n## 1. 案件摘要\n## 2. 关联告警\n## 3. 案件时间线\n## 4. 安全与脱敏说明"
+);
+
+function createReportPreviewMarkdown(markdown: string): string {
+  const safeMarkdown = markdown.slice(0, 20000);
+  const lines = safeMarkdown.split(/\r?\n/);
+  const payloadIndex = lines.findIndex((line) => line.includes("payload_preview"));
+  const payloadWindow =
+    payloadIndex >= 0
+      ? lines
+          .slice(Math.max(0, payloadIndex - 8), Math.min(lines.length, payloadIndex + 18))
+          .join("\n")
+      : safeMarkdown.slice(0, 1400);
+  const securityIndex = lines.findIndex((line) => line.includes("安全与脱敏说明"));
+  const securityWindow =
+    securityIndex >= 0
+      ? lines.slice(securityIndex, Math.min(lines.length, securityIndex + 8)).join("\n")
+      : "## 4. 安全与脱敏说明\n报告已脱敏并按后端策略截断。";
+  return [PREVIEW_HEADINGS, payloadWindow, securityWindow]
+    .filter(Boolean)
+    .join("\n\n")
+    .slice(0, 1800);
+}
 
 export interface IncidentDetailPanelProps {
   detail: IncidentDetailResponse;
@@ -164,6 +191,14 @@ export default function IncidentDetailPanel({
   type ReportAction = "idle" | "loading" | "copied" | "downloaded" | "error";
   const [reportAction, setReportAction] = useState<ReportAction>("idle");
   const [reportMessage, setReportMessage] = useState<string | null>(null);
+  const [reportPreviewLoading, setReportPreviewLoading] = useState(false);
+  const [reportPreviewError, setReportPreviewError] = useState<string | null>(null);
+  const [reportPreview, setReportPreview] = useState<{
+    filename: string;
+    meta: IncidentReportMeta;
+    previewMarkdown: string;
+    loadedAt: number;
+  } | null>(null);
 
   useEffect(() => {
     if (reportAction === "copied" || reportAction === "downloaded") {
@@ -175,6 +210,49 @@ export default function IncidentDetailPanel({
     }
     return undefined;
   }, [reportAction]);
+
+  useEffect(() => {
+    setReportPreview(null);
+    setReportPreviewError(null);
+    setReportPreviewLoading(false);
+  }, [detail.incident.incident_id]);
+
+  useEffect(() => {
+    if (!reportPreview) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setReportPreview(null);
+        setReportPreviewError(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [reportPreview]);
+
+  const handlePreviewReport = useCallback(async () => {
+    if (reportPreviewLoading || reportAction === "loading") return;
+    setReportPreviewLoading(true);
+    setReportPreviewError(null);
+    const result = await onLoadReport(detail.incident.incident_id);
+    if (!result.ok || !result.filename || !result.markdown || !result.meta) {
+      setReportPreview(null);
+      setReportPreviewError("报告预览失败");
+      setReportPreviewLoading(false);
+      return;
+    }
+    setReportPreview({
+      filename: result.filename,
+      meta: result.meta,
+      previewMarkdown: createReportPreviewMarkdown(result.markdown),
+      loadedAt: Date.now(),
+    });
+    setReportPreviewLoading(false);
+  }, [
+    onLoadReport,
+    detail.incident.incident_id,
+    reportAction,
+    reportPreviewLoading,
+  ]);
 
   const handleReport = useCallback(
     async (action: "copy" | "download") => {
@@ -466,6 +544,21 @@ export default function IncidentDetailPanel({
             </span>
             <button
               type="button"
+              data-testid="incident-preview-report"
+              onClick={() => void handlePreviewReport()}
+              disabled={reportPreviewLoading || reportLoading}
+              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              aria-label="预览案件报告"
+            >
+              {reportPreviewLoading ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <FileSearch className="w-3 h-3" />
+              )}
+              {reportPreviewLoading ? "生成中" : "预览报告"}
+            </button>
+            <button
+              type="button"
               data-testid="incident-copy-report"
               onClick={() => void handleReport("copy")}
               disabled={reportLoading}
@@ -507,6 +600,26 @@ export default function IncidentDetailPanel({
             </button>
           </div>
         </div>
+        {reportPreviewError ? (
+          <div
+            data-testid="incident-report-preview-error"
+            className="mb-3 border border-danger text-danger bg-danger-soft px-3 py-2 text-[11px] font-mono"
+          >
+            {reportPreviewError}
+          </div>
+        ) : null}
+        {reportPreview ? (
+          <IncidentReportPreview
+            filename={reportPreview.filename}
+            meta={reportPreview.meta}
+            previewMarkdown={reportPreview.previewMarkdown}
+            loadedAt={reportPreview.loadedAt}
+            onClose={() => {
+              setReportPreview(null);
+              setReportPreviewError(null);
+            }}
+          />
+        ) : null}
         <IncidentTimeline events={detail.events} />
       </div>
     </div>
