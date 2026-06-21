@@ -694,6 +694,51 @@ M2 完成时，项目应满足：
 
 **当前不做**：改 Guardrails fail-closed 策略、改认证/授权、改 SSRF、改 DB schema、改后端 report API、改 npm 依赖、改 rate limit 常量、持久化报告文件、PDF/DOCX/HTML 渲染。
 
+### M3-15 SOC 时间线筛选与详情展开 UX 收口（2026-06-20 已交付）
+
+> 核心目的：基于已交付的 `GET /logs/security-timeline` 和 `SecurityTimelinePanel`，把审计时间线从只读列表升级为可筛选、可展开、可复制脱敏摘要、可截图验收的 SOC 运营证据面板；只改前端 timeline UX、E2E、截图和文档，不改认证、Guardrails、SSRF、DB schema、后端 timeline API、npm 依赖或 rate limit。
+
+**已交付**：
+
+- `SecurityTimelinePanel.tsx` 新增 `全部 / Demo / Copilot / 护栏 / 系统` 筛选按钮、筛选计数和空筛选态，基于现有 timeline `category` 做前端分类，不新增后端参数。
+- 单条事件可展开详情，展示时间、来源、类别、状态、脱敏摘要和安全说明；支持 Escape 收起，筛选切换会收起不再可见的详情。
+- 新增脱敏 SOC 摘要复制按钮，复制内容只由当前可见字段拼接，clipboard 不可用时给出降级状态；不写 `localStorage` / `sessionStorage`，不使用 `dangerouslySetInnerHTML` / `innerHTML`。
+- 新增 `server/tests/test_security_timeline_drilldown_e2e.py`（默认 skip，需 `--run-e2e`），覆盖登录、Demo 事件进入 SOC 时间线、筛选状态、展开详情、复制摘要、Escape、桌面/移动截图和 DOM/copy forbidden sentinel。
+- 成功保存 2 张 full-page 截图：`docs/runs/artifacts/m3-15-soc-timeline-drilldown/security-timeline-desktop.png` / `security-timeline-mobile.png`。
+
+**真实验证**：
+
+- 新增 timeline drilldown E2E：**1 passed in 18.51s**。
+- 后端 timeline 契约测试：**12 passed in 2.88s**。
+- Dashboard responsive E2E：**2 passed in 30.06s**。
+- 九组关键 E2E（Auth / Demo / Incident report / Dashboard route / Responsive desktop+mobile / Demo stability / Mobile visual / Incident report preview / Security timeline drilldown）：**10 passed in 144.89s**。
+- 后端全量：**342 passed, 11 skipped, 17 warnings in 129.68s**（首次固定 `.tmp\pytest` 目录复跑遇到 Windows `PermissionError`，改用本次专属临时目录后通过；未改后端代码）。
+- Guardrails 专项：**139 passed, 17 warnings in 21.84s**。
+- 前端 typecheck 等价命令通过（`next.cmd typegen` + `tsc.cmd --noEmit`）；`next.cmd build` 通过（`/dashboard` 47.1 kB / First Load JS 194 kB）。
+- 运行日志：`docs/runs/2026-06-20-m3-15-soc-timeline-drilldown-filter-ux.md`。
+
+**安全边界**：
+
+- 未改 `server/services/auth_service.py` / `server/core/auth*` / `server/routers/auth*` / `server/security/**` / SSRF / Alembic migration / DB schema。
+- 未改后端 timeline API contract、`server/routers/logs_router.py`、npm 依赖、`REGISTER_RATE_LIMIT_*`、`COPILOT_RATE_LIMIT_*`。
+- 未把 timeline 或复制摘要写入 `localStorage` / `sessionStorage`；未使用 `dangerouslySetInnerHTML` / `innerHTML` 渲染详情。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥；本地 dev server 日志不纳入提交。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_security_timeline_drilldown_e2e.py`（新增 SOC 时间线浏览器 E2E）
+- `web-next/components/dashboard/SecurityTimelinePanel.tsx`（新增筛选、详情展开与复制摘要 UX）
+- `docs/runs/2026-06-20-m3-15-soc-timeline-drilldown-filter-ux.md`（本任务 run log）
+- `docs/runs/artifacts/m3-15-soc-timeline-drilldown/*.png`（成功截图）
+- `docs/agent/M3_15_SOC_TIMELINE_DRILLDOWN_FILTER_UX_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-15 索引更新为已交付，下一条建议刷新）
+- `PRODUCT.md` §2.2 新增第 24 项 M3-15 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无本任务阻塞。九组关键 E2E 首轮在长时运行 dev backend 上触发 register/login rate limit，最终用 fresh 本地 E2E backend/frontend 和稳定测试账号完成真实浏览器验证；未改 rate limit 常量或认证逻辑。
+
+**当前不做**：改 Guardrails fail-closed 策略、改认证/授权、改 SSRF、改 DB schema、改后端 timeline API、改 npm 依赖、改 rate limit 常量、持久化 timeline 快照、引入外部渲染库或可视化库。
+
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
