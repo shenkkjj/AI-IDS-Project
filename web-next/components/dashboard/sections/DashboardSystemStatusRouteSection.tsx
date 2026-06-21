@@ -1,6 +1,7 @@
 "use client";
 
 import SectionHeading from "@/components/dashboard/SectionHeading";
+import OperationalRunbookPanel from "@/components/dashboard/OperationalRunbookPanel";
 import SystemStatusSection from "@/components/dashboard/SystemStatusSection";
 import type {
   SiteTargetState,
@@ -21,6 +22,7 @@ export interface DashboardSystemStatusRouteSectionProps {
   canConfirmThreat: boolean;
   onConfirmThreat: () => void;
   onToggleVoiceAlert: () => void;
+  userEmail: string;
 }
 
 export default function DashboardSystemStatusRouteSection({
@@ -37,6 +39,7 @@ export default function DashboardSystemStatusRouteSection({
   canConfirmThreat,
   onConfirmThreat,
   onToggleVoiceAlert,
+  userEmail,
 }: DashboardSystemStatusRouteSectionProps) {
   return (
     <div className="mt-14" data-testid="dashboard-section-system-status">
@@ -60,6 +63,9 @@ export default function DashboardSystemStatusRouteSection({
         onConfirmThreat={onConfirmThreat}
         onToggleVoiceAlert={onToggleVoiceAlert}
       />
+      <div className="mt-8">
+        <OperationalRunbookPanel siteState={siteState} userEmail={userEmail} />
+      </div>
     </div>
   );
 }

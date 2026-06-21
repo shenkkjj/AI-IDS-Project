@@ -338,6 +338,7 @@ export default function DashboardClient({ userEmail }: DashboardClientProps) {
               canConfirmThreat={Boolean(alertsCtx.selected?.alertId)}
               onConfirmThreat={() => void threatCtx.confirmThreat()}
               onToggleVoiceAlert={() => void threatCtx.toggleVoiceAlert()}
+              userEmail={userEmail}
             />
           )}
 
