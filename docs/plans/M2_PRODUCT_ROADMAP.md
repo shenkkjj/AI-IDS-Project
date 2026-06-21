@@ -739,6 +739,58 @@ M2 完成时，项目应满足：
 
 **当前不做**：改 Guardrails fail-closed 策略、改认证/授权、改 SSRF、改 DB schema、改后端 timeline API、改 npm 依赖、改 rate limit 常量、持久化 timeline 快照、引入外部渲染库或可视化库。
 
+### M3-16 Dashboard Operational Runbook / Health Checklist UX 收口（2026-06-21 已交付）
+
+> 核心目的：在不修改认证/授权、Guardrails、SSRF、DB schema、后端 API、npm 依赖或生产 rate limit 的前提下，把 Dashboard 系统状态区补齐为可自助排障的 operational runbook / health checklist 面板；只改前端 Dashboard runbook UX、E2E、截图和文档。
+
+**已交付**：
+
+- 新增 `web-next/components/dashboard/OperationalRunbookPanel.tsx`，在概览 route 与 `WAF 管理` route 的 `dashboard-section-system-status` 内展示 `Operational Runbook / Health Checklist`。
+- 面板包含六项检查：Backend health、Next API proxy、Login session、Demo readiness、E2E readiness、Env security check；状态 tone 限定为 `ok / warn / manual / blocked`。
+- 登录身份只展示脱敏邮箱（例如 `e***@example.com`）；目标站点 URL 仅显示安全 origin 或通用文案，不展示 query。
+- 五条关键命令仅作为人工执行清单展示：后端全量、Guardrails、前端 typecheck、前端 build、`scripts/check_env_security.py`；面板不在浏览器执行 PowerShell/Python，也不读取真实 `.env`。
+- 复制摘要按钮 `runbook-copy-summary` 写入安全诊断文本，包含 timestamp、health、proxy probe、masked session、item statuses 和 recommended commands；剪贴板不可用时给出降级状态。
+- `DashboardSystemStatusRouteSection.tsx` 只新增 `userEmail` prop 并挂载 runbook；`dashboard-client.tsx` 只传递现有 `userEmail`，未调整认证 hook 或后端 API。
+- 新增 `server/tests/test_dashboard_operational_runbook_e2e.py`（默认 skip，需 `--run-e2e`），真实浏览器覆盖 WAF route 面板、六项 checklist、五条命令、复制摘要、桌面/移动截图和 DOM/copy forbidden sentinel。
+- `server/tests/e2e_helpers.py` 增强测试侧稳定账号 env 复用：显式设置 `E2E_<PREFIX>_EMAIL` 且账号可登录时优先复用，避免长串 E2E 被本地 register rate limit 误挡；不改后端限流常量或认证生产代码。
+- 成功保存 2 张 full-page 截图：`docs/runs/artifacts/m3-16-dashboard-operational-runbook/operational-runbook-desktop.png` / `operational-runbook-mobile.png`。
+
+**真实验证**：
+
+- 新增 runbook E2E：**1 passed in 3.67s**。
+- Dashboard route + responsive E2E：**3 passed in 25.42s**。
+- 关键 E2E 串跑（Auth / Demo / Incident report / Dashboard route / Responsive desktop+mobile / Demo stability / Mobile visual / Incident report preview / Security timeline drilldown / Dashboard operational runbook）：**11 passed in 80.00s**。
+- 后端 timeline 专项：**12 passed in 1.03s**。
+- 后端全量：**344 passed, 12 skipped, 17 warnings in 85.19s**。
+- Guardrails 专项：**139 passed, 17 warnings in 19.51s**。
+- 前端 `npm run typecheck` 通过；`npm run build` 通过（`/dashboard` 49.2 kB / First Load JS 197 kB）。
+- 运行日志：`docs/runs/2026-06-21-m3-16-dashboard-operational-runbook-health-checklist-ux.md`。
+
+**安全边界**：
+
+- 未改 `server/services/auth_service.py` / `server/core/auth*` / `server/routers/auth*` / `server/security/**` / SSRF / Alembic migration / DB schema。
+- 未改后端 API contract、`scripts/check_env_security.py` 行为、npm 依赖、`REGISTER_RATE_LIMIT_*`、`COPILOT_RATE_LIMIT_*`。
+- 未把 runbook 摘要、命令或会话信息写入 `localStorage` / `sessionStorage`；未使用 `dangerouslySetInnerHTML` / `innerHTML`。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥；本地 dev server 日志不纳入提交。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_dashboard_operational_runbook_e2e.py`（新增 runbook 浏览器 E2E）
+- `server/tests/e2e_helpers.py` / `server/tests/test_e2e_helpers.py`（测试侧稳定账号 env 复用与单测）
+- `web-next/components/dashboard/OperationalRunbookPanel.tsx`（新增 runbook/checklist 面板）
+- `web-next/components/dashboard/sections/DashboardSystemStatusRouteSection.tsx`（接入面板）
+- `web-next/app/dashboard/dashboard-client.tsx`（传递现有 `userEmail`）
+- `docs/runs/2026-06-21-m3-16-dashboard-operational-runbook-health-checklist-ux.md`（本任务 run log）
+- `docs/runs/artifacts/m3-16-dashboard-operational-runbook/*.png`（成功截图）
+- `docs/agent/M3_16_DASHBOARD_OPERATIONAL_RUNBOOK_HEALTH_CHECKLIST_UX_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-16 索引更新为已交付，下一条建议刷新）
+- `PRODUCT.md` §2.2 新增第 25 项 M3-16 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无本任务阻塞。完整关键 E2E 首轮暴露现有 helper 在长串里每测先注册唯一账号会耗尽本地注册限流；本次仅在测试 helper 中增加显式稳定账号 env 优先路径，生产认证和后端限流保持不变。
+
+**当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 API、改 npm 依赖、改生产 rate limit 常量、在浏览器执行运维命令、读取真实 env、引入外部渲染库。
+
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
