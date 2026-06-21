@@ -791,6 +791,54 @@ M2 完成时，项目应满足：
 
 **当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 API、改 npm 依赖、改生产 rate limit 常量、在浏览器执行运维命令、读取真实 env、引入外部渲染库。
 
+### M3-17 Incident / Alert Evidence Pack Checklist UX 收口（2026-06-21 已交付）
+
+> 核心目的：在不新增后端导出格式、不修改认证/授权、Guardrails、SSRF、DB schema、后端 incident/report API、npm 依赖或 rate limit 的前提下，把案件详情补齐为可交付、可复盘的只读证据包清单；只改前端 evidence checklist UX、E2E、截图和文档。
+
+**已交付**：
+
+- 新增 `web-next/components/dashboard/IncidentEvidencePackChecklist.tsx`，在 `IncidentDetailPanel` 的关联告警区与事件时间线区之间展示 `Evidence Pack Checklist`。
+- 面板包含六项检查：Report ready、Linked alerts、Incident timeline、Triage coverage、Redaction & truncation、Missing items；状态 tone 限定为 `ready / review / missing`。
+- `evidence-pack-refresh-report` 只调用既有 `onLoadReport(incidentId)`，仅保存 `filename` 与 `meta`，丢弃返回的 markdown，避免在组件 state 或浏览器 storage 中保留完整报告正文。
+- `evidence-pack-copy-summary` 复制安全摘要：incident id、状态、严重度、关联告警数、时间线事件数、研判覆盖、report meta 计数、脱敏/截断状态和缺失项；不包含 payload、原始 timeline note、token、secret 或报告正文。
+- `IncidentDetailPanel.tsx` 只新增组件挂载并传入现有 `detail.incident`、`detail.linked_alerts`、`detail.events` 与 `onLoadReport`，未调整后端 API、认证 hook 或数据 schema。
+- 新增 `server/tests/test_incident_evidence_pack_checklist_e2e.py`（默认 skip，需 `--run-e2e`），真实浏览器覆盖登录、Demo 告警、创建案件、证据包 checklist、报告 meta 刷新、复制摘要、下载 markdown、桌面/移动截图和 DOM/clipboard/markdown forbidden sentinel。
+- 成功保存 2 张 full-page 截图：`docs/runs/artifacts/m3-17-incident-alert-evidence-pack-checklist/evidence-pack-desktop.png` / `evidence-pack-mobile.png`。
+
+**真实验证**：
+
+- 新增 evidence pack E2E：**1 passed in 9.26s**。
+- 既有 incident report / incident report preview / security timeline drilldown / Dashboard responsive E2E：**5 passed in 37.49s**。
+- 关键 E2E 串跑（Auth / Demo / Incident report / Dashboard route / Responsive desktop+mobile / Demo stability / Mobile visual / Incident report preview / Security timeline drilldown / Dashboard operational runbook / Incident evidence pack checklist）：**12 passed in 104.30s**。
+- 后端全量：**344 passed, 13 skipped, 17 warnings in 85.37s**。
+- Guardrails 专项：**139 passed, 17 warnings in 19.29s**。
+- 前端 `npm run typecheck` 通过；`npm run build` 通过（`/dashboard` 51.5 kB / First Load JS 199 kB）。
+- 运行日志：`docs/runs/2026-06-21-m3-17-incident-alert-evidence-pack-checklist-ux.md`。
+
+**安全边界**：
+
+- 未改 `server/services/auth_service.py` / `server/core/auth*` / `server/routers/auth*` / `server/security/**` / SSRF / Alembic migration / DB schema。
+- 未改后端 incident/report API contract、`server/services/incident_report_service.py`、`server/routers/incidents_router.py`、npm 依赖、`REGISTER_RATE_LIMIT_*`、`LOGIN_RATE_LIMIT_*`、`COPILOT_RATE_LIMIT_*`。
+- 未调用 LLM，未新增 ZIP/PDF/DOCX/HTML 导出格式。
+- 未把 evidence summary、报告 markdown 或 timeline 内容写入 `localStorage` / `sessionStorage`；未使用 `dangerouslySetInnerHTML` / `innerHTML`。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥；本地 dev server 日志不纳入提交。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_incident_evidence_pack_checklist_e2e.py`（新增 evidence pack 浏览器 E2E）
+- `web-next/components/dashboard/IncidentEvidencePackChecklist.tsx`（新增证据包 checklist 面板）
+- `web-next/components/dashboard/IncidentDetailPanel.tsx`（接入面板）
+- `docs/runs/2026-06-21-m3-17-incident-alert-evidence-pack-checklist-ux.md`（本任务 run log）
+- `docs/runs/artifacts/m3-17-incident-alert-evidence-pack-checklist/*.png`（成功截图）
+- `docs/agent/M3_17_INCIDENT_ALERT_EVIDENCE_PACK_CHECKLIST_UX_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-17 索引更新为已交付，下一条建议刷新）
+- `PRODUCT.md` §2.2 新增第 26 项 M3-17 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无本任务阻塞。关键 E2E 首轮/二轮失败均为本地长串测试账号注册或登录限流前置问题；最终使用 fresh 本地 E2E backend/frontend 与多稳定测试账号分摊登录次数完成真实浏览器验证，生产认证和 rate limit 保持不变。
+
+**当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 incident/report API、改 npm 依赖、改生产 rate limit 常量、新增导出格式、调用 LLM、持久化报告正文、引入外部渲染库。
+
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
