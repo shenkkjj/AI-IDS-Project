@@ -81,6 +81,8 @@ export interface IncidentListProps {
   items: IncidentSummary[];
   loadState: "idle" | "loading" | "ready" | "empty" | "error";
   selectedId: string | null;
+  filterLabel?: string;
+  mode?: "default" | "archive";
   onSelect: (incident: IncidentSummary) => void;
 }
 
@@ -88,6 +90,8 @@ export default function IncidentList({
   items,
   loadState,
   selectedId,
+  filterLabel = "全部",
+  mode = "default",
   onSelect,
 }: IncidentListProps) {
   if (loadState === "loading" && items.length === 0) {
@@ -111,13 +115,23 @@ export default function IncidentList({
     );
   }
   if (items.length === 0) {
+    const emptyDescription =
+      filterLabel === "已关闭归档"
+        ? "暂无已关闭案件。"
+        : filterLabel === "活跃"
+        ? "暂无活跃案件。"
+        : filterLabel === "全部"
+        ? "点击触发 Demo 攻击后,在告警详情创建第一个案件。"
+        : `当前状态暂无案件。`;
     return (
-      <StatusView
-        tone="empty"
-        title="暂无案件"
-        description="点击触发 Demo 攻击后,在告警详情创建第一个案件。"
-        minHeight={200}
-      />
+      <div data-testid="incident-list-empty-filtered">
+        <StatusView
+          tone="empty"
+          title={filterLabel === "全部" ? "暂无案件" : `${filterLabel}为空`}
+          description={emptyDescription}
+          minHeight={200}
+        />
+      </div>
     );
   }
   return (
@@ -150,8 +164,18 @@ export default function IncidentList({
                 <SeverityBadge severity={incident.severity} />
               </div>
               <div className="mt-1 text-[10px] font-mono text-ink-tertiary">
-                更新 {formatTime(incident.updated_at)}
-                {incident.closed_at ? ` · 已关闭` : ""}
+                {mode === "archive" ? (
+                  <>
+                    <span data-testid="incident-closed-at">
+                      关闭时间: {incident.closed_at ? formatTime(incident.closed_at) : "未记录"}
+                    </span>
+                    <span> · 更新 {formatTime(incident.updated_at)}</span>
+                  </>
+                ) : (
+                  <span data-testid="incident-list-updated-at">
+                    更新 {formatTime(incident.updated_at)}
+                  </span>
+                )}
               </div>
             </button>
           </li>

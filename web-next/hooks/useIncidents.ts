@@ -78,6 +78,9 @@ export function useIncidents() {
         setLoadState(items.length === 0 ? "empty" : "ready");
         return { ok: true, items };
       } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return { ok: false, error: "已取消" };
+        }
         const message = err instanceof Error ? err.message : String(err);
         setError(message);
         setLoadState("error");
@@ -476,6 +479,19 @@ export function useIncidents() {
     []
   );
 
+  /** M3-19: 前端复合筛选(active / closed)聚合后替换当前列表。 */
+  const replaceIncidentItems = useCallback((items: IncidentSummary[]) => {
+    setIncidentItems(items);
+    setLoadState(items.length === 0 ? "empty" : "ready");
+  }, []);
+
+  /** M3-19: 筛选切换后清理不在当前列表中的 stale detail。 */
+  const clearSelectedIncident = useCallback(() => {
+    setSelectedIncident(null);
+    setDetail(null);
+    setDetailState("idle");
+  }, []);
+
   return {
     // 状态
     incidentItems,
@@ -493,6 +509,8 @@ export function useIncidents() {
     linkAlert,
     unlinkAlert,
     loadIncidentReport,
+    replaceIncidentItems,
+    clearSelectedIncident,
     setSelectedIncident,
   };
 }

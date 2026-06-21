@@ -1,11 +1,17 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { IncidentsController } from "@/hooks/useIncidents";
 import IncidentList from "./IncidentList";
 import IncidentDetailPanel from "./IncidentDetailPanel";
+import IncidentStatusFilterBar, {
+  ACTIVE_INCIDENT_STATUSES,
+  CLOSED_INCIDENT_STATUSES,
+  getIncidentFilterLabel,
+  type IncidentListFilter,
+} from "./IncidentStatusFilterBar";
 import StatusView from "./StatusView";
-import type { IncidentSeverity, IncidentStatus } from "@/types/incident";
+import type { IncidentSeverity, IncidentStatus, IncidentSummary } from "@/types/incident";
 
 /**
  * 安全事件 / 案件工作台 (M3-04, M3-09 单一事实源版本)。
@@ -37,12 +43,124 @@ export default function IncidentSection({
   initialIncidentId,
   renderCreateShortcut,
 }: IncidentSectionProps) {
+  const [filter, setFilter] = useState<IncidentListFilter>("all");
+  const [filtering, setFiltering] = useState(false);
+  const requestSeq = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  const reconcileSelection = useCallback(
+    (items: IncidentSummary[]) => {
+      const selectedId = incidents.selectedIncident?.incident_id;
+      if (!selectedId) return;
+      if (!items.some((item) => item.incident_id === selectedId)) {
+        incidents.clearSelectedIncident();
+      }
+    },
+    [incidents]
+  );
+
+  const loadForFilter = useCallback(
+    async (nextFilter: IncidentListFilter) => {
+      const seq = requestSeq.current + 1;
+      requestSeq.current = seq;
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setFiltering(true);
+
+      const mergeById = (groups: IncidentSummary[][]) => {
+        const map = new Map<string, IncidentSummary>();
+        for (const group of groups) {
+          for (const item of group) {
+            map.set(item.incident_id, item);
+          }
+        }
+        return Array.from(map.values());
+      };
+
+      const sortByUpdated = (items: IncidentSummary[]) =>
+        [...items].sort((a, b) => {
+          if (b.updated_at !== a.updated_at) return b.updated_at - a.updated_at;
+          return b.incident_id.localeCompare(a.incident_id);
+        });
+
+      const sortByClosed = (items: IncidentSummary[]) =>
+        [...items].sort((a, b) => {
+          const bTime = b.closed_at ?? b.updated_at;
+          const aTime = a.closed_at ?? a.updated_at;
+          if (bTime !== aTime) return bTime - aTime;
+          return b.incident_id.localeCompare(a.incident_id);
+        });
+
+      if (nextFilter === "all") {
+        const result = await incidents.loadIncidents({
+          limit: 50,
+          signal: controller.signal,
+        });
+        if (seq === requestSeq.current && result.ok && result.items) {
+          reconcileSelection(result.items);
+        }
+        if (seq === requestSeq.current) setFiltering(false);
+        return;
+      }
+
+      const singleStatus = (
+        ["open", "investigating", "contained", "resolved", "false_positive"] as const
+      ).includes(nextFilter as IncidentStatus)
+        ? (nextFilter as IncidentStatus)
+        : null;
+
+      if (singleStatus) {
+        const result = await incidents.loadIncidents({
+          limit: 50,
+          status: singleStatus,
+          signal: controller.signal,
+        });
+        if (seq === requestSeq.current && result.ok && result.items) {
+          reconcileSelection(result.items);
+        }
+        if (seq === requestSeq.current) setFiltering(false);
+        return;
+      }
+
+      const statuses =
+        nextFilter === "active" ? ACTIVE_INCIDENT_STATUSES : CLOSED_INCIDENT_STATUSES;
+      const groups: IncidentSummary[][] = [];
+      for (const status of statuses) {
+        const result = await incidents.loadIncidents({
+          limit: 50,
+          status,
+          signal: controller.signal,
+        });
+        if (seq !== requestSeq.current) return;
+        if (!result.ok || !result.items) {
+          if (seq === requestSeq.current) setFiltering(false);
+          return;
+        }
+        groups.push(result.items);
+      }
+      const merged = nextFilter === "closed"
+        ? sortByClosed(mergeById(groups))
+        : sortByUpdated(mergeById(groups));
+      incidents.replaceIncidentItems(merged);
+      reconcileSelection(merged);
+      if (seq === requestSeq.current) setFiltering(false);
+    },
+    [incidents, reconcileSelection]
+  );
+
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
+
+  const listLoadState = filtering ? "loading" : incidents.loadState;
+
   // 初次进入加载列表(父层可能已经创建过案件并乐观写入 incidentItems,
   // 这里仍刷新以保持服务端一致)。
   useEffect(() => {
-    void incidents.loadIncidents({ limit: 50 });
+    void loadForFilter(filter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [filter]);
 
   // 选中 / 切换 incident 时加载 detail。
   // M3-09: 已经 ready 且 id 一致时跳过,避免重复拉取造成闪烁。
@@ -81,13 +199,20 @@ export default function IncidentSection({
           <button
             type="button"
             data-testid="incident-refresh"
-            onClick={() => void incidents.loadIncidents({ limit: 50 })}
+            onClick={() => void loadForFilter(filter)}
             className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover border border-line px-2 py-1 transition-colors"
             disabled={incidents.loadState === "loading"}
           >
             {incidents.loadState === "loading" ? "加载中" : "刷新"}
           </button>
         </div>
+
+        <IncidentStatusFilterBar
+          value={filter}
+          loadState={listLoadState}
+          count={incidents.incidentItems.length}
+          onChange={setFilter}
+        />
 
         {/* 创建入口(由父组件注入;默认不渲染) */}
         {renderCreateShortcut
@@ -109,8 +234,10 @@ export default function IncidentSection({
 
         <IncidentList
           items={incidents.incidentItems}
-          loadState={incidents.loadState}
+          loadState={listLoadState}
           selectedId={incidents.selectedIncident?.incident_id ?? null}
+          filterLabel={getIncidentFilterLabel(filter)}
+          mode={filter === "closed" || filter === "resolved" || filter === "false_positive" ? "archive" : "default"}
           onSelect={(incident) => {
             incidents.setSelectedIncident(incident);
           }}
@@ -167,5 +294,3 @@ export default function IncidentSection({
     </div>
   );
 }
-
-export type IncidentStatusFilter = IncidentStatus | "all";
