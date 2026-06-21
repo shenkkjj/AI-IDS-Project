@@ -11,6 +11,8 @@ import pytest
 
 from server.tests.e2e_helpers import (
     classify_register_response,
+    _has_stable_email_override,
+    _stable_email_env_key,
     stable_e2e_user,
     unique_e2e_user,
 )
@@ -67,3 +69,14 @@ def test_stable_e2e_user_uses_env_override(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setenv("E2E_E2E_REPORT_EMAIL", "custom-report@example.com")
     email, _ = stable_e2e_user("e2e-report")
     assert email == "custom-report@example.com"
+
+
+def test_stable_email_env_key_matches_prefix_slug() -> None:
+    assert _stable_email_env_key("e2e-report-preview") == "E2E_E2E_REPORT_PREVIEW_EMAIL"
+
+
+def test_has_stable_email_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("E2E_E2E_RUNBOOK_EMAIL", raising=False)
+    assert _has_stable_email_override("e2e-runbook") is False
+    monkeypatch.setenv("E2E_E2E_RUNBOOK_EMAIL", "runbook@example.com")
+    assert _has_stable_email_override("e2e-runbook") is True

@@ -31,6 +31,7 @@ BASE = os.getenv("E2E_BASE_URL", "http://localhost:3000")
 DEFAULT_PASSWORD = os.getenv("E2E_DEFAULT_PASSWORD", "DemoE2EPass123!")
 
 RegisterStatus = Literal["created", "exists", "rate_limited", "error"]
+_STABLE_ENV_ACCOUNTS_READY: set[str] = set()
 
 
 def skip_without_playwright() -> None:
@@ -45,6 +46,11 @@ def skip_without_playwright() -> None:
 def _safe_slug(text: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "-", text).strip("-")
     return cleaned or "e2e"
+
+
+def _stable_email_env_key(prefix: str) -> str:
+    safe_prefix = _safe_slug(prefix.lower())
+    return f"E2E_{safe_prefix.upper().replace('-', '_')}_EMAIL"
 
 
 def unique_e2e_user(prefix: str) -> Tuple[str, str]:
@@ -64,11 +70,15 @@ def stable_e2e_user(prefix: str) -> Tuple[str, str]:
     ``E2E_DEFAULT_PASSWORD``。
     """
     safe_prefix = _safe_slug(prefix.lower())
-    env_key = f"E2E_{safe_prefix.upper().replace('-', '_')}_EMAIL"
+    env_key = _stable_email_env_key(prefix)
     env_email = (os.getenv(env_key) or "").strip()
     if env_email:
         return env_email, DEFAULT_PASSWORD
     return f"{safe_prefix}-stable@example.com", DEFAULT_PASSWORD
+
+
+def _has_stable_email_override(prefix: str) -> bool:
+    return bool((os.getenv(_stable_email_env_key(prefix)) or "").strip())
 
 
 def classify_register_response(status: int, body: str) -> RegisterStatus:
@@ -270,6 +280,16 @@ async def register_or_login_for_e2e(
     Returns ``(email, password, register_status)``,``register_status`` 反映
     本次实际走的注册路径(``created`` / ``exists`` / ``rate_limited``)。
     """
+    if _has_stable_email_override(prefix):
+        email, password = stable_e2e_user(prefix)
+        if email in _STABLE_ENV_ACCOUNTS_READY or await _stable_account_can_login(
+            page, email, password
+        ):
+            _STABLE_ENV_ACCOUNTS_READY.add(email)
+            await login_with_nextauth_callback(page, email, password)
+            await ensure_dashboard_url(page)
+            return email, password, "exists"
+
     email, password = unique_e2e_user(prefix)
     status = await ensure_registered_or_rate_limited(page, email, password)
 
