@@ -890,6 +890,60 @@ M2 完成时，项目应满足：
 
 **当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 incident/report API、改 npm 依赖、改生产 rate limit 常量、新增导出格式、调用 LLM、持久化报告正文、自动关闭案件、引入外部渲染库。
 
+### M3-19 Closed Incident Archive / Status Filter UX 收口（2026-06-21 已交付）
+
+> 核心目的：在 M3-04 案件工作台与 M3-18 关闭前复盘清单之上，为案件列表补齐状态筛选、关闭态归档视图和 `closed_at` 可见性；只改前端案件列表筛选/归档 UX、真实浏览器 E2E、截图和文档。
+
+**已交付**：
+
+- 新增 `web-next/components/dashboard/IncidentStatusFilterBar.tsx`，提供 `全部 / 活跃 / 已开启 / 调查中 / 已遏制 / 已解决 / 误报 / 已关闭归档` 八类筛选按钮。
+- `IncidentSection.tsx` 复用既有 `useIncidents.loadIncidents({ status })` 与后端 `GET /incidents?status=` 单状态能力；`active` 在前端聚合 `open / investigating / contained`，`closed` 在前端聚合 `resolved / false_positive`。
+- 复合筛选使用 request sequence + `AbortController`，避免快速切换时旧请求覆盖新列表；当前 selected 不在新列表中时调用 `clearSelectedIncident()` 清空详情，防止 stale incident。
+- `useIncidents.ts` 新增 `replaceIncidentItems(items)` 与 `clearSelectedIncident()`，并让 `AbortError` 不进入错误态；不改变后端 API contract。
+- `IncidentList.tsx` 新增筛选空态与 `mode="archive"`；关闭态归档项展示结构化 `incident-closed-at`、状态 badge、关联告警数和更新时间，活跃列表保留普通更新时间。
+- 筛选状态只存在 React state；刷新页面后回到默认 `全部`，不写 `localStorage` / `sessionStorage`。
+- 新增 `server/tests/test_incident_status_filter_archive_e2e.py`（默认 skip，需 `--run-e2e`），真实浏览器覆盖登录、Demo 告警、创建 open / contained / resolved / false_positive 样本、八组筛选、关闭归档只显示关闭态、`closed_at` 可见、关闭态详情仍显示 M3-18 closure checklist、刷新后筛选回默认、桌面/移动截图和 DOM/storage forbidden sentinel。
+- 成功保存 2 张 full-page 截图：`docs/runs/artifacts/m3-19-closed-incident-archive-status-filter/status-filter-desktop.png` / `status-filter-mobile.png`。
+
+**真实验证**：
+
+- RED：新增 E2E 在缺少 `incident-status-filter-bar` selector 时失败（`TimeoutError`），测试未 skip。
+- 新增 status filter E2E：**1 passed in 19.95s**。
+- M3-18 closure + M3-17 evidence pack E2E：**2 passed in 10.63s**。
+- incident report + incident report preview + Dashboard responsive E2E：**4 passed in 26.91s**。
+- 后端 incident 契约：**17 passed in 3.10s**。
+- 关键 E2E 串跑首轮在本地长时运行 backend 后遇到注册/登录限流 setup 失败：**10 passed, 4 failed in 153.15s**；owner 重启本地 backend/frontend 后复跑失败项（Dashboard responsive desktop/mobile、Demo stability、Mobile visual）：**4 passed in 36.88s**。失败项均为 setup 阶段环境/限流噪声，未修改生产 rate limit。
+- 后端全量：**344 passed, 15 skipped, 17 warnings in 83.76s**。
+- Guardrails 专项：**139 passed, 17 warnings in 18.30s**。
+- 前端 `npm run typecheck` 通过；`npm run build` 通过（`/dashboard` 55 kB / First Load JS 202 kB）。
+- 运行日志：`docs/runs/2026-06-21-m3-19-closed-incident-archive-status-filter-ux.md`。
+
+**安全边界**：
+
+- 未改 `server/services/auth_service.py` / `server/core/auth*` / `server/routers/auth*` / `server/security/**` / SSRF / Alembic migration / DB schema。
+- 未改后端 incident/report API contract、`server/routers/incidents_router.py`、`server/services/incident_service.py`、`server/services/incident_report_service.py`、npm 依赖、`REGISTER_RATE_LIMIT_*`、`LOGIN_RATE_LIMIT_*`、`COPILOT_RATE_LIMIT_*`。
+- 未新增案件状态，未自动关闭案件，未改变 `closed_at` 自动设置 / 清空语义，未调用 LLM。
+- 未把筛选状态、报告 markdown、payload 或 timeline 内容写入 `localStorage` / `sessionStorage`；未使用 `dangerouslySetInnerHTML` / `innerHTML`。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥；旧任务截图刷新和 dev server 日志不纳入提交。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_incident_status_filter_archive_e2e.py`（新增 status filter / archive 浏览器 E2E）
+- `web-next/components/dashboard/IncidentStatusFilterBar.tsx`（新增筛选条）
+- `web-next/components/dashboard/IncidentSection.tsx`（接入筛选、复合聚合和 stale detail 清理）
+- `web-next/components/dashboard/IncidentList.tsx`（归档模式、`closed_at` 展示和筛选空态）
+- `web-next/hooks/useIncidents.ts`（列表替换与清空 selected helper）
+- `docs/runs/2026-06-21-m3-19-closed-incident-archive-status-filter-ux.md`（本任务 run log）
+- `docs/runs/artifacts/m3-19-closed-incident-archive-status-filter/*.png`（成功截图）
+- `docs/agent/M3_19_CLOSED_INCIDENT_ARCHIVE_STATUS_FILTER_UX_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-19 索引更新为已交付，下一条建议刷新）
+- `PRODUCT.md` §2.2 新增第 28 项 M3-19 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无本任务阻塞。关键 E2E 首轮 4 个失败来自本地长时运行 backend 的注册/登录限流 setup 状态；重启本地 E2E backend/frontend 后失败项全部真实浏览器通过，生产认证和 rate limit 保持不变。
+
+**当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 incident/report API、改 npm 依赖、改生产 rate limit 常量、新增导出格式、调用 LLM、持久化报告正文、自动关闭案件、引入外部渲染库。
+
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
