@@ -26,6 +26,7 @@ import IncidentTimeline from "./IncidentTimeline";
 import IncidentLinkedAlerts from "./IncidentLinkedAlerts";
 import IncidentReportPreview from "./IncidentReportPreview";
 import IncidentEvidencePackChecklist from "./IncidentEvidencePackChecklist";
+import IncidentClosureReviewChecklist from "./IncidentClosureReviewChecklist";
 import StatusView from "./StatusView";
 
 const NOTE_MAX_LENGTH = 1000;
@@ -528,6 +529,13 @@ export default function IncidentDetailPanel({
       </div>
 
       <IncidentEvidencePackChecklist
+        incident={detail.incident}
+        linkedAlerts={detail.linked_alerts}
+        events={detail.events}
+        onLoadReport={onLoadReport}
+      />
+
+      <IncidentClosureReviewChecklist
         incident={detail.incident}
         linkedAlerts={detail.linked_alerts}
         events={detail.events}
