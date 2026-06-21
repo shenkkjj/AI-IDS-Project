@@ -839,6 +839,57 @@ M2 完成时，项目应满足：
 
 **当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 incident/report API、改 npm 依赖、改生产 rate limit 常量、新增导出格式、调用 LLM、持久化报告正文、引入外部渲染库。
 
+### M3-18 Incident Closure / Post-Incident Review Checklist UX 收口（2026-06-21 已交付）
+
+> 核心目的：在 M3-17 证据包清单之上，新增只读关闭前复盘清单，帮助 owner 判断案件是否适合进入 `resolved / false_positive`；只改前端 closure checklist UX、E2E、截图和文档。
+
+**已交付**：
+
+- 新增 `web-next/components/dashboard/IncidentClosureReviewChecklist.tsx`，在 `IncidentDetailPanel` 的 Evidence Pack Checklist 之后、事件时间线之前展示 `Post-Incident Review Checklist`。
+- 面板包含八项检查：状态可复核、证据包基础材料、报告元信息、关联告警、研判覆盖、时间线事件、复盘备注、关闭缺失项。
+- `closure-refresh-report` 只调用既有 `onLoadReport(incidentId)`，仅保存 `filename` 与 `meta`，丢弃返回的 markdown，避免在组件 state 或浏览器 storage 中保留完整报告正文。
+- `closure-copy-summary` 复制安全摘要：incident id、状态、严重度、`closed_at` 是否适用、关联告警数、时间线事件数、研判覆盖、report meta 计数、脱敏/截断状态、复盘备注是否存在、关闭建议和缺失项；不包含 payload、原始 timeline note、analyst note、token、secret 或报告正文。
+- 关闭建议只读推导，不自动把案件改为 `resolved` 或 `false_positive`，不新增案件状态，不改变后端 `closed_at` 自动设置 / 清空语义。
+- `IncidentDetailPanel.tsx` 只新增组件挂载并传入现有 `detail.incident`、`detail.linked_alerts`、`detail.events` 与 `onLoadReport`，未调整后端 API、认证 hook 或数据 schema。
+- 新增 `server/tests/test_incident_closure_review_checklist_e2e.py`（默认 skip，需 `--run-e2e`），真实浏览器覆盖登录、Demo 告警、创建案件、M3-17 Evidence Pack Checklist 仍可见、Closure Review Checklist、报告 meta 刷新、复制摘要、保存 `contained` + 复盘备注、下载 markdown 回归、桌面/移动截图和 DOM/clipboard/markdown forbidden sentinel。
+- 成功保存 2 张 full-page 截图：`docs/runs/artifacts/m3-18-incident-closure-post-incident-review-checklist/closure-review-desktop.png` / `closure-review-mobile.png`。
+
+**真实验证**：
+
+- RED：新增 E2E 在缺少 `incident-closure-review-checklist` selector 时失败（15s timeout）。
+- 新增 closure E2E：**1 passed in 12.07s**。
+- M3-17 evidence pack + incident report + incident report preview + security timeline drilldown + Dashboard responsive E2E：**6 passed in 52.10s**。
+- 关键 E2E 串跑（Auth / Demo / Incident report / Dashboard route / Responsive desktop+mobile / Demo stability / Mobile visual / Incident report preview / Security timeline drilldown / Dashboard operational runbook / Incident evidence pack checklist / Incident closure review checklist）：**13 passed in 99.18s**。
+- 后端 timeline 专项：**12 passed in 1.13s**。
+- 后端全量：**344 passed, 14 skipped, 17 warnings in 83.26s**。
+- Guardrails 专项：**139 passed, 17 warnings in 19.05s**。
+- 前端 `npm run typecheck` 通过；`npm run build` 通过（`/dashboard` 53.4 kB / First Load JS 201 kB）。
+- 运行日志：`docs/runs/2026-06-21-m3-18-incident-closure-post-incident-review-checklist-ux.md`。
+
+**安全边界**：
+
+- 未改 `server/services/auth_service.py` / `server/core/auth*` / `server/routers/auth*` / `server/security/**` / SSRF / Alembic migration / DB schema。
+- 未改后端 incident/report API contract、`server/services/incident_report_service.py`、`server/routers/incidents_router.py`、npm 依赖、`REGISTER_RATE_LIMIT_*`、`LOGIN_RATE_LIMIT_*`、`COPILOT_RATE_LIMIT_*`。
+- 未调用 LLM，未新增 ZIP/PDF/DOCX/HTML 导出格式，未自动关闭案件，未改变 `closed_at` 语义。
+- 未把 closure summary、报告 markdown 或 timeline 内容写入 `localStorage` / `sessionStorage`；未使用 `dangerouslySetInnerHTML` / `innerHTML`。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥；本地 dev server 日志不纳入提交。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_incident_closure_review_checklist_e2e.py`（新增 closure review 浏览器 E2E）
+- `web-next/components/dashboard/IncidentClosureReviewChecklist.tsx`（新增关闭前复盘 checklist 面板）
+- `web-next/components/dashboard/IncidentDetailPanel.tsx`（接入面板）
+- `docs/runs/2026-06-21-m3-18-incident-closure-post-incident-review-checklist-ux.md`（本任务 run log）
+- `docs/runs/artifacts/m3-18-incident-closure-post-incident-review-checklist/*.png`（成功截图）
+- `docs/agent/M3_18_INCIDENT_CLOSURE_POST_INCIDENT_REVIEW_CHECKLIST_UX_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-18 索引更新为已交付，下一条建议刷新）
+- `PRODUCT.md` §2.2 新增第 27 项 M3-18 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无本任务阻塞。相邻 E2E 首轮因本地注册限流前置失败；最终使用 fresh 本地 E2E backend/frontend 与 5 个稳定测试账号完成真实浏览器验证，生产认证和 rate limit 保持不变。
+
+**当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 incident/report API、改 npm 依赖、改生产 rate limit 常量、新增导出格式、调用 LLM、持久化报告正文、自动关闭案件、引入外部渲染库。
+
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
