@@ -25,6 +25,7 @@ import {
 import IncidentTimeline from "./IncidentTimeline";
 import IncidentLinkedAlerts from "./IncidentLinkedAlerts";
 import IncidentReportPreview from "./IncidentReportPreview";
+import IncidentEvidencePackChecklist from "./IncidentEvidencePackChecklist";
 import StatusView from "./StatusView";
 
 const NOTE_MAX_LENGTH = 1000;
@@ -525,6 +526,13 @@ export default function IncidentDetailPanel({
           </button>
         </div>
       </div>
+
+      <IncidentEvidencePackChecklist
+        incident={detail.incident}
+        linkedAlerts={detail.linked_alerts}
+        events={detail.events}
+        onLoadReport={onLoadReport}
+      />
 
       {/* 事件时间线 */}
       <div className="px-5 py-4">
