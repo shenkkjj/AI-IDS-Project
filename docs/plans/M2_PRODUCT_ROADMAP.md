@@ -998,6 +998,63 @@ M2 完成时，项目应满足：
 
 **当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 incident/report API、改 npm 依赖、改生产 rate limit 常量、新增后端导出格式、调用 LLM、持久化队列或报告正文、自动关闭/删除/批量修改案件、引入外部渲染库。
 
+### M3-21 Incident Workspace Keyboard Navigation / Accessibility QA UX 收口（2026-06-22 已交付）
+
+> 核心目的：在 M3-17 到 M3-20 的案件工作台能力之上补齐键盘导航、焦点状态、ARIA 语义、报告预览焦点恢复、Evidence / Closure checklist 可访问性、真实浏览器 E2E 与桌面/移动截图证据。
+
+**已交付**：
+
+- `IncidentSection.tsx` 为案件工作台、案件列表与详情区域补充具名 `region`，并保持左右工作区结构不变。
+- `IncidentList.tsx` 为多选 checkbox 改用安全 accessible name，只包含 incident id、状态、严重度和告警数，不泄露 title 正文、summary、payload、note 或报告内容；当前详情项增加 `aria-current` / `aria-selected`。
+- `IncidentStatusFilterBar.tsx`、`IncidentBulkActionBar.tsx`、`IncidentExportQueuePanel.tsx` 补齐键盘 focus-visible 与列表语义。
+- `IncidentDetailPanel.tsx` 为 status / severity radiogroup 增加方向键与 Home / End 导航；报告预览打开后焦点进入 preview，Escape 或关闭按钮会恢复到 `incident-preview-report`。
+- `IncidentReportPreview.tsx` 增加可聚焦具名 region 和关闭按钮焦点状态，仍使用受控 markdown 文本渲染，不使用 `dangerouslySetInnerHTML` / `innerHTML`。
+- `IncidentEvidencePackChecklist.tsx` 与 `IncidentClosureReviewChecklist.tsx` 为 checklist 补 list/listitem 语义、按钮焦点状态和 live status。
+- 新增 `server/tests/test_incident_workspace_accessibility_e2e.py`（默认 skip，需 `--run-e2e`），真实浏览器覆盖键盘筛选、Space 多选、Tab 到列表项、Enter 打开详情、radiogroup 方向键、保存、报告预览焦点进入与恢复、Evidence / Closure 刷新复制、批量复制、队列清空、accessible name audit、重复 id audit、storage audit、DOM / clipboard forbidden sentinel 和桌面/移动截图。
+- 成功保存 2 张 full-page 截图：`docs/runs/artifacts/m3-21-incident-workspace-accessibility/accessibility-desktop.png` / `accessibility-mobile.png`。
+
+**真实验证**：
+
+- RED：新增 E2E 在旧 UI 上失败，失败点为 checkbox accessible name 使用 title 片段（`checkbox aria-label 应包含 incident_id`）。
+- 新增 keyboard / accessibility E2E：**1 passed in 11.53s**。
+- 相邻案件 UX 回归：首轮 **3 passed / 4 setup failures** 后使用 fresh backend 复跑失败项 **4 passed in 34.32s**，最终 7 个相邻真实浏览器测试都有通过证据。
+- 关键 E2E 串跑：首轮受本地注册限流影响失败；预置 stable 本地账号后 **14 passed / 2 setup failures**；补充实际 prefix 后 timeline 通过，runbook 既有复制状态等待偶发失败后单独复跑 **1 passed in 7.50s**。最终 15 个文件 / 16 个真实浏览器测试全部有通过证据，生产 rate limit、认证和后端 API 保持不变。
+- 后端 incident / report 契约：**31 passed in 7.06s**。
+- 后端全量：**344 passed, 17 skipped, 17 warnings in 89.00s**。
+- Guardrails 专项：**139 passed, 17 warnings in 19.60s**。
+- 前端 `npm run typecheck` 通过；`npm run build` 通过（`/dashboard` 57.8 kB / First Load JS 205 kB）。
+- 运行日志：`docs/runs/2026-06-22-m3-21-incident-workspace-keyboard-navigation-accessibility-qa-ux.md`。
+
+**安全边界**：
+
+- 未改认证/授权、Guardrails、SSRF、DB schema、后端 incident/report API contract、npm 依赖、生产 rate limit 常量或导出格式。
+- 未新增后端能力；未自动关闭、删除或批量修改案件；未调用 LLM。
+- 未把 selection、export queue、报告 markdown、payload 或 timeline 内容写入 `localStorage` / `sessionStorage`；未使用 `dangerouslySetInnerHTML` / `innerHTML`。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥；旧任务截图刷新和 dev server 日志不纳入提交。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_incident_workspace_accessibility_e2e.py`（新增键盘导航 / 可访问性浏览器 E2E）
+- `web-next/components/dashboard/IncidentSection.tsx`（工作台区域语义）
+- `web-next/components/dashboard/IncidentList.tsx`（安全 accessible name 与当前项 ARIA）
+- `web-next/components/dashboard/IncidentStatusFilterBar.tsx`（筛选按钮焦点状态）
+- `web-next/components/dashboard/IncidentBulkActionBar.tsx`（批量操作焦点状态）
+- `web-next/components/dashboard/IncidentExportQueuePanel.tsx`（队列列表语义）
+- `web-next/components/dashboard/IncidentDetailPanel.tsx`（radiogroup 键盘导航、报告预览焦点恢复）
+- `web-next/components/dashboard/IncidentReportPreview.tsx`（预览 region 与焦点入口）
+- `web-next/components/dashboard/IncidentEvidencePackChecklist.tsx`（证据包 checklist 可访问性）
+- `web-next/components/dashboard/IncidentClosureReviewChecklist.tsx`（关闭复盘 checklist 可访问性）
+- `docs/runs/2026-06-22-m3-21-incident-workspace-keyboard-navigation-accessibility-qa-ux.md`（本任务 run log）
+- `docs/runs/artifacts/m3-21-incident-workspace-accessibility/*.png`（成功截图）
+- `docs/agent/M3_21_INCIDENT_WORKSPACE_KEYBOARD_NAVIGATION_ACCESSIBILITY_QA_UX_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-21 索引更新为已交付，下一条建议刷新）
+- `PRODUCT.md` §2.2 新增第 30 项 M3-21 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无本任务阻塞。关键 E2E 中间失败均为本地 dev backend 注册限流前置或既有 runbook 复制状态等待偶发；最终通过 fresh backend、stable 本地测试账号和目标复跑取得通过证据，生产认证和 rate limit 保持不变。
+
+**当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 incident/report API、改 npm 依赖、改生产 rate limit 常量、新增后端能力或导出格式、调用 LLM、持久化队列或报告正文、自动关闭/删除/批量修改案件、引入外部渲染库。
+
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
