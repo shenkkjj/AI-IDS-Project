@@ -483,7 +483,7 @@ export default function IncidentClosureReviewChecklist({
             data-testid="closure-refresh-report"
             onClick={() => void handleRefreshReport()}
             disabled={reportStatus === "loading"}
-            className="inline-flex items-center gap-1.5 border border-line px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-accent transition-colors hover:border-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-1.5 border border-line px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-accent transition-colors hover:border-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             aria-label="检查关闭复核报告元信息"
           >
             {reportStatus === "loading" ? (
@@ -497,7 +497,7 @@ export default function IncidentClosureReviewChecklist({
             type="button"
             data-testid="closure-copy-summary"
             onClick={() => void handleCopySummary()}
-            className="inline-flex items-center gap-1.5 border border-line px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-accent transition-colors hover:border-accent hover:bg-accent-soft"
+            className="inline-flex items-center gap-1.5 border border-line px-2.5 py-1.5 text-[10px] font-mono uppercase tracking-[0.12em] text-accent transition-colors hover:border-accent hover:bg-accent-soft focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             aria-label="复制关闭前复盘摘要"
           >
             <Clipboard className="h-3.5 w-3.5" aria-hidden="true" />
@@ -516,6 +516,8 @@ export default function IncidentClosureReviewChecklist({
       <div
         data-testid="closure-recommendation"
         data-readiness={recommendation.key}
+        role="status"
+        aria-live="polite"
         className={`mb-4 flex flex-col gap-2 border px-3 py-2 text-[11px] sm:flex-row sm:items-center sm:justify-between ${recommendationMeta.className}`}
       >
         <span className="inline-flex items-center gap-1.5 font-mono uppercase tracking-[0.12em]">
@@ -559,7 +561,11 @@ export default function IncidentClosureReviewChecklist({
         </div>
       ) : null}
 
-      <div className="grid gap-2 md:grid-cols-2">
+      <div
+        className="grid gap-2 md:grid-cols-2"
+        role="list"
+        aria-label="关闭前复盘检查项"
+      >
         {checks.map((check) => {
           const tone = TONE_META[check.tone];
           const Icon = tone.icon;
@@ -568,6 +574,7 @@ export default function IncidentClosureReviewChecklist({
               key={check.testId}
               data-testid={check.testId}
               data-tone={check.tone}
+              role="listitem"
               className="min-w-0 border border-line bg-bg-panel px-3 py-2.5"
             >
               <div className="mb-2 flex items-start justify-between gap-3">

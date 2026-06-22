@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import {
   Check,
   Clipboard,
@@ -62,6 +63,27 @@ function createReportPreviewMarkdown(markdown: string): string {
     .slice(0, 1800);
 }
 
+function getNextOptionIndex(
+  currentIndex: number,
+  length: number,
+  key: string
+): number | null {
+  if (length <= 0) return null;
+  if (key === "ArrowRight" || key === "ArrowDown") return (currentIndex + 1) % length;
+  if (key === "ArrowLeft" || key === "ArrowUp") {
+    return (currentIndex - 1 + length) % length;
+  }
+  if (key === "Home") return 0;
+  if (key === "End") return length - 1;
+  return null;
+}
+
+function focusByTestId(testId: string) {
+  window.requestAnimationFrame(() => {
+    document.querySelector<HTMLElement>(`[data-testid="${testId}"]`)?.focus();
+  });
+}
+
 export interface IncidentDetailPanelProps {
   detail: IncidentDetailResponse;
   actionState: "idle" | "saving" | "error";
@@ -115,6 +137,7 @@ export default function IncidentDetailPanel({
   const [note, setNote] = useState<string>("");
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [linkInput, setLinkInput] = useState<string>("");
+  const previewButtonRef = useRef<HTMLButtonElement | null>(null);
 
   // 切换 incident 时同步本地 state
   useEffect(() => {
@@ -150,6 +173,46 @@ export default function IncidentDetailPanel({
       setSaveMessage(result.error || "保存失败");
     }
   }, [onUpdate, status, severity, title, summary, note]);
+
+  const handleStatusKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const currentIndex = Math.max(
+        0,
+        INCIDENT_STATUS_OPTIONS.findIndex((option) => option.value === status)
+      );
+      const nextIndex = getNextOptionIndex(
+        currentIndex,
+        INCIDENT_STATUS_OPTIONS.length,
+        event.key
+      );
+      if (nextIndex === null) return;
+      event.preventDefault();
+      const nextStatus = INCIDENT_STATUS_OPTIONS[nextIndex].value;
+      setStatus(nextStatus);
+      focusByTestId(`incident-status-${nextStatus}`);
+    },
+    [status]
+  );
+
+  const handleSeverityKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const currentIndex = Math.max(
+        0,
+        INCIDENT_SEVERITY_OPTIONS.findIndex((option) => option.value === severity)
+      );
+      const nextIndex = getNextOptionIndex(
+        currentIndex,
+        INCIDENT_SEVERITY_OPTIONS.length,
+        event.key
+      );
+      if (nextIndex === null) return;
+      event.preventDefault();
+      const nextSeverity = INCIDENT_SEVERITY_OPTIONS[nextIndex].value;
+      setSeverity(nextSeverity);
+      focusByTestId(`incident-severity-${nextSeverity}`);
+    },
+    [severity]
+  );
 
   const handleLink = useCallback(async () => {
     const value = linkInput.trim();
@@ -219,17 +282,27 @@ export default function IncidentDetailPanel({
     setReportPreviewLoading(false);
   }, [detail.incident.incident_id]);
 
+  const closeReportPreview = useCallback((restoreFocus = true) => {
+    setReportPreview(null);
+    setReportPreviewError(null);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => previewButtonRef.current?.focus());
+    }
+  }, []);
+
   useEffect(() => {
     if (!reportPreview) return undefined;
-    const handleKeyDown = (event: KeyboardEvent) => {
+    window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('[data-testid="incident-report-preview"]')?.focus();
+    });
+    const handleKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
-        setReportPreview(null);
-        setReportPreviewError(null);
+        closeReportPreview(true);
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [reportPreview]);
+  }, [closeReportPreview, reportPreview]);
 
   const handlePreviewReport = useCallback(async () => {
     if (reportPreviewLoading || reportAction === "loading") return;
@@ -337,9 +410,9 @@ export default function IncidentDetailPanel({
           type="button"
           onClick={onRefresh}
           data-testid="incident-detail-refresh"
-          className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1"
+          className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
-          <RefreshCw className="w-3 h-3" />
+          <RefreshCw className="w-3 h-3" aria-hidden />
           刷新
         </button>
       </div>
@@ -354,6 +427,7 @@ export default function IncidentDetailPanel({
           <div
             role="radiogroup"
             aria-label="事件状态"
+            onKeyDown={handleStatusKeyDown}
             className="flex flex-wrap gap-1"
           >
             {INCIDENT_STATUS_OPTIONS.map((option) => {
@@ -371,9 +445,10 @@ export default function IncidentDetailPanel({
                   type="button"
                   role="radio"
                   aria-checked={isActive}
+                  tabIndex={isActive ? 0 : -1}
                   data-testid={`incident-status-${option.value}`}
                   onClick={() => setStatus(option.value)}
-                  className={`px-2 py-1 text-[11px] font-mono uppercase tracking-[0.1em] border transition-colors ${
+                  className={`px-2 py-1 text-[11px] font-mono uppercase tracking-[0.1em] border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                     isActive
                       ? activeTone[option.tone]
                       : "border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary"
@@ -394,6 +469,7 @@ export default function IncidentDetailPanel({
           <div
             role="radiogroup"
             aria-label="事件严重度"
+            onKeyDown={handleSeverityKeyDown}
             className="flex flex-wrap gap-1"
           >
             {INCIDENT_SEVERITY_OPTIONS.map((option) => {
@@ -404,9 +480,10 @@ export default function IncidentDetailPanel({
                   type="button"
                   role="radio"
                   aria-checked={isActive}
+                  tabIndex={isActive ? 0 : -1}
                   data-testid={`incident-severity-${option.value}`}
                   onClick={() => setSeverity(option.value)}
-                  className={`px-2 py-1 text-[11px] font-mono uppercase tracking-[0.1em] border transition-colors ${
+                  className={`px-2 py-1 text-[11px] font-mono uppercase tracking-[0.1em] border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                     isActive
                       ? "bg-accent-soft text-accent border-accent"
                       : "border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary"
@@ -428,9 +505,10 @@ export default function IncidentDetailPanel({
             <input
               data-testid="incident-title-input"
               type="text"
+              aria-label="案件标题"
               value={title}
               onChange={(e) => setTitle(e.target.value.slice(0, TITLE_MAX_LENGTH))}
-              className="w-full bg-transparent text-ink text-sm py-1.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent transition-colors"
+              className="w-full bg-transparent text-ink text-sm py-1.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent transition-colors"
             />
           </div>
           <div>
@@ -439,12 +517,13 @@ export default function IncidentDetailPanel({
             </label>
             <textarea
               data-testid="incident-summary-input"
+              aria-label="案件摘要"
               value={summary}
               onChange={(e) =>
                 setSummary(e.target.value.slice(0, SUMMARY_MAX_LENGTH))
               }
               rows={2}
-              className="w-full bg-transparent text-ink text-xs leading-relaxed py-1.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent transition-colors resize-y min-h-[40px]"
+              className="w-full bg-transparent text-ink text-xs leading-relaxed py-1.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent transition-colors resize-y min-h-[40px]"
             />
           </div>
         </div>
@@ -456,13 +535,14 @@ export default function IncidentDetailPanel({
           </label>
           <textarea
             data-testid="incident-note-input"
+            aria-label="处置备注"
             value={note}
             onChange={(e) =>
               setNote(e.target.value.slice(0, NOTE_MAX_LENGTH))
             }
             rows={2}
             placeholder="例如:已加入同源 IP 监控,WAF 持续拦截,待后续人工复盘"
-            className="w-full bg-transparent text-ink text-xs leading-relaxed py-1.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent transition-colors resize-y min-h-[40px] placeholder:text-ink-tertiary"
+            className="w-full bg-transparent text-ink text-xs leading-relaxed py-1.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent transition-colors resize-y min-h-[40px] placeholder:text-ink-tertiary"
           />
         </div>
 
@@ -476,7 +556,7 @@ export default function IncidentDetailPanel({
             data-testid="incident-save"
             onClick={() => void handleSave()}
             disabled={!dirty || saving}
-            className={`px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.15em] border transition-colors inline-flex items-center gap-1.5 ${
+            className={`px-3 py-1.5 text-[10px] font-mono uppercase tracking-[0.15em] border transition-colors inline-flex items-center gap-1.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
               dirty
                 ? "border-accent text-accent hover:bg-accent-soft"
                 : "border-line text-ink-tertiary"
@@ -511,17 +591,18 @@ export default function IncidentDetailPanel({
           <input
             data-testid="incident-link-input"
             type="text"
+            aria-label="加入告警 ID"
             value={linkInput}
             onChange={(e) => setLinkInput(e.target.value)}
             placeholder="输入 alert_id 加入案件"
-            className="flex-1 bg-transparent text-ink text-xs py-1.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent transition-colors placeholder:text-ink-tertiary"
+            className="flex-1 bg-transparent text-ink text-xs py-1.5 px-0 border-0 border-b border-line focus:outline-none focus:border-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent transition-colors placeholder:text-ink-tertiary"
           />
           <button
             type="button"
             data-testid="incident-link-submit"
             onClick={() => void handleLink()}
             disabled={!linkInput.trim() || saving}
-            className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.15em] border border-accent text-accent hover:bg-accent-soft transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="px-2.5 py-1 text-[10px] font-mono uppercase tracking-[0.15em] border border-accent text-accent hover:bg-accent-soft transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
             加入
           </button>
@@ -561,9 +642,10 @@ export default function IncidentDetailPanel({
             <button
               type="button"
               data-testid="incident-preview-report"
+              ref={previewButtonRef}
               onClick={() => void handlePreviewReport()}
               disabled={reportPreviewLoading || reportLoading}
-              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               aria-label="预览案件报告"
             >
               {reportPreviewLoading ? (
@@ -578,7 +660,7 @@ export default function IncidentDetailPanel({
               data-testid="incident-copy-report"
               onClick={() => void handleReport("copy")}
               disabled={reportLoading}
-              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               aria-label="复制案件报告"
             >
               {reportLoading ? (
@@ -595,7 +677,7 @@ export default function IncidentDetailPanel({
               data-testid="incident-download-report"
               onClick={() => void handleReport("download")}
               disabled={reportLoading}
-              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
               aria-label="下载案件报告"
             >
               {reportLoading ? (
@@ -609,9 +691,9 @@ export default function IncidentDetailPanel({
               type="button"
               data-testid="incident-copilot"
               onClick={handleCopilot}
-              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1"
+              className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover inline-flex items-center gap-1 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             >
-              <Sparkles className="w-3 h-3" />
+              <Sparkles className="w-3 h-3" aria-hidden />
               用 AI 分析案件
             </button>
           </div>
@@ -630,10 +712,7 @@ export default function IncidentDetailPanel({
             meta={reportPreview.meta}
             previewMarkdown={reportPreview.previewMarkdown}
             loadedAt={reportPreview.loadedAt}
-            onClose={() => {
-              setReportPreview(null);
-              setReportPreviewError(null);
-            }}
+            onClose={() => closeReportPreview(true)}
           />
         ) : null}
         <IncidentTimeline events={detail.events} />

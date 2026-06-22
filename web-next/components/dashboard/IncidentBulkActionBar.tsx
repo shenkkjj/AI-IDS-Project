@@ -68,7 +68,7 @@ export default function IncidentBulkActionBar({
           data-testid="incident-bulk-select-page"
           onClick={onSelectPage}
           disabled={!hasVisibleItems}
-          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           <SquareCheckBig className="w-3 h-3" aria-hidden />
           全选当前列表
@@ -78,7 +78,7 @@ export default function IncidentBulkActionBar({
           data-testid="incident-bulk-clear-selection"
           onClick={onClearSelection}
           disabled={!hasSelection}
-          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           <Eraser className="w-3 h-3" aria-hidden />
           清空选择
@@ -88,7 +88,7 @@ export default function IncidentBulkActionBar({
           data-testid="incident-bulk-copy-summary"
           onClick={onCopySummary}
           disabled={!hasSelection}
-          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-accent text-accent hover:bg-accent-soft transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-accent text-accent hover:bg-accent-soft transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           {copyStatus === "copied" ? (
             <CheckSquare className="w-3 h-3" aria-hidden />
@@ -102,7 +102,7 @@ export default function IncidentBulkActionBar({
           data-testid="incident-add-export-queue"
           onClick={onAddToQueue}
           disabled={!hasSelection}
-          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-accent text-accent hover:bg-accent-soft transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-accent text-accent hover:bg-accent-soft transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           <ListPlus className="w-3 h-3" aria-hidden />
           加入导出队列

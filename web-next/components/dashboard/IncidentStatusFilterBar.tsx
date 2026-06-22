@@ -130,7 +130,7 @@ export default function IncidentStatusFilterBar({
               data-testid={option.testId}
               aria-pressed={active}
               onClick={() => onChange(option.value)}
-              className={`inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase tracking-[0.1em] border transition-colors ${
+              className={`inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase tracking-[0.1em] border transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent ${
                 active
                   ? "border-accent bg-accent-soft text-accent"
                   : "border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary"

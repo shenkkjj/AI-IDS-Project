@@ -75,13 +75,15 @@ export default function IncidentReportPreview({
   return (
     <section
       data-testid="incident-report-preview"
-      className="mb-3 border border-line bg-bg-panel px-3 py-3 sm:px-4 sm:py-4 overflow-hidden"
+      role="region"
+      tabIndex={-1}
+      className="mb-3 border border-line bg-bg-panel px-3 py-3 sm:px-4 sm:py-4 overflow-hidden focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
       aria-label="案件报告预览"
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-[10px] font-mono uppercase tracking-[0.15em] text-accent">
-            <FileText className="w-3 h-3 shrink-0" />
+            <FileText className="w-3 h-3 shrink-0" aria-hidden />
             报告预览
           </div>
           <div
@@ -98,11 +100,11 @@ export default function IncidentReportPreview({
           type="button"
           data-testid="incident-report-preview-close"
           onClick={onClose}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center border border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary transition-colors"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center border border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           aria-label="关闭报告预览"
           title="关闭报告预览"
         >
-          <X className="w-3.5 h-3.5" />
+          <X className="w-3.5 h-3.5" aria-hidden />
         </button>
       </div>
 
@@ -145,7 +147,7 @@ export default function IncidentReportPreview({
       </div>
 
       <div className="mt-3 flex items-start gap-2 border border-line bg-bg-raised px-2.5 py-2 text-[11px] text-ink-secondary">
-        <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" />
+        <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent" aria-hidden />
         <p className="leading-relaxed break-words">
           已脱敏；{meta.truncated ? "部分告警或事件已截断。" : "未触发条目截断。"}
           预览只显示后端报告片段，复制和下载会重新拉取完整脱敏报告。

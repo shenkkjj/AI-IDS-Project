@@ -278,9 +278,11 @@ export default function IncidentSection({
   return (
     <div
       data-testid="incident-section"
+      role="region"
+      aria-label="案件工作台"
       className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-6"
     >
-      <div className="space-y-4">
+      <div className="space-y-4" role="region" aria-label="案件列表与批量操作">
         {/* 顶部工具栏 */}
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div>
@@ -293,7 +295,7 @@ export default function IncidentSection({
             type="button"
             data-testid="incident-refresh"
             onClick={() => void loadForFilter(filter)}
-            className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover border border-line px-2 py-1 transition-colors"
+            className="text-[10px] font-mono uppercase tracking-[0.15em] text-accent hover:text-accent-hover border border-line px-2 py-1 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
             disabled={incidents.loadState === "loading"}
           >
             {incidents.loadState === "loading" ? "加载中" : "刷新"}
@@ -355,7 +357,7 @@ export default function IncidentSection({
         />
       </div>
 
-      <div>
+      <div role="region" aria-label="案件详情">
         {incidents.detailState === "loading" ? (
           <StatusView
             tone="empty"

@@ -49,7 +49,7 @@ export default function IncidentExportQueuePanel({
           data-testid="incident-export-queue-clear"
           onClick={onClear}
           disabled={queue.length === 0}
-          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 px-2 py-1 text-[10px] font-mono uppercase border border-line text-ink-tertiary hover:text-ink hover:border-ink-tertiary transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
         >
           <Trash2 className="w-3 h-3" aria-hidden />
           清空队列
@@ -57,12 +57,17 @@ export default function IncidentExportQueuePanel({
       </div>
 
       {queue.length > 0 ? (
-        <ol className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+        <ol
+          className="space-y-1.5 max-h-40 overflow-y-auto pr-1"
+          role="list"
+          aria-label="导出准备队列"
+        >
           {queue.map((item) => (
             <li
               key={item.incident_id}
               data-testid="incident-export-queue-item"
               data-incident-id={item.incident_id}
+              role="listitem"
               className="border border-line-subtle px-2 py-1.5"
             >
               <div className="flex items-center justify-between gap-2 flex-wrap">

@@ -77,6 +77,15 @@ function formatTime(epoch: number): string {
   return new Date(epoch * 1000).toLocaleString("zh-CN", { hour12: false });
 }
 
+function checkboxLabel(incident: IncidentSummary): string {
+  return [
+    `选择案件 ${incident.incident_id}`,
+    `状态 ${INCIDENT_STATUS_LABEL[incident.status] || incident.status}`,
+    `严重度 ${INCIDENT_SEVERITY_LABEL[incident.severity] || incident.severity}`,
+    `${incident.alert_count} 条关联告警`,
+  ].join("，");
+}
+
 export interface IncidentListProps {
   items: IncidentSummary[];
   loadState: "idle" | "loading" | "ready" | "empty" | "error";
@@ -160,16 +169,18 @@ export default function IncidentList({
                     checked={isBulkSelected}
                     onChange={() => onToggleSelect(incident)}
                     onClick={(event) => event.stopPropagation()}
-                    aria-label={`选择案件 ${incident.title || incident.incident_id}`}
-                    className="mt-0.5 h-4 w-4 shrink-0 accent-accent"
+                    aria-label={checkboxLabel(incident)}
+                    className="mt-0.5 h-4 w-4 shrink-0 accent-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                   />
                 ) : null}
                 <button
                   type="button"
                   data-testid="incident-list-item"
                   data-incident-id={incident.incident_id}
+                  aria-current={isSelected ? "true" : undefined}
+                  aria-selected={isSelected}
                   onClick={() => onSelect(incident)}
-                  className="min-w-0 flex-1 text-left"
+                  className="min-w-0 flex-1 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="text-sm text-ink font-mono break-all">
