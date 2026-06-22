@@ -944,6 +944,60 @@ M2 完成时，项目应满足：
 
 **当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 incident/report API、改 npm 依赖、改生产 rate limit 常量、新增导出格式、调用 LLM、持久化报告正文、自动关闭案件、引入外部渲染库。
 
+### M3-20 Incident Workbench Bulk Selection / Export Queue UX 收口（2026-06-22 已交付）
+
+> 核心目的：在 M3-19 案件状态筛选和关闭态归档之上，为案件列表补齐多选、全选当前筛选、批量复制安全摘要和前端内存级导出队列提示；只改前端案件列表批量 UX、真实浏览器 E2E、截图和文档。
+
+**已交付**：
+
+- 新增 `web-next/components/dashboard/IncidentBulkActionBar.tsx`，显示当前筛选下选中数、全选当前列表、清空选择、复制安全摘要和加入导出队列动作。
+- 新增 `web-next/components/dashboard/IncidentExportQueuePanel.tsx`，展示前端准备队列数量、最近加入的 incident id、状态、严重度、告警数、title length 与 `closed_at` 是否存在，并提供清空队列。
+- 新增 `web-next/types/incidentBulkActions.ts`，集中生成安全字段队列项和 clipboard 摘要；摘要不包含 title 正文、summary、payload、note、report markdown、secret、stack trace。
+- `IncidentList.tsx` 为每个列表项增加 sibling checkbox（`data-testid="incident-select-checkbox"`）；checkbox 点击只切换选择，不触发详情打开。
+- `IncidentSection.tsx` 用 React state 保存 `selectedIncidentIds` 与 `exportQueue`；筛选或列表刷新时把 selection 与当前可见列表求交集，防止 stale selection；队列去重并限制最多 25 项。
+- 不新增后端导出格式，不改后端 incident/report API；队列只存在当前 React 内存中，刷新页面后清空。
+- 新增 `server/tests/test_incident_bulk_selection_export_queue_e2e.py`（默认 skip，需 `--run-e2e`），真实浏览器覆盖登录、Demo 告警、创建 open / contained / resolved 样本、多选、全选、清空、复制安全摘要、导出队列提示、筛选切换清理选择、checkbox 不打开详情、详情打开回归、刷新后不从 storage 恢复、桌面/移动截图和 DOM/clipboard/storage forbidden sentinel。
+- 成功保存 2 张 full-page 截图：`docs/runs/artifacts/m3-20-incident-workbench-bulk-selection-export-queue/bulk-selection-desktop.png` / `bulk-selection-mobile.png`。
+
+**真实验证**：
+
+- RED：新增 E2E 在缺少 `incident-bulk-action-bar` selector 时失败（`TimeoutError`），测试未 skip。
+- 新增 bulk selection/export queue E2E：**1 passed in 19.56s**。
+- 相邻案件 UX + Dashboard responsive 回归 E2E：**7 passed in 74.98s**。
+- Demo flow stability 复跑：**1 passed in 10.14s**。
+- 关键 E2E 串跑最终：**15 passed in 145.85s**。
+- 后端 incident 契约：**17 passed in 3.12s**。
+- 后端全量：**344 passed, 16 skipped, 17 warnings in 85.66s**。
+- Guardrails 专项：**139 passed, 17 warnings in 18.92s**。
+- 前端 `npm run typecheck` 通过；`npm run build` 通过（`/dashboard` 57.1 kB / First Load JS 204 kB）。
+- 运行日志：`docs/runs/2026-06-22-m3-20-incident-workbench-bulk-selection-export-queue-ux.md`。
+
+**安全边界**：
+
+- 未改认证/授权、Guardrails、SSRF、Alembic migration、DB schema、后端 incident/report API contract、npm 依赖、生产 rate limit 常量或导出格式。
+- 未自动关闭、删除或批量修改案件；未调用 LLM。
+- 未把 selection、export queue、报告 markdown、payload 或 timeline 内容写入 `localStorage` / `sessionStorage`；未使用 `dangerouslySetInnerHTML` / `innerHTML`。
+- 未提交 `.coverage` / `.env` / 真实 env / 数据库 / 密钥；旧任务截图刷新和 dev server 日志不纳入提交。
+
+**改动文件（精确 stage）**：
+
+- `server/tests/test_incident_bulk_selection_export_queue_e2e.py`（新增 bulk selection / export queue 浏览器 E2E）
+- `web-next/types/incidentBulkActions.ts`（安全摘要与队列项 helper）
+- `web-next/components/dashboard/IncidentBulkActionBar.tsx`（新增批量操作栏）
+- `web-next/components/dashboard/IncidentExportQueuePanel.tsx`（新增导出队列提示）
+- `web-next/components/dashboard/IncidentList.tsx`（列表项 checkbox、多选状态）
+- `web-next/components/dashboard/IncidentSection.tsx`（selection / queue state 与筛选清理）
+- `docs/runs/2026-06-22-m3-20-incident-workbench-bulk-selection-export-queue-ux.md`（本任务 run log）
+- `docs/runs/artifacts/m3-20-incident-workbench-bulk-selection-export-queue/*.png`（成功截图）
+- `docs/agent/M3_20_INCIDENT_WORKBENCH_BULK_SELECTION_EXPORT_QUEUE_UX_TASK.md`（任务文档入库）
+- `docs/agent/UNATTENDED_LONG_TASKS.md`（M3-20 索引更新为已交付，下一条建议刷新）
+- `PRODUCT.md` §2.2 新增第 29 项 M3-20 说明
+- `docs/plans/M2_PRODUCT_ROADMAP.md`（本节）
+
+**未解决问题**：无本任务阻塞。关键 E2E 初始失败均发生在本地 dev backend 注册/登录限流前置阶段；最终通过每个 E2E prefix 独立本地测试账号完成完整真实浏览器串跑，生产认证和 rate limit 保持不变。
+
+**当前不做**：改认证/授权、改 Guardrails fail-closed 策略、改 SSRF、改 DB schema、改后端 incident/report API、改 npm 依赖、改生产 rate limit 常量、新增后端导出格式、调用 LLM、持久化队列或报告正文、自动关闭/删除/批量修改案件、引入外部渲染库。
+
 
 > 核心目的：把 M3-04 / M3-05 run log 里反复标记为"预存失败"的 3 大测试债务收口为可重复、可解释、可验证的质量门；不允许通过 skip / xfail / 删除断言 / 弱化 Guardrails fail-closed / 放宽 SSRF 生产策略来制造绿色。
 
