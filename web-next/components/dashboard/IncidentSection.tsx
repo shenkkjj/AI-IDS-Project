@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { IncidentsController } from "@/hooks/useIncidents";
 import IncidentList from "./IncidentList";
 import IncidentDetailPanel from "./IncidentDetailPanel";
+import IncidentBulkActionBar from "./IncidentBulkActionBar";
+import IncidentExportQueuePanel from "./IncidentExportQueuePanel";
 import IncidentStatusFilterBar, {
   ACTIVE_INCIDENT_STATUSES,
   CLOSED_INCIDENT_STATUSES,
@@ -12,6 +14,12 @@ import IncidentStatusFilterBar, {
 } from "./IncidentStatusFilterBar";
 import StatusView from "./StatusView";
 import type { IncidentSeverity, IncidentStatus, IncidentSummary } from "@/types/incident";
+import {
+  buildIncidentBulkSummary,
+  buildIncidentExportQueueItem,
+  type BulkCopyStatus,
+  type IncidentExportQueueItem,
+} from "@/types/incidentBulkActions";
 
 /**
  * 安全事件 / 案件工作台 (M3-04, M3-09 单一事实源版本)。
@@ -45,8 +53,14 @@ export default function IncidentSection({
 }: IncidentSectionProps) {
   const [filter, setFilter] = useState<IncidentListFilter>("all");
   const [filtering, setFiltering] = useState(false);
+  const [selectedIncidentIds, setSelectedIncidentIds] = useState<Set<string>>(
+    () => new Set()
+  );
+  const [exportQueue, setExportQueue] = useState<IncidentExportQueueItem[]>([]);
+  const [bulkCopyStatus, setBulkCopyStatus] = useState<BulkCopyStatus>("idle");
   const requestSeq = useRef(0);
   const abortRef = useRef<AbortController | null>(null);
+  const filterLabel = getIncidentFilterLabel(filter);
 
   const reconcileSelection = useCallback(
     (items: IncidentSummary[]) => {
@@ -154,6 +168,85 @@ export default function IncidentSection({
   }, []);
 
   const listLoadState = filtering ? "loading" : incidents.loadState;
+  const selectedIncidents = incidents.incidentItems.filter((item) =>
+    selectedIncidentIds.has(item.incident_id)
+  );
+
+  useEffect(() => {
+    const visibleIds = new Set(
+      incidents.incidentItems.map((item) => item.incident_id)
+    );
+    setSelectedIncidentIds((prev) => {
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (visibleIds.has(id)) next.add(id);
+      }
+      return next.size === prev.size ? prev : next;
+    });
+  }, [incidents.incidentItems]);
+
+  useEffect(() => {
+    setBulkCopyStatus("idle");
+  }, [filter, selectedIncidentIds]);
+
+  const handleToggleBulkSelect = useCallback((incident: IncidentSummary) => {
+    setSelectedIncidentIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(incident.incident_id)) {
+        next.delete(incident.incident_id);
+      } else {
+        next.add(incident.incident_id);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleSelectCurrentList = useCallback(() => {
+    setSelectedIncidentIds(
+      new Set(incidents.incidentItems.map((item) => item.incident_id))
+    );
+  }, [incidents.incidentItems]);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedIncidentIds(new Set());
+  }, []);
+
+  const handleCopyBulkSummary = useCallback(async () => {
+    if (selectedIncidents.length === 0) return;
+    const text = buildIncidentBulkSummary(selectedIncidents, filterLabel);
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.clipboard ||
+      typeof navigator.clipboard.writeText !== "function"
+    ) {
+      setBulkCopyStatus("failed");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      setBulkCopyStatus("copied");
+    } catch {
+      setBulkCopyStatus("failed");
+    }
+  }, [filterLabel, selectedIncidents]);
+
+  const handleAddToExportQueue = useCallback(() => {
+    if (selectedIncidents.length === 0) return;
+    const selectedItems = selectedIncidents.map((incident) =>
+      buildIncidentExportQueueItem(incident)
+    );
+    setExportQueue((prev) => {
+      const byId = new Map(prev.map((item) => [item.incident_id, item]));
+      for (const item of selectedItems) {
+        byId.set(item.incident_id, item);
+      }
+      return Array.from(byId.values()).slice(-25);
+    });
+  }, [selectedIncidents]);
+
+  const handleClearExportQueue = useCallback(() => {
+    setExportQueue([]);
+  }, []);
 
   // 初次进入加载列表(父层可能已经创建过案件并乐观写入 incidentItems,
   // 这里仍刷新以保持服务端一致)。
@@ -214,6 +307,22 @@ export default function IncidentSection({
           onChange={setFilter}
         />
 
+        <IncidentBulkActionBar
+          selectedCount={selectedIncidents.length}
+          visibleCount={incidents.incidentItems.length}
+          filterLabel={filterLabel}
+          copyStatus={bulkCopyStatus}
+          onSelectPage={handleSelectCurrentList}
+          onClearSelection={handleClearSelection}
+          onCopySummary={() => void handleCopyBulkSummary()}
+          onAddToQueue={handleAddToExportQueue}
+        />
+
+        <IncidentExportQueuePanel
+          queue={exportQueue}
+          onClear={handleClearExportQueue}
+        />
+
         {/* 创建入口(由父组件注入;默认不渲染) */}
         {renderCreateShortcut
           ? renderCreateShortcut({
@@ -236,11 +345,13 @@ export default function IncidentSection({
           items={incidents.incidentItems}
           loadState={listLoadState}
           selectedId={incidents.selectedIncident?.incident_id ?? null}
-          filterLabel={getIncidentFilterLabel(filter)}
+          selectedIds={selectedIncidentIds}
+          filterLabel={filterLabel}
           mode={filter === "closed" || filter === "resolved" || filter === "false_positive" ? "archive" : "default"}
           onSelect={(incident) => {
             incidents.setSelectedIncident(incident);
           }}
+          onToggleSelect={handleToggleBulkSelect}
         />
       </div>
 
